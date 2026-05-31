@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/opensaml",
+    "crates/samlify",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/sebasxsala/opensaml-rs"
+homepage = "https://github.com/sebasxsala/opensaml-rs"
+
+[workspace.dependencies]
+base64 = "0.22"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+quick-xml = "0.37"
+thiserror = "2"
+url = "2"
+bergshamra = "0.4"
+opensaml = { path = "crates/opensaml", version = "0.0.1" }
+samlify = { path = "crates/samlify", version = "0.0.1" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+panic = "warn"
+unwrap_used = "warn"
+expect_used = "warn"

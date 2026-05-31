@@ -1,0 +1,7 @@
+/target/
+.DS_Store
+.cache/
+tmp/
+
+# samlify upstream clone (local porting reference only; never commit)
+reference/upstream-samlify/*/repository/

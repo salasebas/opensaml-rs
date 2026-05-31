@@ -1,0 +1,30 @@
+[package]
+name = "opensaml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+description = "SAML 2.0 Service Provider library (bergshamra for XML crypto)."
+keywords = ["saml", "sso", "xml", "authentication"]
+categories = ["authentication", "web-programming"]
+
+[lib]
+name = "opensaml"
+path = "src/lib.rs"
+
+[features]
+default = []
+crypto-bergshamra = ["dep:bergshamra"]
+
+[dependencies]
+base64.workspace = true
+flate2.workspace = true
+quick-xml.workspace = true
+thiserror.workspace = true
+url.workspace = true
+bergshamra = { workspace = true, optional = true }
+
+[lints]
+workspace = true

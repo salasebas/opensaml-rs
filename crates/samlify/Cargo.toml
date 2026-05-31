@@ -1,0 +1,21 @@
+[package]
+name = "samlify"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+description = "Re-exports opensaml (samlify-shaped crate name for Rust)."
+keywords = ["saml", "sso", "authentication"]
+categories = ["authentication", "web-programming"]
+
+[lib]
+name = "samlify"
+path = "src/lib.rs"
+
+[dependencies]
+opensaml.workspace = true
+
+[lints]
+workspace = true
