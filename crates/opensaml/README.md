@@ -67,3 +67,17 @@ cargo run -p opensaml --example sso
 ```
 
 See [`examples/sso.rs`](examples/sso.rs).
+
+## Security
+
+- Inbound responses are validated for signature, issuer, `<Audience>`, the
+  assertion time window, and (opt-in) `InResponseTo`
+  (`parse_login_response_with_request_id`).
+- Signature verification pins to the metadata-declared keys
+  (`trusted_keys_only`), enforces signed-reference positions (XSW protection),
+  and rejects non-same-document references. The verification trust model is
+  documented in `crypto::verify`.
+- `context::set_schema_validator` plugs in XSD/schema validation on top of the
+  always-on DOCTYPE/XXE rejection.
+
+Pre-1.0 and not yet externally audited — review before production use.
