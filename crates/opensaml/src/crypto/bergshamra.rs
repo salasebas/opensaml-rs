@@ -5,15 +5,17 @@ use crate::error::OpenSamlError;
 
 /// [`XmlSecurityBackend`] implementation backed by the `bergshamra` crate.
 ///
-/// Stub: wired up in M1 with `trusted_keys_only` + `strict_verification`.
+/// Verifies enveloped XML-DSig signatures against a metadata certificate using
+/// `trusted_keys_only` + `strict_verification` (see [`crate::crypto::verify`]).
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct BergshamraBackend;
 
 impl XmlSecurityBackend for BergshamraBackend {
-    fn verify_signature(&self, _xml: &str, _cert_pem: &str) -> Result<(), OpenSamlError> {
-        Err(OpenSamlError::Unsupported(
-            "BergshamraBackend::verify_signature".into(),
-        ))
+    fn verify_signature(&self, xml: &str, cert_pem: &str) -> Result<(), OpenSamlError> {
+        match crate::crypto::verify::verify_signature(xml, &[cert_pem.to_string()])? {
+            (true, _) => Ok(()),
+            (false, _) => Err(OpenSamlError::FailedToVerifySignature),
+        }
     }
 }

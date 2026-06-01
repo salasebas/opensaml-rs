@@ -17,7 +17,9 @@ base64 = "0.22"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 quick-xml = "0.37"
 thiserror = "2"
+time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 url = "2"
+uuid = { version = "1", default-features = false, features = ["v4"] }
 bergshamra = "0.4"
 opensaml = { path = "crates/opensaml", version = "0.0.1" }
 samlify = { path = "crates/samlify", version = "0.0.1" }

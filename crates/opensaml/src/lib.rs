@@ -8,16 +8,23 @@
 
 #![forbid(unsafe_code)]
 
-pub mod authn;
 pub mod binding;
+pub mod constants;
+pub mod context;
 pub mod crypto;
+pub mod entity;
 pub mod error;
+pub mod flow;
 pub mod idp;
 pub mod logout;
 pub mod metadata;
-pub mod response;
 pub mod sp;
+pub mod template;
+pub mod util;
+pub mod validator;
+pub mod xml;
 
+pub use entity::EntitySetting;
 pub use error::OpenSamlError;
 pub use idp::IdentityProvider;
 pub use sp::ServiceProvider;

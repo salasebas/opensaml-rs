@@ -11,4 +11,6 @@ pub use deflate::{deflate_raw_decode, deflate_raw_encode};
 pub use encoding::{base64_decode, base64_encode};
 pub use escape::{html_escape, xml_escape};
 pub use post_form::saml_post_binding_form;
-pub use redirect::redirect_binding_query;
+pub use redirect::{
+    append_signature, build_redirect_octet, build_redirect_url, redirect_binding_query,
+};

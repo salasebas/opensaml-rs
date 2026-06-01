@@ -23,7 +23,9 @@ base64.workspace = true
 flate2.workspace = true
 quick-xml.workspace = true
 thiserror.workspace = true
+time.workspace = true
 url.workspace = true
+uuid.workspace = true
 bergshamra = { workspace = true, optional = true }
 
 [lints]

@@ -1,0 +1,109 @@
+//! SAML message field-sets (ported from samlify `extractor.ts`).
+
+use super::extract::ExtractorField;
+
+/// Fields for an `<AuthnRequest>` (`loginRequestFields`).
+pub fn login_request_fields() -> Vec<ExtractorField> {
+    vec![
+        ExtractorField::new("request", &["AuthnRequest"]).attrs(&[
+            "ID",
+            "IssueInstant",
+            "Destination",
+            "AssertionConsumerServiceURL",
+        ]),
+        ExtractorField::new("issuer", &["AuthnRequest", "Issuer"]),
+        ExtractorField::new("nameIDPolicy", &["AuthnRequest", "NameIDPolicy"])
+            .attrs(&["Format", "AllowCreate"]),
+        ExtractorField::new(
+            "authnContextClassRef",
+            &["AuthnRequest", "AuthnContextClassRef"],
+        ),
+        ExtractorField::new("signature", &["AuthnRequest", "Signature"]).with_context(),
+    ]
+}
+
+/// Two-tier status fields for a `<Response>` (`loginResponseStatusFields`).
+pub fn login_response_status_fields() -> Vec<ExtractorField> {
+    vec![
+        ExtractorField::new("top", &["Response", "Status", "StatusCode"]).attrs(&["Value"]),
+        ExtractorField::new(
+            "second",
+            &["Response", "Status", "StatusCode", "StatusCode"],
+        )
+        .attrs(&["Value"]),
+    ]
+}
+
+/// Two-tier status fields for a `<LogoutResponse>` (`logoutResponseStatusFields`).
+pub fn logout_response_status_fields() -> Vec<ExtractorField> {
+    vec![
+        ExtractorField::new("top", &["LogoutResponse", "Status", "StatusCode"]).attrs(&["Value"]),
+        ExtractorField::new(
+            "second",
+            &["LogoutResponse", "Status", "StatusCode", "StatusCode"],
+        )
+        .attrs(&["Value"]),
+    ]
+}
+
+/// Fields for a login `<Response>` (`loginResponseFields`).
+///
+/// `assertion` is the (verified) assertion XML used as the `shortcut` document
+/// for assertion-scoped fields; `response` is read from the full message.
+pub fn login_response_fields(assertion: &str) -> Vec<ExtractorField> {
+    vec![
+        ExtractorField::new("conditions", &["Assertion", "Conditions"])
+            .attrs(&["NotBefore", "NotOnOrAfter"])
+            .with_shortcut(assertion),
+        ExtractorField::new("response", &["Response"]).attrs(&[
+            "ID",
+            "IssueInstant",
+            "Destination",
+            "InResponseTo",
+        ]),
+        ExtractorField::new(
+            "audience",
+            &["Assertion", "Conditions", "AudienceRestriction", "Audience"],
+        )
+        .with_shortcut(assertion),
+        ExtractorField::new("issuer", &["Assertion", "Issuer"]).with_shortcut(assertion),
+        ExtractorField::new("nameID", &["Assertion", "Subject", "NameID"]).with_shortcut(assertion),
+        ExtractorField::new("sessionIndex", &["Assertion", "AuthnStatement"])
+            .attrs(&["AuthnInstant", "SessionNotOnOrAfter", "SessionIndex"])
+            .with_shortcut(assertion),
+        ExtractorField::new(
+            "attributes",
+            &["Assertion", "AttributeStatement", "Attribute"],
+        )
+        .aggregate(&["Name"], &["AttributeValue"])
+        .with_shortcut(assertion),
+    ]
+}
+
+/// Fields for a `<LogoutRequest>` (`logoutRequestFields`).
+pub fn logout_request_fields() -> Vec<ExtractorField> {
+    vec![
+        ExtractorField::new("request", &["LogoutRequest"]).attrs(&[
+            "ID",
+            "IssueInstant",
+            "Destination",
+        ]),
+        ExtractorField::new("issuer", &["LogoutRequest", "Issuer"]),
+        ExtractorField::new("nameID", &["LogoutRequest", "NameID"]),
+        ExtractorField::new("sessionIndex", &["LogoutRequest", "SessionIndex"]),
+        ExtractorField::new("signature", &["LogoutRequest", "Signature"]).with_context(),
+    ]
+}
+
+/// Fields for a `<LogoutResponse>` (`logoutResponseFields`).
+pub fn logout_response_fields() -> Vec<ExtractorField> {
+    vec![
+        ExtractorField::new("response", &["LogoutResponse"]).attrs(&[
+            "ID",
+            "Destination",
+            "InResponseTo",
+        ]),
+        ExtractorField::new("issuer", &["LogoutResponse", "Issuer"]),
+        ExtractorField::new("signature", &["LogoutResponse", "Signature"]).with_context(),
+    ]
+}
