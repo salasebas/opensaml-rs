@@ -9,9 +9,6 @@ readme = "README.md"
 description = "SAML 2.0 Service Provider library (bergshamra for XML crypto)."
 keywords = ["saml", "sso", "xml", "authentication"]
 categories = ["authentication", "web-programming"]
-# Keep the published crate lean: tests carry fixture keys, and the example
-# reads those fixtures, so neither ships to crates.io.
-exclude = ["tests/", "examples/"]
 
 [lib]
 name = "opensaml"
