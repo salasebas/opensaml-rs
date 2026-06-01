@@ -56,7 +56,8 @@ jobs:
 
           crate_version_exists() {
             local status
-            status="$(curl --silent --output /dev/null --write-out "%{http_code}" "https://crates.io/api/v1/crates/$1/${version}")"
+            # crates.io rejects requests without a User-Agent (HTTP 403).
+            status="$(curl --silent --user-agent "opensaml-rs-release (+https://github.com/sebasxsala/opensaml-rs)" --output /dev/null --write-out "%{http_code}" "https://crates.io/api/v1/crates/$1/${version}")"
             [ "$status" = "200" ]
           }
 
