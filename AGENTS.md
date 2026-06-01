@@ -4,14 +4,19 @@ Standalone Rust workspace for SAML 2.0 Service Provider support.
 
 ## Crates
 
-- `opensaml` — all SAML SP logic: HTTP bindings (POST form, Redirect query,
-  DEFLATE, base64, escaping) plus documented stubs for metadata, AuthnRequest,
-  response parsing, and logout. `#![forbid(unsafe_code)]`, no business deps
-  beyond `base64`, `flate2`, `quick-xml`, `thiserror`, `url`.
+- `opensaml` — SAML 2.0 Service Provider **and** Identity Provider logic ported
+  to parity with npm `samlify` v2.10.2: constants, XML extraction (quick-xml),
+  templates, metadata parse/generate, the three bindings (HTTP-POST,
+  HTTP-Redirect, HTTP-POST-SimpleSign), entity/flow orchestration, time/status
+  validation, and Single Logout. XML cryptography (XML-DSig sign/verify with
+  anti-wrapping, XML-Enc encrypt/decrypt, detached message signatures) is
+  delegated to the `bergshamra` crate behind the optional `crypto-bergshamra`
+  feature (off by default). `#![forbid(unsafe_code)]`.
 - `samlify` — thin re-export (`pub use opensaml::*;`). No logic of its own. It
-  is a Rust crate-name alias, unrelated to the npm `samlify` package.
-- XML cryptography (XML-DSig, XML-Enc, C14N) is delegated to the `bergshamra`
-  crate behind the optional `crypto-bergshamra` feature (off by default in M0).
+  is a Rust crate-name alias, unrelated to the npm `samlify` package. Forwards
+  the `crypto-bergshamra` feature.
+- XML cryptography is delegated to `bergshamra`; without the feature, signing,
+  verification, and encryption fail closed with `OpenSamlError::Unsupported`.
 
 ## Reference
 

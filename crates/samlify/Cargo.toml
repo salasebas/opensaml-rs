@@ -14,6 +14,10 @@ categories = ["authentication", "web-programming"]
 name = "samlify"
 path = "src/lib.rs"
 
+[features]
+default = []
+crypto-bergshamra = ["opensaml/crypto-bergshamra"]
+
 [dependencies]
 opensaml.workspace = true
 
