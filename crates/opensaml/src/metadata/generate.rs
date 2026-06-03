@@ -99,6 +99,7 @@ fn name_id_formats(formats: &[String]) -> String {
 }
 
 fn endpoint_attrs(e: &Endpoint, index: Option<usize>) -> String {
+    use crate::binding::xml_escape;
     let mut attrs = String::new();
     if let Some(i) = index {
         attrs.push_str(&format!(" index=\"{i}\""));
@@ -109,7 +110,7 @@ fn endpoint_attrs(e: &Endpoint, index: Option<usize>) -> String {
     attrs.push_str(&format!(
         " Binding=\"{}\" Location=\"{}\"",
         e.binding.urn(),
-        e.location
+        xml_escape(&e.location)
     ));
     attrs
 }
