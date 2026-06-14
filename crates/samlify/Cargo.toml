@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-description = "Re-exports opensaml (samlify-shaped crate name for Rust)."
+description = "Re-exports opensaml."
 keywords = ["saml", "sso", "authentication"]
 categories = ["authentication", "web-programming"]
 

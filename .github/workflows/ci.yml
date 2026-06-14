@@ -50,7 +50,9 @@ jobs:
           - open-saml
           - rust-saml
           - rustsaml
+          - saml-rs
           - samlify
+          - samlrs
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

@@ -16,7 +16,7 @@ opensaml = "0.1"
 # opensaml = { version = "0.1", default-features = false }
 ```
 
-> Alias crates ([`samlify`](crates/samlify), [`open-saml`](crates/open-saml), [`rust-saml`](crates/rust-saml), [`rustsaml`](crates/rustsaml)) are only `pub use opensaml::*;` — defensive name reservation and familiar alternate names. Prefer `opensaml` directly.
+> Alias crates ([`samlify`](crates/samlify), [`open-saml`](crates/open-saml), [`rust-saml`](crates/rust-saml), [`rustsaml`](crates/rustsaml), [`saml-rs`](crates/saml-rs), [`samlrs`](crates/samlrs)) are thin `pub use opensaml::*;` re-exports.
 
 ---
 
@@ -181,6 +181,7 @@ Source: [`crates/opensaml/examples/sso.rs`](crates/opensaml/examples/sso.rs).
 |-------|------|
 | [`opensaml`](crates/opensaml) | Library: constants, XML, templates, metadata, bindings, `ServiceProvider` / `IdentityProvider`, flow, logout, validation, crypto (feature). |
 | [`samlify`](crates/samlify) | Thin re-export: `pub use opensaml::*;` — drop-in crate name only. |
+| [`open-saml`](crates/open-saml), [`rust-saml`](crates/rust-saml), [`rustsaml`](crates/rustsaml), [`saml-rs`](crates/saml-rs), [`samlrs`](crates/samlrs) | Same thin re-export as `samlify`. |
 
 Crate-level API details: [docs.rs/opensaml](https://docs.rs/opensaml) and the `opensaml` crate rustdoc module map.
 

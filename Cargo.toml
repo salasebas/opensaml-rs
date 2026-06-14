@@ -5,11 +5,13 @@ members = [
     "crates/open-saml",
     "crates/rust-saml",
     "crates/rustsaml",
+    "crates/saml-rs",
     "crates/samlify",
+    "crates/samlrs",
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/sebasxsala/opensaml-rs"
@@ -24,8 +26,8 @@ time = { version = "0.3", default-features = false, features = ["std", "parsing"
 url = "2"
 uuid = { version = "1", default-features = false, features = ["v4"] }
 bergshamra = "0.4"
-opensaml = { path = "crates/opensaml", version = "0.1.1" }
-samlify = { path = "crates/samlify", version = "0.1.1" }
+opensaml = { path = "crates/opensaml", version = "0.1.2" }
+samlify = { path = "crates/samlify", version = "0.1.2" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

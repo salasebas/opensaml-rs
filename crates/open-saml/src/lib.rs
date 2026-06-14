@@ -1,8 +1,5 @@
 //! Thin re-export crate. All SAML logic lives in [`opensaml`].
 //!
-//! This crate exists only to reserve the `open-saml` name on crates.io and
-//! offer a hyphenated alias. Prefer depending on `opensaml` directly.
-//!
 //! # Disclaimer — no affiliation
 //!
 //! This is an independent Rust crate. It is **not** affiliated with, derived

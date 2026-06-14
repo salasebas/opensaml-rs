@@ -28,11 +28,17 @@ opensaml-rs uses **Cargo** and is released via **GitHub releases** and
    visible before publishing dependents:
 
    1. `opensaml` — no workspace dependencies.
-   2. `samlify` — depends on `opensaml`.
+   2. Alias crates — each depends only on `opensaml`: `samlify`, `open-saml`,
+      `rust-saml`, `rustsaml`, `saml-rs`, `samlrs`.
 
    ```bash
    cargo publish -p opensaml
    cargo publish -p samlify
+   cargo publish -p open-saml
+   cargo publish -p rust-saml
+   cargo publish -p rustsaml
+   cargo publish -p saml-rs
+   cargo publish -p samlrs
    ```
 
 7. Create a **GitHub release** tagging the commit that matches the published

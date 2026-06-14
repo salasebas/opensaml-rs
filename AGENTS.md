@@ -16,9 +16,8 @@ Standalone Rust workspace for SAML 2.0 Service Provider support.
 - `samlify` — thin re-export (`pub use opensaml::*;`). No logic of its own. It
   is a Rust crate-name alias, unrelated to the npm `samlify` package. Forwards
   the `crypto-bergshamra` feature.
-- `open-saml`, `rust-saml`, `rustsaml` — same thin re-export pattern as
-  `samlify`; defensive name reservation on crates.io. Prefer `opensaml`
-  directly.
+- `open-saml`, `rust-saml`, `rustsaml`, `saml-rs`, `samlrs` — same thin
+  re-export pattern as `samlify`.
 - XML cryptography is delegated to `bergshamra`; without the feature, signing,
   verification, and encryption fail closed with `OpenSamlError::Unsupported`.
 

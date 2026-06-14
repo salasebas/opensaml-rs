@@ -7,6 +7,13 @@ Versioning while the API is still pre-1.0.
 
 ## Unreleased
 
+## [0.1.2] - 2026-06-14
+
+### Changed
+
+- Alias crate READMEs and crate descriptions simplified.
+- Workspace version bump to 0.1.2 (packaging-only for alias crates).
+
 ## [0.1.1] - 2026-06-02
 
 ### Added
