@@ -16,6 +16,7 @@ use crate::error::OpenSamlError;
 use crate::util::normalize_cert_string;
 use crate::xml::dom::{self, Node};
 use bergshamra::{verify, DsigContext, KeysManager, VerifyResult};
+use std::collections::HashSet;
 
 fn children_named<'a>(node: &'a Node, name: &str) -> Vec<&'a Node> {
     node.children
@@ -48,6 +49,21 @@ fn wrapping_detected(root: &Node) -> bool {
         }
     }
     false
+}
+
+fn saml_id_attr(name: &str) -> bool {
+    matches!(name, "ID" | "AssertionID")
+}
+
+fn duplicate_saml_id(node: &Node, seen: &mut HashSet<String>) -> Option<String> {
+    for (name, value) in &node.attrs {
+        if saml_id_attr(name) && !value.is_empty() && !seen.insert(value.clone()) {
+            return Some(value.clone());
+        }
+    }
+    node.children
+        .iter()
+        .find_map(|child| duplicate_saml_id(child, seen))
 }
 
 /// Return the source of the content covered by the verified signature: the lone
@@ -102,6 +118,11 @@ pub fn verify_signature(
     let root = &doc.root;
 
     if root.local_name.contains("Response") && wrapping_detected(root) {
+        return Err(OpenSamlError::PotentialWrappingAttack);
+    }
+
+    let mut seen_ids = HashSet::new();
+    if duplicate_saml_id(root, &mut seen_ids).is_some() {
         return Err(OpenSamlError::PotentialWrappingAttack);
     }
 
@@ -204,6 +225,39 @@ mod tests {
         assert!(is_external_reference("/etc/passwd"));
         assert!(is_external_reference("file:///etc/passwd"));
         assert!(is_external_reference("cid:attachment"));
+    }
+
+    #[test]
+    fn duplicate_saml_id_allows_unique_ids() -> Result<(), Box<dyn std::error::Error>> {
+        let doc = dom::parse(
+            r#"<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_response"><saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_assertion"/></samlp:Response>"#,
+        )?;
+        let mut seen = HashSet::new();
+        assert_eq!(duplicate_saml_id(&doc.root, &mut seen), None);
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_saml_id_returns_repeated_value() -> Result<(), Box<dyn std::error::Error>> {
+        let doc = dom::parse(
+            r#"<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_same"/><saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_same"/></samlp:Response>"#,
+        )?;
+        let mut seen = HashSet::new();
+        assert_eq!(
+            duplicate_saml_id(&doc.root, &mut seen),
+            Some("_same".to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_saml_id_ignores_empty_values() -> Result<(), Box<dyn std::error::Error>> {
+        let doc = dom::parse(
+            r#"<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID=""><saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID=""/></samlp:Response>"#,
+        )?;
+        let mut seen = HashSet::new();
+        assert_eq!(duplicate_saml_id(&doc.root, &mut seen), None);
+        Ok(())
     }
 
     const RESPONSE_SIGNED: &str = include_str!("../../tests/fixtures/response_signed.xml");

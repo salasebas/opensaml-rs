@@ -7,6 +7,11 @@ Versioning while the API is still pre-1.0.
 
 ## Unreleased
 
+### Fixed
+
+- Reject duplicate SAML `ID`/`AssertionID` values before trusting an XML-DSig
+  verification result.
+
 ## [0.1.2] - 2026-06-14
 
 ### Changed

@@ -56,6 +56,26 @@ fn sibling_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+#[test]
+fn duplicate_id_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let signed = signed_response();
+    let duplicate = FORGED.replace(
+        "ID=\"_forged\"",
+        "ID=\"_d71a3a8e9fcc45c9e9d248ef7049393fc8f04e5f75\"",
+    );
+    let pos = signed.find("<saml:Assertion").ok_or("no assertion")?;
+    let wrapped = format!("{}{}{}", &signed[..pos], duplicate, &signed[pos..]);
+
+    match verify_signature(&wrapped, &[CERT.to_string()]) {
+        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+        Ok((false, _)) => Ok(()),
+        Ok((true, content)) => {
+            Err(format!("duplicate-ID wrapper must not verify: {:?}", content).into())
+        }
+        Err(other) => Err(format!("unexpected error: {other:?}").into()),
+    }
+}
+
 /// A forged sibling assertion appended after the signed one is never trusted.
 #[test]
 fn trailing_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Error>> {
