@@ -1452,14 +1452,14 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "open-saml"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "opensaml",
 ]
 
 [[package]]
 name = "opensaml"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "base64",
  "bergshamra",
@@ -1756,7 +1756,7 @@ dependencies = [
 
 [[package]]
 name = "rust-saml"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "opensaml",
 ]
@@ -1772,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "rustsaml"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "opensaml",
 ]
@@ -1794,21 +1794,21 @@ dependencies = [
 
 [[package]]
 name = "saml-rs"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "opensaml",
 ]
 
 [[package]]
 name = "samlify"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "opensaml",
 ]
 
 [[package]]
 name = "samlrs"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "opensaml",
 ]

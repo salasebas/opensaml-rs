@@ -7,6 +7,8 @@ Versioning while the API is still pre-1.0.
 
 ## Unreleased
 
+## [0.1.3] - 2026-06-20
+
 ### Changed
 
 - Updated `bergshamra` from 0.4.0 to 0.5.1.
