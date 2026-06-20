@@ -7,6 +7,13 @@ Versioning while the API is still pre-1.0.
 
 ## Unreleased
 
+### Changed
+
+- Updated `bergshamra` from 0.4.0 to 0.5.1.
+- Re-audited the XML security trust-model comment against `bergshamra` 0.5.1
+  secure `DsigContext::new()` defaults.
+- XSW coverage includes duplicate SAML assertion IDs.
+
 ### Fixed
 
 - Reject duplicate SAML `ID`/`AssertionID` values before trusting an XML-DSig

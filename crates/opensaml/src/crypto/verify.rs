@@ -162,19 +162,22 @@ pub fn verify_signature(
         have_key = true;
         let mut manager = KeysManager::new();
         manager.add_key(key);
-        // Trust model (audited against bergshamra 0.4.0):
-        // - `trusted_keys_only`: verification uses only the metadata-pinned key;
-        //   inline KeyInfo (X509Certificate/KeyValue) is never imported as key
-        //   material (`resolve_key_info` only selects among manager keys).
-        // - `strict_verification`: each signed reference must target the document
-        //   element, an ancestor, or a sibling of the Signature (XSW guard).
-        // - `insecure(true)`: skips X.509 *chain* validation (expiry/CRL/CA path)
-        //   only — irrelevant to our pinning model and never gates the signature,
-        //   digest, or XSW checks, which always run.
-        let ctx = DsigContext::new(manager)
-            .with_trusted_keys_only(true)
-            .with_strict_verification(true)
-            .with_insecure(true);
+        // Trust model (audited against bergshamra 0.5.1):
+        // - `DsigContext::new()` enables `trusted_keys_only = true`,
+        //   `strict_verification = true`, and `hmac_min_out_len = 160` by
+        //   default. Verification uses only the metadata-pinned key; inline
+        //   KeyInfo (X509Certificate/KeyValue) is never imported as key
+        //   material.
+        // - `strict_verification`: each signed reference must target the
+        //   document element, an ancestor, or a sibling of the Signature (XSW
+        //   guard).
+        // - `with_insecure(true)`: intentionally skips X.509 chain/path/time
+        //   validation only, which is irrelevant to our pinning model. It does
+        //   not skip signature, digest, reference, duplicate-ID, or XSW
+        //   enforcement.
+        // - Inbound SAML verification must never use
+        //   `DsigContext::new_permissive()`.
+        let ctx = DsigContext::new(manager).with_insecure(true);
         match verify(&ctx, xml) {
             Ok(VerifyResult::Valid { references, .. }) => {
                 if references.is_empty() {
