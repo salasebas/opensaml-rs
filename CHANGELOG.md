@@ -7,6 +7,23 @@ Versioning while the API is still pre-1.0.
 
 ## Unreleased
 
+## [0.1.4] - 2026-06-21
+
+### Changed
+
+- Updated `quick-xml` from 0.37.5 to 0.40.1, `time` from 0.3.47 to
+  0.3.49, and `uuid` from 1.23.2 to 1.23.3.
+- Pinned GitHub Actions workflow dependencies to immutable commit SHAs and
+  disabled checkout credential persistence.
+- Added Dependabot cooldown windows for Cargo and GitHub Actions updates.
+
+### Fixed
+
+- Adapted the internal XML DOM parser to `quick-xml` 0.40 text/reference
+  events so predefined and numeric XML entities in element text are preserved.
+- Removed the auto-label workflow that used `pull_request_target`, clearing the
+  remaining high-severity `zizmor` trigger finding.
+
 ## [0.1.3] - 2026-06-20
 
 ### Changed

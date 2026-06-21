@@ -5,9 +5,10 @@
 //! canonicalisation concerns — verification is delegated to bergshamra).
 
 use crate::error::OpenSamlError;
-use quick_xml::events::Event;
+use quick_xml::escape::resolve_predefined_entity;
+use quick_xml::events::{BytesRef, Event};
 use quick_xml::name::QName;
-use quick_xml::Reader;
+use quick_xml::{Reader, XmlVersion};
 
 /// A parsed XML element.
 #[derive(Debug, Clone)]
@@ -53,7 +54,7 @@ fn read_attrs(e: &quick_xml::events::BytesStart) -> Result<Vec<(String, String)>
         let attr = attr.map_err(|err| OpenSamlError::Xml(err.to_string()))?;
         let key = local_name_str(attr.key);
         let value = attr
-            .unescape_value()
+            .decoded_and_normalized_value(XmlVersion::Implicit1_0, e.decoder())
             .map_err(|err| OpenSamlError::Xml(err.to_string()))?
             .into_owned();
         out.push((key, value));
@@ -74,6 +75,24 @@ fn push_child(stack: &mut [Node], roots: &mut Vec<Node>, node: Node) {
         Some(parent) => parent.children.push(node),
         None => roots.push(node),
     }
+}
+
+fn push_general_ref(node: &mut Node, e: BytesRef) -> Result<(), OpenSamlError> {
+    if let Some(ch) = e
+        .resolve_char_ref()
+        .map_err(|err| OpenSamlError::Xml(err.to_string()))?
+    {
+        node.text.push(ch);
+        return Ok(());
+    }
+
+    let entity = e
+        .decode()
+        .map_err(|err| OpenSamlError::Xml(err.to_string()))?;
+    let resolved = resolve_predefined_entity(&entity)
+        .ok_or_else(|| OpenSamlError::Xml(format!("unrecognized entity `{entity}`")))?;
+    node.text.push_str(resolved);
+    Ok(())
 }
 
 /// Parse `xml` into a [`Document`].
@@ -131,7 +150,7 @@ pub fn parse_roots(xml: &str) -> Result<Vec<Node>, OpenSamlError> {
             Event::Text(e) => {
                 if let Some(top) = stack.last_mut() {
                     let txt = e
-                        .unescape()
+                        .decode()
                         .map_err(|err| OpenSamlError::Xml(err.to_string()))?;
                     top.text.push_str(&txt);
                 }
@@ -139,6 +158,11 @@ pub fn parse_roots(xml: &str) -> Result<Vec<Node>, OpenSamlError> {
             Event::CData(e) => {
                 if let Some(top) = stack.last_mut() {
                     top.text.push_str(&String::from_utf8_lossy(&e.into_inner()));
+                }
+            }
+            Event::GeneralRef(e) => {
+                if let Some(top) = stack.last_mut() {
+                    push_general_ref(top, e)?;
                 }
             }
             // Hardening (adapted from openauth-saml): reject DTDs so the parser
@@ -171,6 +195,15 @@ mod tests {
         assert_eq!(doc.root.attr("id"), Some("1"));
         assert_eq!(doc.root.children.len(), 1);
         assert_eq!(doc.root.children[0].text, "hi");
+        Ok(())
+    }
+
+    #[test]
+    fn parses_escaped_attribute_and_text_values() -> Result<(), OpenSamlError> {
+        let doc = parse("<Root value=\"one &amp; two\"><Child>three &lt; four</Child></Root>")?;
+
+        assert_eq!(doc.root.attr("value"), Some("one & two"));
+        assert_eq!(doc.root.children[0].text, "three < four");
         Ok(())
     }
 }

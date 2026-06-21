@@ -7,6 +7,11 @@ updates:
       day: monday
       time: "09:00"
       timezone: America/New_York
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     open-pull-requests-limit: 5
     groups:
       cargo-dependencies:
@@ -20,6 +25,11 @@ updates:
       day: monday
       time: "09:00"
       timezone: America/New_York
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     open-pull-requests-limit: 5
     groups:
       github-actions:
