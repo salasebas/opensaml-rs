@@ -1,0 +1,89 @@
+core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/lib.rs"
+          - "crates/opensaml/src/context.rs"
+          - "crates/opensaml/src/entity.rs"
+          - "crates/opensaml/src/error.rs"
+          - "crates/opensaml/src/flow.rs"
+          - "crates/opensaml/src/idp.rs"
+          - "crates/opensaml/src/sp.rs"
+          - "crates/opensaml/src/validator.rs"
+
+aliases:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/open-saml/**"
+          - "crates/rust-saml/**"
+          - "crates/rustsaml/**"
+          - "crates/saml-rs/**"
+          - "crates/samlify/**"
+          - "crates/samlrs/**"
+
+bindings:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/binding/**"
+
+crypto:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/crypto/**"
+          - "crates/opensaml/tests/fixtures/key/**"
+          - "crates/opensaml/tests/hardening.rs"
+          - "crates/opensaml/tests/xsw.rs"
+
+metadata:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/metadata/**"
+          - "crates/opensaml/tests/fixtures/*meta*.xml"
+          - "crates/opensaml/tests/fixtures/misc/*meta*.xml"
+
+xml:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/xml/**"
+          - "crates/opensaml/src/template.rs"
+          - "crates/opensaml/tests/fixtures/**/*.xml"
+
+logout:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/logout.rs"
+          - "crates/opensaml/tests/fixtures/**/logout_request.xml"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/**/tests/**"
+          - "crates/**/examples/**"
+          - "reference/**"
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "crates/**/README.md"
+          - "docs/**"
+          - "plans/**"
+
+release:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Cargo.toml"
+          - "Cargo.lock"
+          - "crates/**/Cargo.toml"
+          - "CHANGELOG.md"
+          - "RELEASE.md"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "clippy.toml"
+          - "deny.toml"
+          - "lefthook.yml"
+          - "rust-toolchain.toml"
+          - "rustfmt.toml"
+          - "scripts/**"

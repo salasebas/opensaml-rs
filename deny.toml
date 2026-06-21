@@ -1,0 +1,29 @@
+[advisories]
+ignore = [
+    # Transitive through bergshamra's rsa dependency. RustSec currently lists no
+    # safe upgrade; keep this explicit until bergshamra can move away from rsa.
+    { id = "RUSTSEC-2023-0071", reason = "Transitive through bergshamra; no safe upgrade is currently available." },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-workspace = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
