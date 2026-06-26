@@ -1,0 +1,105 @@
+# Path-based PR labels for actions/labeler.
+
+area:core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/*.rs"
+
+area:bindings:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/binding/**"
+
+area:xml:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/xml/**"
+
+area:crypto:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/crypto/**"
+
+area:metadata:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/metadata/**"
+
+area:flow:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/entity.rs"
+          - "crates/opensaml/src/flow.rs"
+          - "crates/opensaml/src/idp.rs"
+          - "crates/opensaml/src/sp.rs"
+
+area:logout:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/src/logout.rs"
+
+area:aliases:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/open-saml/**"
+          - "crates/rust-saml/**"
+          - "crates/rustsaml/**"
+          - "crates/saml-rs/**"
+          - "crates/samlify/**"
+          - "crates/samlrs/**"
+
+rust:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.rs"
+          - "**/Cargo.toml"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/**/tests/**"
+
+fixtures:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/opensaml/tests/fixtures/**"
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "SECURITY.md"
+          - "deny.toml"
+          - "crates/opensaml/src/crypto/**"
+          - "crates/opensaml/tests/hardening.rs"
+          - "crates/opensaml/tests/xsw.rs"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "crates/**/README.md"
+
+release:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "CHANGELOG.md"
+          - "RELEASE.md"
+          - "release-plz.toml"
+          - ".github/workflows/release-plz.yml"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Cargo.lock"
+          - "**/Cargo.toml"
+          - ".github/dependabot.yml"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "deny.toml"
+          - "lefthook.yml"
+          - "rust-toolchain.toml"
+          - "rustfmt.toml"
+          - "clippy.toml"
