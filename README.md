@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/opensaml.svg)](https://crates.io/crates/opensaml)
 [![docs.rs](https://img.shields.io/docsrs/opensaml)](https://docs.rs/opensaml)
-[![MIT licensed](https://img.shields.io/crates/l/opensaml)](https://github.com/sebasxsala/opensaml-rs/blob/main/LICENSE)
+[![MIT licensed](https://img.shields.io/crates/l/opensaml)](https://github.com/salasebas/opensaml-rs/blob/main/LICENSE)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success)](#security)
 
 **Pure-Rust SAML 2.0** — Service Provider and Identity Provider in one crate. No `libxml2`, no `xmlsec1`, no OpenSSL build chain for the protocol layer. XML cryptography (XML-DSig, XML-Enc, C14N) is delegated to [`bergshamra`](https://crates.io/crates/bergshamra) behind an optional feature that is **on by default**.

@@ -1,0 +1,56 @@
+[workspace]
+release_always = false
+dependencies_update = false
+pr_labels = ["release"]
+pr_name = "release: opensaml-rs{% if version %} v{{ version }}{% endif %}"
+git_tag_enable = false
+git_release_enable = false
+semver_check = false
+
+[[package]]
+name = "opensaml"
+version_group = "opensaml-rs"
+changelog_path = "CHANGELOG.md"
+changelog_include = [
+    "samlify",
+    "open-saml",
+    "rust-saml",
+    "rustsaml",
+    "saml-rs",
+    "samlrs",
+]
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+git_release_name = "opensaml-rs v{{ version }}"
+semver_check = true
+
+[[package]]
+name = "samlify"
+version_group = "opensaml-rs"
+changelog_update = false
+
+[[package]]
+name = "open-saml"
+version_group = "opensaml-rs"
+changelog_update = false
+
+[[package]]
+name = "rust-saml"
+version_group = "opensaml-rs"
+changelog_update = false
+
+[[package]]
+name = "rustsaml"
+version_group = "opensaml-rs"
+changelog_update = false
+
+[[package]]
+name = "saml-rs"
+version_group = "opensaml-rs"
+changelog_update = false
+
+[[package]]
+name = "samlrs"
+version_group = "opensaml-rs"
+changelog_update = false

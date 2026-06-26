@@ -1,7 +1,7 @@
 # saml-rs
 
 Thin re-export of [`opensaml`](https://crates.io/crates/opensaml) (`pub use opensaml::*;`).
-Full documentation: [repository README](https://github.com/sebasxsala/opensaml-rs#readme) · [docs.rs/opensaml](https://docs.rs/opensaml).
+Full documentation: [repository README](https://github.com/salasebas/opensaml-rs#readme) · [docs.rs/opensaml](https://docs.rs/opensaml).
 
 ---
 
