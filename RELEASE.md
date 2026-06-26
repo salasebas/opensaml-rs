@@ -29,12 +29,12 @@ from the merged release PR, not from every push to `main`.
 Recommended setup is crates.io trusted publishing:
 
 1. In GitHub, allow Actions to create pull requests.
-2. In GitHub, create the `release` environment. Require reviewer approval if
-   you want a final manual publish gate.
+2. In GitHub, create the `release` environment and allow deployments from the
+   `main` branch. The workflow runs from `main`; the `vX.Y.Z` tag is created
+   later by release-plz.
 3. In crates.io, configure trusted publishing for every crate above:
    repository `salasebas/opensaml-rs`, workflow
-   `.github/workflows/release-plz.yml`, environment `release`, allowed tags
-   `v*`.
+   `.github/workflows/release-plz.yml`, environment `release`.
 4. Do not configure `CARGO_REGISTRY_TOKEN` when using trusted publishing.
 
 ## Manual fallback
