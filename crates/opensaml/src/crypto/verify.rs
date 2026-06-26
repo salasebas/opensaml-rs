@@ -15,7 +15,7 @@ use super::keys::load_certificate;
 use crate::error::OpenSamlError;
 use crate::util::normalize_cert_string;
 use crate::xml::dom::{self, Node};
-use bergshamra::{verify, DsigContext, KeysManager, VerifyResult};
+use bergshamra::{verify, DsigContext, KeysManager, VerifiedReference, VerifyResult};
 use std::collections::HashSet;
 
 fn children_named<'a>(node: &'a Node, name: &str) -> Vec<&'a Node> {
@@ -66,23 +66,129 @@ fn duplicate_saml_id(node: &Node, seen: &mut HashSet<String>) -> Option<String> 
         .find_map(|child| duplicate_saml_id(child, seen))
 }
 
-/// Return the source of the content covered by the verified signature: the lone
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VerifiedTarget {
+    WholeDocument,
+    Id(String),
+}
+
+fn verified_target_from_uri(uri: &str) -> Result<VerifiedTarget, OpenSamlError> {
+    if uri.is_empty() || uri == "#xpointer(/)" {
+        return Ok(VerifiedTarget::WholeDocument);
+    }
+
+    let fragment = uri
+        .strip_prefix('#')
+        .ok_or_else(|| OpenSamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()))?;
+    if fragment.is_empty() {
+        return Err(OpenSamlError::Crypto(
+            "ERR_UNSUPPORTED_REFERENCE_URI".into(),
+        ));
+    }
+    if let Some(id) = fragment
+        .strip_prefix("xpointer(id('")
+        .and_then(|rest| rest.strip_suffix("'))"))
+    {
+        if id.is_empty() {
+            return Err(OpenSamlError::Crypto(
+                "ERR_UNSUPPORTED_REFERENCE_URI".into(),
+            ));
+        }
+        return Ok(VerifiedTarget::Id(id.to_string()));
+    }
+    if fragment.starts_with("xpointer(") {
+        return Err(OpenSamlError::Crypto(
+            "ERR_UNSUPPORTED_REFERENCE_URI".into(),
+        ));
+    }
+    Ok(VerifiedTarget::Id(fragment.to_string()))
+}
+
+fn verified_targets(
+    references: &[VerifiedReference],
+) -> Result<Vec<VerifiedTarget>, OpenSamlError> {
+    if references.is_empty() {
+        return Err(OpenSamlError::Crypto("NO_SIGNATURE_REFERENCES".into()));
+    }
+
+    let mut targets = Vec::with_capacity(references.len());
+    for reference in references {
+        if is_external_reference(&reference.uri) {
+            return Err(OpenSamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()));
+        }
+        if !reference.digest_verified {
+            return Err(OpenSamlError::Crypto(
+                "ERR_UNVERIFIED_REFERENCE_DIGEST".into(),
+            ));
+        }
+        let target = verified_target_from_uri(&reference.uri)?;
+        if matches!(target, VerifiedTarget::Id(_)) && reference.resolved_node.is_none() {
+            return Err(OpenSamlError::Crypto("ERR_UNRESOLVED_REFERENCE".into()));
+        }
+        targets.push(target);
+    }
+    Ok(targets)
+}
+
+fn node_saml_id(node: &Node) -> Option<&str> {
+    node.attr("ID").or_else(|| node.attr("AssertionID"))
+}
+
+fn target_matches_node(targets: &[VerifiedTarget], node: &Node) -> bool {
+    targets.iter().any(|target| match target {
+        VerifiedTarget::WholeDocument => true,
+        VerifiedTarget::Id(id) => node_saml_id(node).is_some_and(|node_id| node_id == id),
+    })
+}
+
+fn id_target_matches_node(targets: &[VerifiedTarget], node: &Node) -> bool {
+    targets.iter().any(|target| match target {
+        VerifiedTarget::WholeDocument => false,
+        VerifiedTarget::Id(id) => node_saml_id(node).is_some_and(|node_id| node_id == id),
+    })
+}
+
+fn response_is_covered(targets: &[VerifiedTarget], root: &Node) -> bool {
+    target_matches_node(targets, root)
+}
+
+fn verified_content_not_covered() -> OpenSamlError {
+    OpenSamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
+}
+
+/// Return the source of the content covered by a verified reference: the lone
 /// `<Assertion>`, or the whole `<Response>` when assertions are encrypted.
-fn verified_content(root: &Node, xml: &str) -> Option<String> {
+fn verified_content(
+    root: &Node,
+    xml: &str,
+    targets: &[VerifiedTarget],
+) -> Result<Option<String>, OpenSamlError> {
     if root.local_name == "Assertion" {
-        return Some(xml[root.start..root.end].to_string());
+        if target_matches_node(targets, root) {
+            return Ok(Some(xml[root.start..root.end].to_string()));
+        }
+        return Err(verified_content_not_covered());
     }
     if root.local_name.contains("Response") {
         let assertions = children_named(root, "Assertion");
+        if assertions.len() > 1 {
+            return Err(OpenSamlError::PotentialWrappingAttack);
+        }
         if assertions.len() == 1 {
             let a = assertions[0];
-            return Some(xml[a.start..a.end].to_string());
+            if id_target_matches_node(targets, a) || response_is_covered(targets, root) {
+                return Ok(Some(xml[a.start..a.end].to_string()));
+            }
+            return Err(verified_content_not_covered());
         }
         if has_child(root, "EncryptedAssertion") {
-            return Some(xml[root.start..root.end].to_string());
+            if response_is_covered(targets, root) {
+                return Ok(Some(xml[root.start..root.end].to_string()));
+            }
+            return Err(verified_content_not_covered());
         }
     }
-    None
+    Ok(None)
 }
 
 /// True for a signed `<Reference>` URI that is not same-document (i.e. not a
@@ -179,17 +285,13 @@ pub fn verify_signature(
         //   `DsigContext::new_permissive()`.
         let ctx = DsigContext::new(manager).with_insecure(true);
         match verify(&ctx, xml) {
-            Ok(VerifyResult::Valid { references, .. }) => {
-                if references.is_empty() {
-                    return Err(OpenSamlError::Crypto("NO_SIGNATURE_REFERENCES".into()));
-                }
-                // Only same-document references (`#id` or whole-document) are
-                // allowed; reject external/remote/file URIs to avoid pulling
-                // unsigned or local content into the verified set.
-                if references.iter().any(|r| is_external_reference(&r.uri)) {
-                    return Err(OpenSamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()));
-                }
-                return Ok((true, verified_content(root, xml)));
+            Ok(VerifyResult::Valid {
+                signature_node: _,
+                references,
+                ..
+            }) => {
+                let targets = verified_targets(&references)?;
+                return Ok((true, verified_content(root, xml, &targets)?));
             }
             Ok(VerifyResult::Invalid { .. }) => tried_invalid = true,
             Err(e) => last_err = Some(OpenSamlError::Crypto(e.to_string())),
@@ -228,6 +330,38 @@ mod tests {
         assert!(is_external_reference("/etc/passwd"));
         assert!(is_external_reference("file:///etc/passwd"));
         assert!(is_external_reference("cid:attachment"));
+    }
+
+    #[test]
+    fn same_document_reference_target_parsing() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(verified_target_from_uri("")?, VerifiedTarget::WholeDocument);
+        assert_eq!(
+            verified_target_from_uri("#_assertion123")?,
+            VerifiedTarget::Id("_assertion123".to_string())
+        );
+        assert_eq!(
+            verified_target_from_uri("#xpointer(/)")?,
+            VerifiedTarget::WholeDocument
+        );
+        assert_eq!(
+            verified_target_from_uri("#xpointer(id('_assertion123'))")?,
+            VerifiedTarget::Id("_assertion123".to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_reference_target_parsing_fails() {
+        assert!(matches!(
+            verified_target_from_uri("#"),
+            Err(OpenSamlError::Crypto(message))
+                if message == "ERR_UNSUPPORTED_REFERENCE_URI"
+        ));
+        assert!(matches!(
+            verified_target_from_uri("#xpointer(//saml:Assertion)"),
+            Err(OpenSamlError::Crypto(message))
+                if message == "ERR_UNSUPPORTED_REFERENCE_URI"
+        ));
     }
 
     #[test]

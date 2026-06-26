@@ -3,9 +3,12 @@
 #![cfg(feature = "crypto-bergshamra")]
 #![allow(clippy::unwrap_used)]
 
+use bergshamra::{sign, DsigContext, KeysManager};
 use opensaml::constants::signature_algorithm::RSA_SHA256;
+use opensaml::constants::{digest_for_signature, namespace, transform_algorithm};
 use opensaml::crypto::keys::load_private_key;
 use opensaml::crypto::{construct_saml_signature, verify_signature};
+use opensaml::util::normalize_cert_string;
 use opensaml::xml::{extract, ExtractorField};
 use opensaml::OpenSamlError;
 
@@ -22,6 +25,34 @@ fn signed_response() -> String {
     construct_saml_signature(RESPONSE, false, &key, CERT, RSA_SHA256, &[], None).unwrap()
 }
 
+fn response_signed_over_top_level_issuer() -> Result<String, Box<dyn std::error::Error>> {
+    let issuer_id = "_signed_issuer";
+    let with_issuer_id = RESPONSE.replacen(
+        "<saml:Issuer>",
+        &format!("<saml:Issuer ID=\"{issuer_id}\">"),
+        1,
+    );
+    let digest = digest_for_signature(RSA_SHA256).ok_or("unknown digest")?;
+    let signature = format!(
+        "<ds:Signature xmlns:ds=\"{dsig}\"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"{exc_c14n}\"/><ds:SignatureMethod Algorithm=\"{sig_alg}\"/><ds:Reference URI=\"#{issuer_id}\"><ds:Transforms><ds:Transform Algorithm=\"{enveloped}\"/><ds:Transform Algorithm=\"{exc_c14n}\"/></ds:Transforms><ds:DigestMethod Algorithm=\"{digest}\"/><ds:DigestValue></ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue></ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>{cert}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature>",
+        dsig = namespace::DSIG,
+        exc_c14n = transform_algorithm::EXC_C14N,
+        sig_alg = RSA_SHA256,
+        enveloped = transform_algorithm::ENVELOPED_SIGNATURE,
+        cert = normalize_cert_string(CERT),
+    );
+    let template = with_issuer_id.replacen(
+        "</saml:Issuer><samlp:Status>",
+        &format!("</saml:Issuer>{signature}<samlp:Status>"),
+        1,
+    );
+    let key = load_private_key(PRIVKEY, None)?;
+    let mut manager = KeysManager::new();
+    manager.add_key(key);
+    let ctx = DsigContext::new(manager).with_insecure(true);
+    Ok(sign(&ctx, &template)?)
+}
+
 /// The legitimately signed Response must verify and yield the real assertion.
 #[test]
 fn baseline_signed_response_verifies() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,6 +60,24 @@ fn baseline_signed_response_verifies() -> Result<(), Box<dyn std::error::Error>>
     assert!(verified);
     assert!(content.unwrap_or_default().contains("Assertion"));
     Ok(())
+}
+
+#[test]
+fn reference_must_cover_returned_assertion() -> Result<(), Box<dyn std::error::Error>> {
+    let signed = response_signed_over_top_level_issuer()?;
+    match verify_signature(&signed, &[CERT.to_string()]) {
+        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+        Err(OpenSamlError::Crypto(message))
+            if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
+        {
+            Ok(())
+        }
+        Ok((true, content)) => Err(format!(
+            "issuer-only signature must not verify assertion content: {content:?}"
+        )
+        .into()),
+        other => Err(format!("unexpected verification result: {other:?}").into()),
+    }
 }
 
 /// Assertion/Signature smuggled under `SubjectConfirmationData` is rejected.
@@ -51,9 +100,15 @@ fn sibling_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Erro
     let signed = signed_response();
     let pos = signed.find("<saml:Assertion").ok_or("no assertion")?;
     let wrapped = format!("{}{}{}", &signed[..pos], FORGED, &signed[pos..]);
-    let (_, content) = verify_signature(&wrapped, &[CERT.to_string()])?;
-    assert!(!content.unwrap_or_default().contains("attacker@evil.com"));
-    Ok(())
+    match verify_signature(&wrapped, &[CERT.to_string()]) {
+        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+        Ok((false, _)) => Ok(()),
+        Ok((true, content)) => {
+            assert!(!content.unwrap_or_default().contains("attacker@evil.com"));
+            Ok(())
+        }
+        Err(other) => Err(format!("unexpected error: {other:?}").into()),
+    }
 }
 
 #[test]
@@ -84,9 +139,15 @@ fn trailing_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Err
         .rfind("</samlp:Response>")
         .ok_or("no response close")?;
     let wrapped = format!("{}{}{}", &signed[..pos], FORGED, &signed[pos..]);
-    let (_, content) = verify_signature(&wrapped, &[CERT.to_string()])?;
-    assert!(!content.unwrap_or_default().contains("attacker@evil.com"));
-    Ok(())
+    match verify_signature(&wrapped, &[CERT.to_string()]) {
+        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+        Ok((false, _)) => Ok(()),
+        Ok((true, content)) => {
+            assert!(!content.unwrap_or_default().contains("attacker@evil.com"));
+            Ok(())
+        }
+        Err(other) => Err(format!("unexpected error: {other:?}").into()),
+    }
 }
 
 /// Tampering with signed content invalidates the signature.
