@@ -5,17 +5,44 @@ workspace. The `samlify` crate is a Rust crate-name alias and is not affiliated
 with, maintained by, endorsed by, or sponsored by the npm `samlify` package or
 its authors.
 
-opensaml-rs uses **Cargo** and is released via **GitHub releases** and
-**crates.io**.
+opensaml-rs uses **release-plz** to publish one coordinated workspace release.
+All crates share the same version and are published together: `opensaml`,
+`samlify`, `open-saml`, `rust-saml`, `rustsaml`, `saml-rs`, and `samlrs`.
 
-1. Bump the workspace version in the root `Cargo.toml` under
-   `[workspace.package] version`. Member crates use `version.workspace = true`.
-2. Align the path-dependency version pins in
-   `[workspace.dependencies]` (`opensaml` / `samlify`) with the new version so
-   the semver constraints match what you publish on crates.io.
-3. Refresh the lockfile: `cargo build --workspace` so `Cargo.lock` reflects the
-   bump (commit the lockfile change when it differs).
-4. Run checks:
+Git tags use `v*`, for example `v0.1.5`.
+
+## Normal release process
+
+1. Merge changes to `main` using Conventional Commit titles: `fix: ...`,
+   `feat: ...`, or `feat!: ...` / `BREAKING CHANGE: ...`.
+2. The `Release-plz` workflow opens or updates a release PR.
+3. Review the version bump, `Cargo.lock`, and `CHANGELOG.md`.
+4. Merge the release PR after CI passes.
+5. `release-plz release` publishes the crates, creates the `vX.Y.Z` tag, and
+   creates the GitHub release.
+
+`release-plz.toml` sets `release_always = false`, so publication happens only
+from the merged release PR, not from every push to `main`.
+
+## GitHub and crates.io setup
+
+Recommended setup is crates.io trusted publishing:
+
+1. In GitHub, allow Actions to create pull requests.
+2. In GitHub, create the `release` environment. Require reviewer approval if
+   you want a final manual publish gate.
+3. In crates.io, configure trusted publishing for every crate above:
+   repository `salasebas/opensaml-rs`, workflow
+   `.github/workflows/release-plz.yml`, environment `release`, allowed tags
+   `v*`.
+4. Do not configure `CARGO_REGISTRY_TOKEN` when using trusted publishing.
+
+## Manual fallback
+
+1. Bump `[workspace.package] version` and the internal workspace dependency
+   versions in the root `Cargo.toml`.
+2. Refresh `Cargo.lock` with `cargo build --workspace`.
+3. Run checks:
 
    ```bash
    cargo fmt --all --check
@@ -23,13 +50,8 @@ opensaml-rs uses **Cargo** and is released via **GitHub releases** and
    cargo nextest run --workspace --all-features
    ```
 
-5. Update `CHANGELOG.md` with the release notes for the version being published.
-6. Publish crates to crates.io in **dependency order**, waiting for each to be
-   visible before publishing dependents:
-
-   1. `opensaml` — no workspace dependencies.
-   2. Alias crates — each depends only on `opensaml`: `samlify`, `open-saml`,
-      `rust-saml`, `rustsaml`, `saml-rs`, `samlrs`.
+4. Update `CHANGELOG.md`.
+5. Publish in dependency order: first `opensaml`, then the alias crates.
 
    ```bash
    cargo publish -p opensaml
@@ -41,8 +63,7 @@ opensaml-rs uses **Cargo** and is released via **GitHub releases** and
    cargo publish -p samlrs
    ```
 
-7. Create a **GitHub release** tagging the commit that matches the published
-   version.
+6. Create the `vX.Y.Z` tag and GitHub release.
 
 Use `cargo publish -p <crate> --dry-run` to validate a publish without
 uploading. Published versions on crates.io are whatever you ship from this
