@@ -1,9 +1,10 @@
 # Contributing
 
-opensaml-rs is an independent, unofficial Rust SAML 2.0 Service Provider
-toolkit. It is not affiliated with, maintained by, endorsed by, or sponsored by
-the npm `samlify` package or its authors; the `samlify` crate here is only a
-Rust crate-name alias and shares no code with the npm package.
+opensaml-rs is an independent, unofficial Rust SAML 2.0 Service Provider and
+Identity Provider toolkit. It is not affiliated with, maintained by, endorsed
+by, or sponsored by the npm `samlify` package or its authors; the `samlify`
+crate here is only a Rust crate-name alias and shares no code with the npm
+package.
 
 ## Setup
 
@@ -28,8 +29,9 @@ cargo nextest run -p <crate>
 
 ## Porting Work
 
-`samlify` (npm, tag `v2.10.2`) is the behavioral/porting reference. When porting
-behavior:
+`samlify` (npm, pinned in `reference/upstream-samlify/VERSION.md`) is the
+behavioral/porting reference. The original conformance port targets v2.10.2;
+new parity work tracks the active pin. When porting behavior:
 
 1. Read the active pin in `reference/upstream-samlify/VERSION.md`.
 2. Inspect the matching sources under
