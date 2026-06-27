@@ -1,10 +1,10 @@
 # Security Policy
 
-This project is experimental. It implements only the SAML 2.0 **Service
-Provider** role, and XML cryptography (signature verification, encryption, C14N)
-is delegated to `bergshamra` behind the optional `crypto-bergshamra` feature. Do
-not use it for production authentication until the relevant crate is explicitly
-documented as stable.
+This project is experimental. It implements SAML 2.0 **Service Provider** and
+**Identity Provider** flows, and XML cryptography (signature verification,
+encryption, C14N) is delegated to `bergshamra` behind the default
+`crypto-bergshamra` feature. Do not use it for production authentication until
+the relevant crate is explicitly documented as stable.
 
 This is an independent, unofficial project. It is not affiliated with,
 maintained by, endorsed by, or sponsored by the npm `samlify` package or its

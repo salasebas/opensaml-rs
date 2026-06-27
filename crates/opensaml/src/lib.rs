@@ -1,10 +1,11 @@
 //! `opensaml` — SAML 2.0 **Service Provider** and **Identity Provider** library.
 //!
-//! Ported to parity with npm `samlify` v2.10.2: constants, XML field
-//! extraction ([`xml`]), message [`template`]s, [`metadata`] parse/generate,
-//! the three HTTP [`binding`]s (POST, Redirect, POST-SimpleSign), the
-//! [`sp`]/[`idp`] [`entity`] orchestration, inbound [`flow`] (decode →
-//! validate → verify/decrypt → extract), and Single [`logout`]. XML
+//! Originally ported from npm `samlify` v2.10.2 conformance fixtures:
+//! constants, XML field extraction ([`xml`]), message [`template`]s,
+//! [`metadata`] parse/generate, the three HTTP [`binding`]s (POST, Redirect,
+//! POST-SimpleSign), the [`sp`]/[`idp`] [`entity`] orchestration, inbound
+//! [`flow`] (decode → validate → verify/decrypt → extract), and Single
+//! [`logout`]. XML
 //! cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
 //! message signatures) is delegated to `bergshamra` behind the
 //! `crypto-bergshamra` feature (**on by default**; disable with
