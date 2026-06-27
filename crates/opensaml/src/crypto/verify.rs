@@ -157,7 +157,8 @@ fn verified_content_not_covered() -> OpenSamlError {
 }
 
 /// Return the source of the content covered by a verified reference: the lone
-/// `<Assertion>`, or the whole `<Response>` when assertions are encrypted.
+/// `<Assertion>`, the whole `<Response>` when assertions are encrypted, or the
+/// consumed metadata `<EntityDescriptor>`.
 fn verified_content(
     root: &Node,
     xml: &str,
@@ -187,6 +188,12 @@ fn verified_content(
             }
             return Err(verified_content_not_covered());
         }
+    }
+    if root.local_name == "EntityDescriptor" {
+        if target_matches_node(targets, root) {
+            return Ok(Some(xml[root.start..root.end].to_string()));
+        }
+        return Err(verified_content_not_covered());
     }
     Ok(None)
 }
@@ -309,7 +316,8 @@ pub fn verify_signature(
 }
 
 /// Verify the enveloped XML-DSig signature on a metadata document against
-/// trusted certificate(s); returns whether it is valid.
+/// trusted certificate(s); returns whether it is valid and covers the consumed
+/// `<EntityDescriptor>` document.
 pub fn verify_metadata_signature(
     xml: &str,
     trusted_certs: &[String],
