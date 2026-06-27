@@ -369,8 +369,31 @@ impl IdentityProvider {
 mod tests {
     use super::*;
     use crate::constants::Binding;
+    use crate::metadata::{Endpoint, SpMetadataConfig};
 
     const IDPMETA: &str = include_str!("../tests/fixtures/idpmeta.xml");
+
+    fn unsigned_idp() -> Result<IdentityProvider, OpenSamlError> {
+        IdentityProvider::from_config(
+            &IdpMetadataConfig {
+                entity_id: "https://idp.example.com/metadata".into(),
+                single_sign_on_service: vec![Endpoint::new(Binding::Post, "https://idp/sso")],
+                ..Default::default()
+            },
+            EntitySetting::default(),
+        )
+    }
+
+    fn unsigned_sp(entity_id: &str) -> Result<ServiceProvider, OpenSamlError> {
+        ServiceProvider::from_config(
+            &SpMetadataConfig {
+                entity_id: entity_id.into(),
+                assertion_consumer_service: vec![Endpoint::new(Binding::Post, "https://sp/acs")],
+                ..Default::default()
+            },
+            EntitySetting::default(),
+        )
+    }
 
     #[test]
     fn from_metadata_merges_flags() -> Result<(), Box<dyn std::error::Error>> {
@@ -382,6 +405,37 @@ mod tests {
                 .as_deref(),
             Some("https://idp.example.org/sso/SingleSignOnService")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_login_request_accepts_matching_sp_issuer() -> Result<(), Box<dyn std::error::Error>> {
+        let idp = unsigned_idp()?;
+        let sp = unsigned_sp("https://sp.example.com/metadata")?;
+        let ctx = sp.create_login_request(&idp, Binding::Post, None)?;
+        let request = HttpRequest::post(vec![("SAMLRequest".into(), ctx.context)]);
+
+        let result = idp.parse_login_request(&sp, Binding::Post, &request)?;
+
+        assert_eq!(
+            result.extract.get_str("issuer"),
+            Some("https://sp.example.com/metadata")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_login_request_rejects_unexpected_sp_issuer() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let idp = unsigned_idp()?;
+        let expected_sp = unsigned_sp("https://expected-sp.example.com/metadata")?;
+        let attacker_sp = unsigned_sp("https://attacker-sp.example.com/metadata")?;
+        let ctx = attacker_sp.create_login_request(&idp, Binding::Post, None)?;
+        let request = HttpRequest::post(vec![("SAMLRequest".into(), ctx.context)]);
+
+        let result = idp.parse_login_request(&expected_sp, Binding::Post, &request);
+
+        assert!(matches!(result, Err(OpenSamlError::UnmatchIssuer)));
         Ok(())
     }
 }
@@ -418,10 +472,10 @@ mod crypto_tests {
         )
     }
 
-    fn sp() -> Result<ServiceProvider, OpenSamlError> {
+    fn signed_sp(entity_id: &str) -> Result<ServiceProvider, OpenSamlError> {
         ServiceProvider::from_config(
             &SpMetadataConfig {
-                entity_id: "https://sp.example.com/metadata".into(),
+                entity_id: entity_id.into(),
                 authn_requests_signed: true,
                 want_assertions_signed: true,
                 signing_certs: vec![CERT.into()],
@@ -430,6 +484,10 @@ mod crypto_tests {
             },
             signing_setting(),
         )
+    }
+
+    fn sp() -> Result<ServiceProvider, OpenSamlError> {
+        signed_sp("https://sp.example.com/metadata")
     }
 
     #[test]
@@ -513,6 +571,21 @@ mod crypto_tests {
         let signed_xml = String::from_utf8(base64_decode(&ctx.context)?)?;
         assert!(signed_xml.contains("<ds:Signature"));
         assert_eq!(result.extract.get_str("request.id"), Some(ctx.id.as_str()));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_signed_login_request_rejects_unexpected_sp_issuer(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let idp = idp()?;
+        let expected_sp = sp()?;
+        let attacker_sp = signed_sp("https://attacker-sp.example.com/metadata")?;
+        let ctx = attacker_sp.create_login_request(&idp, Binding::Post, None)?;
+        let request = HttpRequest::post(vec![("SAMLRequest".into(), ctx.context)]);
+
+        let result = idp.parse_login_request(&expected_sp, Binding::Post, &request);
+
+        assert!(matches!(result, Err(OpenSamlError::UnmatchIssuer)));
         Ok(())
     }
 }
