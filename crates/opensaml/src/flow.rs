@@ -75,6 +75,8 @@ pub struct FlowOptions<'a> {
     pub expected_audience: Option<&'a str>,
     /// Expected `InResponseTo` (originating request ID); `None` skips the check.
     pub expected_in_response_to: Option<&'a str>,
+    /// Reject a non-empty `InResponseTo` when no expected request ID is supplied.
+    pub reject_unexpected_in_response_to: bool,
 }
 
 /// Result of a successful flow.
@@ -246,10 +248,21 @@ fn validate_context(
                 return Err(OpenSamlError::UnmatchIssuer);
             }
         }
-        if let Some(expected) = opts.expected_in_response_to {
-            if extracted.get_str("response.inResponseTo") != Some(expected) {
-                return Err(OpenSamlError::InvalidInResponseTo);
+        match opts.expected_in_response_to {
+            Some(expected) => {
+                if extracted.get_str("response.inResponseTo") != Some(expected) {
+                    return Err(OpenSamlError::InvalidInResponseTo);
+                }
             }
+            None if opts.reject_unexpected_in_response_to => {
+                if extracted
+                    .get_str("response.inResponseTo")
+                    .is_some_and(|actual| !actual.is_empty())
+                {
+                    return Err(OpenSamlError::InvalidInResponseTo);
+                }
+            }
+            None => {}
         }
     }
     if parser_type == ParserType::SamlResponse {
