@@ -358,6 +358,7 @@ impl IdentityProvider {
                 decrypt_key_pass: None,
                 clock_drifts: self.setting.clock_drifts,
                 redirect_inflate_max_bytes: self.setting.redirect_inflate_max_bytes,
+                xml_limits: self.setting.xml_limits,
                 expected_audience: None,
                 expected_in_response_to: None,
             },

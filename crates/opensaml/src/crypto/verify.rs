@@ -14,7 +14,7 @@
 use super::keys::load_certificate;
 use crate::error::OpenSamlError;
 use crate::util::normalize_cert_string;
-use crate::xml::dom::{self, Node};
+use crate::xml::dom::{self, Node, XmlLimits};
 use bergshamra::{verify, DsigContext, KeysManager, VerifiedReference, VerifyResult};
 use std::collections::HashSet;
 
@@ -241,7 +241,16 @@ pub fn verify_signature(
     xml: &str,
     metadata_certs: &[String],
 ) -> Result<(bool, Option<String>), OpenSamlError> {
-    let doc = dom::parse(xml)?;
+    verify_signature_with_limits(xml, metadata_certs, XmlLimits::default())
+}
+
+/// Verify the XML-DSig signature(s) of `xml` with explicit XML parser limits.
+pub fn verify_signature_with_limits(
+    xml: &str,
+    metadata_certs: &[String],
+    limits: XmlLimits,
+) -> Result<(bool, Option<String>), OpenSamlError> {
+    let doc = dom::parse_with_limits(xml, limits)?;
     let root = &doc.root;
 
     if root.local_name.contains("Response") && wrapping_detected(root) {
@@ -336,7 +345,16 @@ pub fn verify_metadata_signature(
     xml: &str,
     trusted_certs: &[String],
 ) -> Result<bool, OpenSamlError> {
-    Ok(verify_signature(xml, trusted_certs)?.0)
+    verify_metadata_signature_with_limits(xml, trusted_certs, XmlLimits::default())
+}
+
+/// Verify a metadata XML-DSig signature with explicit XML parser limits.
+pub fn verify_metadata_signature_with_limits(
+    xml: &str,
+    trusted_certs: &[String],
+    limits: XmlLimits,
+) -> Result<bool, OpenSamlError> {
+    Ok(verify_signature_with_limits(xml, trusted_certs, limits)?.0)
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 
 use crate::constants::{status_code, ParserType};
 use crate::error::OpenSamlError;
-use crate::xml::{extract, fields};
+use crate::xml::{extract_with_limits, fields, XmlLimits};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 fn parse(ts: &str) -> Option<OffsetDateTime> {
@@ -47,12 +47,21 @@ pub fn verify_time(
 /// Only `SAMLResponse` / `LogoutResponse` are checked; other parser types are
 /// skipped. Success resolves to `Ok(())`; anything else is an error.
 pub fn check_status(content: &str, parser_type: ParserType) -> Result<(), OpenSamlError> {
+    check_status_with_limits(content, parser_type, XmlLimits::default())
+}
+
+/// Check response status with explicit XML parser resource limits.
+pub fn check_status_with_limits(
+    content: &str,
+    parser_type: ParserType,
+    limits: XmlLimits,
+) -> Result<(), OpenSamlError> {
     let fields = match parser_type {
         ParserType::SamlResponse => fields::login_response_status_fields(),
         ParserType::LogoutResponse => fields::logout_response_status_fields(),
         _ => return Ok(()),
     };
-    let result = extract(content, &fields)?;
+    let result = extract_with_limits(content, &fields, limits)?;
     match result.get_str("top") {
         Some(code) if code == status_code::SUCCESS => Ok(()),
         Some(code) if !code.is_empty() => Err(OpenSamlError::FailedStatus {

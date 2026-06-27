@@ -19,8 +19,11 @@ pub use backend::XmlSecurityBackend;
 #[cfg(feature = "crypto-bergshamra")]
 pub use bergshamra::BergshamraBackend;
 #[cfg(feature = "crypto-bergshamra")]
-pub use enc::{decrypt_assertion, encrypt_assertion};
+pub use enc::{decrypt_assertion, decrypt_assertion_with_limits, encrypt_assertion};
 #[cfg(feature = "crypto-bergshamra")]
 pub use sign::{construct_message_signature, construct_saml_signature, verify_message_signature};
 #[cfg(feature = "crypto-bergshamra")]
-pub use verify::{verify_metadata_signature, verify_signature};
+pub use verify::{
+    verify_metadata_signature, verify_metadata_signature_with_limits, verify_signature,
+    verify_signature_with_limits,
+};

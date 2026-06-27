@@ -13,7 +13,7 @@ pub use sp::SpMetadata;
 use crate::constants::{Binding, CertUse};
 use crate::error::OpenSamlError;
 use crate::util::Value;
-use crate::xml::{dom, extract, ExtractorField};
+use crate::xml::{dom, extract_with_limits, ExtractorField, XmlLimits};
 
 fn base_fields() -> Vec<ExtractorField> {
     vec![
@@ -77,7 +77,16 @@ impl Metadata {
     ///
     /// Rejects documents carrying more than one top-level `<EntityDescriptor>`.
     pub fn parse(xml: &str, extra: Vec<ExtractorField>) -> Result<Self, OpenSamlError> {
-        let roots = dom::parse_roots(xml)?;
+        Self::parse_with_limits(xml, extra, XmlLimits::default())
+    }
+
+    /// Parse `xml` with explicit XML parser resource limits.
+    pub fn parse_with_limits(
+        xml: &str,
+        extra: Vec<ExtractorField>,
+        limits: XmlLimits,
+    ) -> Result<Self, OpenSamlError> {
+        let roots = dom::parse_roots_with_limits(xml, limits)?;
         if roots
             .iter()
             .filter(|n| n.local_name == "EntityDescriptor")
@@ -91,7 +100,7 @@ impl Metadata {
 
         let mut fields = base_fields();
         fields.extend(extra);
-        let mut meta = extract(xml, &fields)?;
+        let mut meta = extract_with_limits(xml, &fields, limits)?;
 
         // A single shared certificate is used for both signing and encryption.
         if let Some(shared) = meta.get_str("sharedCertificate") {
@@ -179,7 +188,17 @@ impl Metadata {
     /// certificate(s) (federation trust anchor). Requires `crypto-bergshamra`.
     #[cfg(feature = "crypto-bergshamra")]
     pub fn verify_signature(&self, trusted_certs: &[String]) -> Result<bool, OpenSamlError> {
-        crate::crypto::verify_metadata_signature(&self.xml, trusted_certs)
+        self.verify_signature_with_limits(trusted_certs, XmlLimits::default())
+    }
+
+    /// Verify this metadata document's signature with explicit XML parser limits.
+    #[cfg(feature = "crypto-bergshamra")]
+    pub fn verify_signature_with_limits(
+        &self,
+        trusted_certs: &[String],
+        limits: XmlLimits,
+    ) -> Result<bool, OpenSamlError> {
+        crate::crypto::verify_metadata_signature_with_limits(&self.xml, trusted_certs, limits)
     }
 }
 

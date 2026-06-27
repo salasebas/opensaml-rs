@@ -322,6 +322,7 @@ impl ServiceProvider {
                 decrypt_key_pass: self.setting.enc_private_key_pass.as_deref(),
                 clock_drifts: self.setting.clock_drifts,
                 redirect_inflate_max_bytes: self.setting.redirect_inflate_max_bytes,
+                xml_limits: self.setting.xml_limits,
                 expected_audience: self.setting.validate_audience.then_some(audience.as_str()),
                 expected_in_response_to,
             },

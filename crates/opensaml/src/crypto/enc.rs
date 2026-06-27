@@ -4,7 +4,7 @@
 use super::keys::load_certificate;
 use crate::constants::namespace;
 use crate::error::OpenSamlError;
-use crate::xml::dom::{self, Node};
+use crate::xml::dom::{self, Node, XmlLimits};
 use bergshamra::keys::Key;
 use bergshamra::{decrypt, encrypt, EncContext, KeysManager};
 
@@ -64,7 +64,16 @@ pub fn encrypt_assertion(
 ///
 /// Returns `(response_with_decrypted_assertion, decrypted_assertion)`.
 pub fn decrypt_assertion(xml: &str, enc_key: &Key) -> Result<(String, String), OpenSamlError> {
-    let doc = dom::parse(xml)?;
+    decrypt_assertion_with_limits(xml, enc_key, XmlLimits::default())
+}
+
+/// Decrypt the `<EncryptedAssertion>` with explicit XML parser resource limits.
+pub fn decrypt_assertion_with_limits(
+    xml: &str,
+    enc_key: &Key,
+    limits: XmlLimits,
+) -> Result<(String, String), OpenSamlError> {
+    let doc = dom::parse_with_limits(xml, limits)?;
     let encrypted = child(&doc.root, "EncryptedAssertion")
         .ok_or_else(|| OpenSamlError::Crypto("ERR_UNDEFINED_ENCRYPTED_ASSERTION".into()))?;
     // bergshamra::decrypt returns the input doc with <EncryptedData> replaced by
@@ -88,6 +97,8 @@ pub fn decrypt_assertion(xml: &str, enc_key: &Key) -> Result<(String, String), O
         assertion,
         &xml[encrypted.end..]
     );
+    limits.check_input_bytes(response.len())?;
+    limits.check_input_bytes(assertion.len())?;
     Ok((response, assertion))
 }
 
