@@ -174,6 +174,8 @@ pub mod signature_algorithm {
     pub const RSA_SHA1: &str = "http://www.w3.org/2000/09/xmldsig#rsa-sha1";
     /// RSA-SHA256.
     pub const RSA_SHA256: &str = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+    /// RSASSA-PSS with SHA-256 and MGF1.
+    pub const RSA_SHA256_MGF1: &str = "http://www.w3.org/2007/05/xmldsig-more#sha256-rsa-MGF1";
     /// RSA-SHA512.
     pub const RSA_SHA512: &str = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512";
 }
@@ -193,6 +195,7 @@ pub fn digest_for_signature(sig_alg: &str) -> Option<&'static str> {
     match sig_alg {
         signature_algorithm::RSA_SHA1 => Some(digest_algorithm::SHA1),
         signature_algorithm::RSA_SHA256 => Some(digest_algorithm::SHA256),
+        signature_algorithm::RSA_SHA256_MGF1 => Some(digest_algorithm::SHA256),
         signature_algorithm::RSA_SHA512 => Some(digest_algorithm::SHA512),
         _ => None,
     }
@@ -386,6 +389,10 @@ mod tests {
     fn digest_mapping_matches_samlify() {
         assert_eq!(
             digest_for_signature(signature_algorithm::RSA_SHA256),
+            Some(digest_algorithm::SHA256)
+        );
+        assert_eq!(
+            digest_for_signature(signature_algorithm::RSA_SHA256_MGF1),
             Some(digest_algorithm::SHA256)
         );
         assert_eq!(

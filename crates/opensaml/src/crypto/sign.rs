@@ -187,9 +187,12 @@ pub fn verify_message_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::signature_algorithm::{RSA_SHA1, RSA_SHA256, RSA_SHA512};
+    use crate::constants::signature_algorithm::{
+        RSA_SHA1, RSA_SHA256, RSA_SHA256_MGF1, RSA_SHA512,
+    };
     use crate::crypto::keys::load_private_key;
     use crate::crypto::verify::verify_signature;
+    use crate::entity::EntitySetting;
 
     const SP_PRIVKEY: &str = include_str!("../../tests/fixtures/key/sp_privkey.pem");
     const SP_CERT: &str = include_str!("../../tests/fixtures/key/sp_signing_cert.cer");
@@ -208,6 +211,26 @@ mod tests {
             let (verified, _) = verify_signature(&signed, &[SP_CERT.to_string()])?;
             assert!(verified, "self-signed AuthnRequest should verify ({alg})");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn sign_message_with_rsa_pss_sha256_then_verify() -> Result<(), Box<dyn std::error::Error>> {
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let signed = construct_saml_signature(
+            AUTHN_REQUEST,
+            true,
+            &key,
+            SP_CERT,
+            RSA_SHA256_MGF1,
+            &[],
+            None,
+        )?;
+        assert!(signed.contains("<ds:Signature"));
+        assert!(signed.contains(RSA_SHA256_MGF1));
+        assert!(!signed.contains("<ds:SignatureValue></ds:SignatureValue>"));
+        let (verified, _) = verify_signature(&signed, &[SP_CERT.to_string()])?;
+        assert!(verified, "self-signed PSS AuthnRequest should verify");
         Ok(())
     }
 
@@ -279,5 +302,58 @@ mod tests {
             RSA_SHA256
         )?);
         Ok(())
+    }
+
+    #[test]
+    fn detached_message_signature_with_rsa_pss_sha256_round_trip(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let octet = "SAMLRequest=abc&RelayState=xyz&SigAlg=http%3A%2F%2Fwww.w3.org%2F2007%2F05%2Fxmldsig-more%23sha256-rsa-MGF1";
+        let sig = construct_message_signature(octet, &key, RSA_SHA256_MGF1)?;
+        assert!(verify_message_signature(
+            octet,
+            &sig,
+            SP_CERT,
+            RSA_SHA256_MGF1
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn default_rsa_sha256_detached_signature_does_not_verify_as_rsa_pss(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let octet =
+            "SAMLRequest=abc&SigAlg=http%3A%2F%2Fwww.w3.org%2F2001%2F04%2Fxmldsig-more%23rsa-sha256";
+        let sig = construct_message_signature(octet, &key, RSA_SHA256)?;
+        assert!(
+            !verify_message_signature(octet, &sig, SP_CERT, RSA_SHA256_MGF1)?,
+            "RSA-SHA256 signature must not verify under PSS"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_signature_algorithm_fails_closed() -> Result<(), Box<dyn std::error::Error>> {
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let alg = "http://example.com/signature#unknown";
+        assert!(construct_message_signature("SAMLRequest=abc", &key, alg).is_err());
+        assert!(verify_message_signature("SAMLRequest=abc", "c2lnbmF0dXJl", SP_CERT, alg).is_err());
+        assert!(
+            construct_saml_signature(AUTHN_REQUEST, true, &key, SP_CERT, alg, &[], None).is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn default_request_signature_algorithm_remains_rsa_sha256() {
+        assert_eq!(
+            EntitySetting::default().request_signature_algorithm,
+            RSA_SHA256
+        );
+        assert_ne!(
+            EntitySetting::default().request_signature_algorithm,
+            RSA_SHA256_MGF1
+        );
     }
 }
