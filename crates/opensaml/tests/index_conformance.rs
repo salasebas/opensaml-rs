@@ -329,6 +329,7 @@ mod crypto {
         construct_message_signature, construct_saml_signature, encrypt_assertion,
         verify_message_signature, verify_signature,
     };
+    use opensaml::OpenSamlError;
 
     const SP_PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
     const SIGN_CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -355,6 +356,20 @@ mod crypto {
         IdpMetadata::from_xml(IDPMETA)
             .unwrap()
             .x509_certificates(CertUse::Signing)
+    }
+    fn assert_content_not_covered(
+        result: Result<(bool, Option<String>), OpenSamlError>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match result {
+            Err(OpenSamlError::Crypto(message))
+                if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
+            {
+                Ok(())
+            }
+            other => {
+                Err(format!("expected uncovered signed content rejection, got {other:?}").into())
+            }
+        }
     }
 
     // 9-11: sign a SAML message (round-trip verify; bytes are deterministic).
@@ -437,9 +452,8 @@ mod crypto {
         Ok(())
     }
     #[test]
-    fn verify_xml_signature_sha256_with_metadata() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(verify_signature(SIGNED_SHA256, &sp_signing())?.0);
-        Ok(())
+    fn reject_issuer_only_request_sha256_with_metadata() -> Result<(), Box<dyn std::error::Error>> {
+        assert_content_not_covered(verify_signature(SIGNED_SHA256, &sp_signing()))
     }
     #[test]
     fn integrity_check_request_sha256() -> Result<(), Box<dyn std::error::Error>> {
@@ -447,9 +461,8 @@ mod crypto {
         Ok(())
     }
     #[test]
-    fn verify_xml_signature_sha512_with_metadata() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(verify_signature(SIGNED_SHA512, &sp_signing())?.0);
-        Ok(())
+    fn reject_issuer_only_request_sha512_with_metadata() -> Result<(), Box<dyn std::error::Error>> {
+        assert_content_not_covered(verify_signature(SIGNED_SHA512, &sp_signing()))
     }
     #[test]
     fn integrity_check_request_sha512() -> Result<(), Box<dyn std::error::Error>> {
@@ -471,19 +484,16 @@ mod crypto {
 
     // 28-30: verify with a bare certificate (samlify `keyFile`).
     #[test]
-    fn verify_signature_sha1_with_cert() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(verify_signature(SIGNED_SHA1, &[SP_CERT.to_string()])?.0);
-        Ok(())
+    fn reject_issuer_only_request_sha1_with_cert() -> Result<(), Box<dyn std::error::Error>> {
+        assert_content_not_covered(verify_signature(SIGNED_SHA1, &[SP_CERT.to_string()]))
     }
     #[test]
-    fn verify_signature_sha256_with_cert() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(verify_signature(SIGNED_SHA256, &[SP_CERT.to_string()])?.0);
-        Ok(())
+    fn reject_issuer_only_request_sha256_with_cert() -> Result<(), Box<dyn std::error::Error>> {
+        assert_content_not_covered(verify_signature(SIGNED_SHA256, &[SP_CERT.to_string()]))
     }
     #[test]
-    fn verify_signature_sha512_with_cert() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(verify_signature(SIGNED_SHA512, &[SP_CERT.to_string()])?.0);
-        Ok(())
+    fn reject_issuer_only_request_sha512_with_cert() -> Result<(), Box<dyn std::error::Error>> {
+        assert_content_not_covered(verify_signature(SIGNED_SHA512, &[SP_CERT.to_string()]))
     }
 
     // 31-35: encrypt assertion + error cases.

@@ -156,19 +156,27 @@ fn verified_content_not_covered() -> OpenSamlError {
     OpenSamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
 }
 
+fn verified_root_content(
+    root: &Node,
+    xml: &str,
+    targets: &[VerifiedTarget],
+) -> Result<String, OpenSamlError> {
+    if target_matches_node(targets, root) {
+        return Ok(xml[root.start..root.end].to_string());
+    }
+    Err(verified_content_not_covered())
+}
+
 /// Return the source of the content covered by a verified reference: the lone
-/// `<Assertion>`, the whole `<Response>` when assertions are encrypted, or the
-/// consumed metadata `<EntityDescriptor>`.
+/// `<Assertion>`, a consumed root element, or the whole `<Response>` when
+/// assertions are encrypted.
 fn verified_content(
     root: &Node,
     xml: &str,
     targets: &[VerifiedTarget],
 ) -> Result<Option<String>, OpenSamlError> {
     if root.local_name == "Assertion" {
-        if target_matches_node(targets, root) {
-            return Ok(Some(xml[root.start..root.end].to_string()));
-        }
-        return Err(verified_content_not_covered());
+        return verified_root_content(root, xml, targets).map(Some);
     }
     if root.local_name.contains("Response") {
         let assertions = children_named(root, "Assertion");
@@ -194,6 +202,12 @@ fn verified_content(
             return Ok(Some(xml[root.start..root.end].to_string()));
         }
         return Err(verified_content_not_covered());
+    }
+    if matches!(
+        root.local_name.as_str(),
+        "AuthnRequest" | "LogoutRequest" | "LogoutResponse"
+    ) {
+        return verified_root_content(root, xml, targets).map(Some);
     }
     Ok(None)
 }
@@ -428,13 +442,17 @@ mod tests {
     }
 
     #[test]
-    fn verifies_signed_request_with_sp_cert() -> Result<(), Box<dyn std::error::Error>> {
-        let (verified, _) = verify_signature(SIGNED_REQUEST, &[SP_CERT.to_string()])?;
-        assert!(
-            verified,
-            "signed_request_sha256.xml should verify with the SP cert"
-        );
-        Ok(())
+    fn rejects_signed_request_without_root_coverage() -> Result<(), Box<dyn std::error::Error>> {
+        match verify_signature(SIGNED_REQUEST, &[SP_CERT.to_string()]) {
+            Err(OpenSamlError::Crypto(message))
+                if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
+            {
+                Ok(())
+            }
+            other => {
+                Err(format!("expected uncovered AuthnRequest rejection, got {other:?}").into())
+            }
+        }
     }
 
     #[test]
