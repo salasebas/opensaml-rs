@@ -7,7 +7,10 @@ use crate::entity::{generate_id, now_iso8601, BindingContext, EntitySetting, Use
 use crate::error::OpenSamlError;
 use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::Metadata;
-use crate::template::{replace_tags_by_value, LOGOUT_REQUEST_TEMPLATE, LOGOUT_RESPONSE_TEMPLATE};
+use crate::template::{
+    replace_tags_by_optional_value, replace_tags_by_value, LOGOUT_REQUEST_TEMPLATE,
+    LOGOUT_RESPONSE_TEMPLATE,
+};
 
 fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
     setting
@@ -92,8 +95,7 @@ fn unsigned_context(
 
 /// Build a `<LogoutRequest>` from `init` to `target` (samlify `createLogoutRequest`).
 ///
-/// `user` supplies the `<NameID>` and an optional `SessionIndex` (available to
-/// custom `logout_request_template`s; the default template omits it, as samlify).
+/// `user` supplies the `<NameID>` and optional `<samlp:SessionIndex>`.
 pub fn create_logout_request(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -143,19 +145,16 @@ pub fn create_logout_request_with_id(
         .logout_request_template
         .as_deref()
         .unwrap_or(LOGOUT_REQUEST_TEMPLATE);
-    let xml = replace_tags_by_value(
+    let xml = replace_tags_by_optional_value(
         template,
         &[
-            ("ID", id.clone()),
-            ("IssueInstant", now_iso8601()),
-            ("Destination", destination.clone()),
-            ("Issuer", issuer_of(init_setting, init_meta)),
-            ("NameIDFormat", name_id_format),
-            ("NameID", user.name_id.clone()),
-            (
-                "SessionIndex",
-                user.session_index.clone().unwrap_or_default(),
-            ),
+            ("ID", Some(id.clone())),
+            ("IssueInstant", Some(now_iso8601())),
+            ("Destination", Some(destination.clone())),
+            ("Issuer", Some(issuer_of(init_setting, init_meta))),
+            ("NameIDFormat", Some(name_id_format)),
+            ("NameID", Some(user.name_id.clone())),
+            ("SessionIndex", user.session_index.clone()),
         ],
     );
     let (context, signature, sig_alg) = if want_signed {
