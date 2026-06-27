@@ -1,13 +1,16 @@
 //! Inbound message flow (samlify `flow.ts`): decode → validate XML/status →
 //! (signature verify + optional decrypt) → extract → issuer/time validation.
 
-use crate::binding::{base64_decode, deflate_raw_decode_with_limit, MAX_DEFLATE_RAW_DECODE_BYTES};
+use crate::binding::{
+    base64_decode, base64_decode_with_limit, deflate_raw_decode_with_limit,
+    MAX_DEFLATE_RAW_DECODE_BYTES,
+};
 use crate::constants::{Binding, ParserType};
-use crate::context::is_valid_xml;
+use crate::context::is_valid_xml_with_limits;
 use crate::error::OpenSamlError;
 use crate::util::Value;
-use crate::validator::{check_status, verify_time};
-use crate::xml::{extract, fields, ExtractorField};
+use crate::validator::{check_status_with_limits, verify_time};
+use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
@@ -73,6 +76,8 @@ pub struct FlowOptions<'a> {
     pub parser_type: Option<ParserType>,
     /// Maximum inflated raw-DEFLATE bytes accepted for HTTP-Redirect input.
     pub redirect_inflate_max_bytes: usize,
+    /// XML parser resource limits for decoded messages and DOM reparses.
+    pub xml_limits: XmlLimits,
     /// Whether to require and verify a signature.
     pub check_signature: bool,
     /// Expected issuer (peer `entityID`).
@@ -102,6 +107,7 @@ impl<'a> Default for FlowOptions<'a> {
             binding: None,
             parser_type: None,
             redirect_inflate_max_bytes: MAX_DEFLATE_RAW_DECODE_BYTES,
+            xml_limits: XmlLimits::default(),
             check_signature: false,
             from_issuer: None,
             signing_certs: &[],
@@ -147,6 +153,7 @@ fn decode_message(
     parser_type: ParserType,
     request: &HttpRequest,
     redirect_inflate_max_bytes: usize,
+    xml_limits: XmlLimits,
 ) -> Result<String, OpenSamlError> {
     let direction = parser_type.query_param();
     let bytes = match binding {
@@ -154,24 +161,31 @@ fn decode_message(
             let content = request
                 .query_get(direction)?
                 .ok_or_else(|| OpenSamlError::Invalid("ERR_REDIRECT_FLOW_BAD_ARGS".into()))?;
-            deflate_raw_decode_with_limit(&base64_decode(content)?, redirect_inflate_max_bytes)?
+            let compressed = base64_decode(content)?;
+            deflate_raw_decode_with_limit(
+                &compressed,
+                redirect_inflate_max_bytes.min(xml_limits.max_bytes),
+            )?
         }
         Binding::Post | Binding::SimpleSign => {
             let content = request
                 .body_get(direction)?
                 .ok_or_else(|| OpenSamlError::Invalid("ERR_FLOW_BAD_ARGS".into()))?;
-            base64_decode(content)?
+            base64_decode_with_limit(content, xml_limits.max_bytes)?
         }
         Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
     };
+    xml_limits.check_input_bytes(bytes.len())?;
     String::from_utf8(bytes).map_err(|e| OpenSamlError::Xml(e.to_string()))
 }
 
-fn assertion_shortcut(xml: &str) -> Result<Option<String>, OpenSamlError> {
+fn assertion_shortcut(xml: &str, limits: XmlLimits) -> Result<Option<String>, OpenSamlError> {
     let field = ExtractorField::new("assertion", &["Response", "Assertion"]).with_context();
-    Ok(extract(xml, std::slice::from_ref(&field))?
-        .get_str("assertion")
-        .map(str::to_string))
+    Ok(
+        extract_with_limits(xml, std::slice::from_ref(&field), limits)?
+            .get_str("assertion")
+            .map(str::to_string),
+    )
 }
 
 fn verified_content_not_covered() -> OpenSamlError {
@@ -288,13 +302,14 @@ fn verify_and_prepare(
     opts: &FlowOptions<'_>,
 ) -> Result<(String, Option<String>), OpenSamlError> {
     use crate::crypto::{
-        decrypt_assertion,
+        decrypt_assertion_with_limits,
         enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
         keys::load_private_key,
-        verify_signature,
+        verify_signature_with_limits,
     };
 
-    let (verified, verified_node) = verify_signature(xml, opts.signing_certs)?;
+    let (verified, verified_node) =
+        verify_signature_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
     let decrypt_required = opts.decrypt_key.is_some();
     if decrypt_required && !opts.allow_insecure_software_rsa_key_transport_decryption {
         return Err(software_rsa_decryption_disabled());
@@ -309,14 +324,21 @@ fn verify_and_prepare(
         if let Some(node) = verified_node {
             // signed-then-encrypted: the verified content is a Response carrying
             // an EncryptedAssertion.
-            let (content, assertion) = decrypt_assertion(&node, &load_key()?, decrypt_options)?;
+            let (content, assertion) = decrypt_assertion_with_limits(
+                &node,
+                &load_key()?,
+                decrypt_options,
+                opts.xml_limits,
+            )?;
             return Ok((content, Some(assertion)));
         }
     }
     if decrypt_required && !verified {
         // encrypted-then-signed: decrypt first, then verify the result.
-        let (content, _) = decrypt_assertion(xml, &load_key()?, decrypt_options)?;
-        let (re_verified, re_node) = verify_signature(&content, opts.signing_certs)?;
+        let (content, _) =
+            decrypt_assertion_with_limits(xml, &load_key()?, decrypt_options, opts.xml_limits)?;
+        let (re_verified, re_node) =
+            verify_signature_with_limits(&content, opts.signing_certs, opts.xml_limits)?;
         return if re_verified {
             Ok((content, re_node))
         } else {
@@ -429,7 +451,7 @@ fn is_valid_bearer_subject_confirmation(
         )
         .attrs(&["NotOnOrAfter", "Recipient", "InResponseTo"]),
     ];
-    let extracted = extract(xml, &fields)?;
+    let extracted = extract_with_limits(xml, &fields, opts.xml_limits)?;
 
     if extracted.get_str("subjectConfirmation") != Some(BEARER_SUBJECT_CONFIRMATION_METHOD) {
         return Ok(false);
@@ -556,16 +578,17 @@ fn flow_inner(
         parser_type,
         request,
         opts.redirect_inflate_max_bytes,
+        opts.xml_limits,
     )?;
-    is_valid_xml(&xml)?;
-    check_status(&xml, parser_type)?;
+    is_valid_xml_with_limits(&xml, opts.xml_limits)?;
+    check_status_with_limits(&xml, parser_type, opts.xml_limits)?;
 
     let (saml_content, assertion, sig_alg) = if opts.check_signature {
         match binding {
             Binding::Redirect | Binding::SimpleSign => {
                 let sig_alg = verify_detached(binding, parser_type, request, opts, &xml)?;
                 let assertion = if parser_type == ParserType::SamlResponse {
-                    assertion_shortcut(&xml)?
+                    assertion_shortcut(&xml, opts.xml_limits)?
                 } else {
                     None
                 };
@@ -578,7 +601,7 @@ fn flow_inner(
         }
     } else {
         let assertion = if parser_type == ParserType::SamlResponse {
-            assertion_shortcut(&xml)?
+            assertion_shortcut(&xml, opts.xml_limits)?
         } else {
             None
         };
@@ -586,7 +609,7 @@ fn flow_inner(
     };
 
     let fields = default_fields(parser_type, assertion.as_deref())?;
-    let extracted = extract(&saml_content, &fields)?;
+    let extracted = extract_with_limits(&saml_content, &fields, opts.xml_limits)?;
     validate_context(parser_type, &extracted, opts, expected_recipient)?;
 
     Ok(FlowResult {

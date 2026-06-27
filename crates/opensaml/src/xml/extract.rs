@@ -5,7 +5,7 @@
 //! (substring match on local-name), attribute selection (0/1/N), whole-node
 //! context capture, `index`+`attributePath` aggregation, and multi-path union.
 
-use super::dom::{self, Node};
+use super::dom::{self, Node, XmlLimits};
 use crate::error::OpenSamlError;
 use crate::util::{camel_case, uniq, zip_object, Value};
 
@@ -237,12 +237,21 @@ fn extract_field(src: &str, root: &Node, field: &ExtractorField) -> Value {
 
 /// Extract `fields` from `xml`, returning a [`Value::Object`] keyed by field key.
 pub fn extract(xml: &str, fields: &[ExtractorField]) -> Result<Value, OpenSamlError> {
-    let root_doc = dom::parse(xml)?;
+    extract_with_limits(xml, fields, XmlLimits::default())
+}
+
+/// Extract `fields` from `xml` with explicit parser resource limits.
+pub fn extract_with_limits(
+    xml: &str,
+    fields: &[ExtractorField],
+    limits: XmlLimits,
+) -> Result<Value, OpenSamlError> {
+    let root_doc = dom::parse_with_limits(xml, limits)?;
     let mut out: Vec<(String, Value)> = Vec::new();
     for field in fields {
         let value = match &field.shortcut {
             Some(sc) => {
-                let doc = dom::parse(sc)?;
+                let doc = dom::parse_with_limits(sc, limits)?;
                 extract_field(sc, &doc.root, field)
             }
             None => extract_field(xml, &root_doc.root, field),
