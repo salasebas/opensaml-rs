@@ -5,10 +5,13 @@ use opensaml::constants::{Binding, ParserType};
 use opensaml::entity::EntitySetting;
 use opensaml::flow::{flow, FlowOptions, HttpRequest};
 use opensaml::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
+use opensaml::xml::XmlLimits;
 use opensaml::{IdentityProvider, OpenSamlError, ServiceProvider};
 use url::Url;
 
 const LIMIT_ERROR: &str = "ERR_DEFLATE_OUTPUT_LIMIT_EXCEEDED";
+const BASE64_LIMIT_ERROR: &str = "ERR_BASE64_OUTPUT_LIMIT_EXCEEDED";
+const XML_LIMIT_ERROR: &str = "ERR_XML_LIMIT_EXCEEDED";
 
 fn oversized_deflate_payload() -> Result<Vec<u8>, OpenSamlError> {
     let oversized = vec![b'A'; MAX_DEFLATE_RAW_DECODE_BYTES + 1];
@@ -125,6 +128,83 @@ fn redirect_flow_rejects_oversized_inflated_message() -> Result<(), Box<dyn std:
     assert!(matches!(
         err,
         OpenSamlError::Invalid(message) if message == LIMIT_ERROR
+    ));
+    Ok(())
+}
+
+#[test]
+fn post_flow_rejects_decoded_xml_byte_limit() -> Result<(), Box<dyn std::error::Error>> {
+    let request = HttpRequest::post(vec![(
+        "SAMLRequest".to_string(),
+        base64_encode(b"<AuthnRequest/>"),
+    )]);
+    let mut opts = FlowOptions::default();
+    opts.binding = Some(Binding::Post);
+    opts.parser_type = Some(ParserType::SamlRequest);
+    opts.xml_limits = XmlLimits {
+        max_bytes: 8,
+        ..Default::default()
+    };
+
+    let err = flow(&opts, &request)
+        .err()
+        .ok_or("POST flow unexpectedly succeeded")?;
+
+    assert!(matches!(
+        err,
+        OpenSamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
+    ));
+    Ok(())
+}
+
+#[test]
+fn simplesign_flow_rejects_decoded_xml_byte_limit() -> Result<(), Box<dyn std::error::Error>> {
+    let request = HttpRequest::post(vec![(
+        "SAMLRequest".to_string(),
+        base64_encode(b"<AuthnRequest/>"),
+    )]);
+    let mut opts = FlowOptions::default();
+    opts.binding = Some(Binding::SimpleSign);
+    opts.parser_type = Some(ParserType::SamlRequest);
+    opts.xml_limits = XmlLimits {
+        max_bytes: 8,
+        ..Default::default()
+    };
+
+    let err = flow(&opts, &request)
+        .err()
+        .ok_or("SimpleSign flow unexpectedly succeeded")?;
+
+    assert!(matches!(
+        err,
+        OpenSamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
+    ));
+    Ok(())
+}
+
+#[test]
+fn post_flow_rejects_dom_node_budget_before_authentication(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = format!("<AuthnRequest>{}</AuthnRequest>", "<Extra/>".repeat(4));
+    let request = HttpRequest::post(vec![(
+        "SAMLRequest".to_string(),
+        base64_encode(xml.as_bytes()),
+    )]);
+    let mut opts = FlowOptions::default();
+    opts.binding = Some(Binding::Post);
+    opts.parser_type = Some(ParserType::SamlRequest);
+    opts.xml_limits = XmlLimits {
+        max_nodes: 3,
+        ..Default::default()
+    };
+
+    let err = flow(&opts, &request)
+        .err()
+        .ok_or("POST flow unexpectedly succeeded")?;
+
+    assert!(matches!(
+        err,
+        OpenSamlError::Invalid(message) if message.contains(XML_LIMIT_ERROR)
     ));
     Ok(())
 }

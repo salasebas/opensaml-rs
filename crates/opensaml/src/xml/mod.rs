@@ -4,4 +4,5 @@ pub mod dom;
 pub mod extract;
 pub mod fields;
 
-pub use extract::{extract, ExtractorField, LocalPath};
+pub use dom::XmlLimits;
+pub use extract::{extract, extract_with_limits, ExtractorField, LocalPath};

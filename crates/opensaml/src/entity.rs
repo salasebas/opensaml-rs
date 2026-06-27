@@ -6,6 +6,7 @@ use crate::constants::{
     data_encryption_algorithm, key_encryption_algorithm, signature_algorithm, transform_algorithm,
     MessageSignatureOrder,
 };
+use crate::xml::XmlLimits;
 
 /// Runtime configuration for an entity (keys, algorithms, flags).
 ///
@@ -72,6 +73,8 @@ pub struct EntitySetting {
     /// SAML does not define this limit; the default is a conservative
     /// resource-exhaustion guard for unauthenticated Redirect messages.
     pub redirect_inflate_max_bytes: usize,
+    /// XML parser resource limits for inbound messages and metadata parsing.
+    pub xml_limits: XmlLimits,
     /// IdP: tag prefix for the `<EncryptedAssertion>` element (default `saml`).
     pub tag_prefix_encrypted_assertion: String,
     /// IdP: login `<Response>` template + attribute configuration.
@@ -158,6 +161,7 @@ impl Default for EntitySetting {
             enc_private_key_pass: None,
             clock_drifts: (0, 0),
             redirect_inflate_max_bytes: MAX_DEFLATE_RAW_DECODE_BYTES,
+            xml_limits: XmlLimits::default(),
             tag_prefix_encrypted_assertion: "saml".to_string(),
             login_response_template: None,
             login_request_template: None,
