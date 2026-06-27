@@ -9,9 +9,27 @@ use bergshamra::keys::Key;
 use bergshamra::{decrypt, encrypt, EncContext, KeysManager};
 
 const ENC: &str = "http://www.w3.org/2001/04/xmlenc#";
+const SOFTWARE_RSA_DECRYPTION_DISABLED: &str = "XML-Enc RSA key-transport decryption with software private keys is disabled by default because the bundled RustCrypto rsa backend is affected by RUSTSEC-2023-0071. Enable allow_insecure_software_rsa_key_transport_decryption only as an explicit compatibility exception.";
+
+/// Options for XML-Enc assertion decryption.
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
+pub struct AssertionDecryptionOptions {
+    /// Allow the bundled software RSA backend for XML-Enc key transport.
+    ///
+    /// This preserves compatibility with samlify-style PEM private-key
+    /// decryption, but it reaches `RUSTSEC-2023-0071`-affected code when an
+    /// attacker can observe timing. Keep this `false` unless the caller has a
+    /// deployment-specific reason to accept that risk.
+    pub allow_insecure_software_rsa_key_transport_decryption: bool,
+}
 
 fn crypto_err(err: impl std::fmt::Display) -> OpenSamlError {
     OpenSamlError::Crypto(err.to_string())
+}
+
+pub(crate) fn software_rsa_decryption_disabled() -> OpenSamlError {
+    OpenSamlError::Unsupported(SOFTWARE_RSA_DECRYPTION_DISABLED.into())
 }
 
 fn child<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
@@ -63,7 +81,15 @@ pub fn encrypt_assertion(
 /// the plaintext `<Assertion>` (samlify `decryptAssertion`).
 ///
 /// Returns `(response_with_decrypted_assertion, decrypted_assertion)`.
-pub fn decrypt_assertion(xml: &str, enc_key: &Key) -> Result<(String, String), OpenSamlError> {
+pub fn decrypt_assertion(
+    xml: &str,
+    enc_key: &Key,
+    options: AssertionDecryptionOptions,
+) -> Result<(String, String), OpenSamlError> {
+    if !options.allow_insecure_software_rsa_key_transport_decryption {
+        return Err(software_rsa_decryption_disabled());
+    }
+
     let doc = dom::parse(xml)?;
     let encrypted = child(&doc.root, "EncryptedAssertion")
         .ok_or_else(|| OpenSamlError::Crypto("ERR_UNDEFINED_ENCRYPTED_ASSERTION".into()))?;
@@ -122,11 +148,29 @@ mod tests {
         assert!(!encrypted.contains("<saml:Assertion"));
 
         let key = load_private_key(SP_PRIVKEY, None)?;
-        let (response, assertion) = decrypt_assertion(&encrypted, &key)?;
+        let (response, assertion) = decrypt_assertion(
+            &encrypted,
+            &key,
+            AssertionDecryptionOptions {
+                allow_insecure_software_rsa_key_transport_decryption: true,
+            },
+        )?;
         assert!(assertion.contains("Assertion"));
         assert!(assertion.contains("_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7"));
         assert!(response.contains("Assertion"));
         assert!(!response.contains("EncryptedAssertion"));
+        Ok(())
+    }
+
+    #[test]
+    fn decrypt_rejects_software_rsa_by_default() -> Result<(), Box<dyn std::error::Error>> {
+        let encrypted = encrypt_assertion(RESPONSE, SP_CERT, AES_256, RSA_OAEP_MGF1P, "saml")?;
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        assert!(matches!(
+            decrypt_assertion(&encrypted, &key, AssertionDecryptionOptions::default()),
+            Err(OpenSamlError::Unsupported(message))
+                if message.contains("RUSTSEC-2023-0071")
+        ));
         Ok(())
     }
 }

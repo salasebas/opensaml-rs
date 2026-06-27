@@ -27,6 +27,14 @@ pub struct EntitySetting {
     pub allow_create: bool,
     /// Whether assertions are encrypted.
     pub is_assertion_encrypted: bool,
+    /// Allow XML-Enc RSA key-transport decryption with the bundled software RSA backend.
+    ///
+    /// This is disabled by default because `bergshamra` currently reaches the
+    /// RustCrypto `rsa` crate, which is affected by `RUSTSEC-2023-0071` when an
+    /// attacker can observe timing. Prefer an external/HSM decryptor once one is
+    /// exposed through the public API; enable this only as an explicit
+    /// compatibility exception for deployments that accept that risk.
+    pub allow_insecure_software_rsa_key_transport_decryption: bool,
     /// Default RelayState.
     pub relay_state: String,
     /// SP: signs its AuthnRequests.
@@ -132,6 +140,7 @@ impl Default for EntitySetting {
             message_signing_order: MessageSignatureOrder::SignThenEncrypt,
             allow_create: false,
             is_assertion_encrypted: false,
+            allow_insecure_software_rsa_key_transport_decryption: false,
             relay_state: String::new(),
             authn_requests_signed: false,
             want_assertions_signed: false,
