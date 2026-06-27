@@ -20,6 +20,12 @@ pub struct ServiceProvider {
     pub metadata: SpMetadata,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum LoginResponseCorrelation<'a> {
+    Unsolicited,
+    RequestId(&'a str),
+}
+
 impl ServiceProvider {
     /// Build from SP metadata XML, merging the metadata-declared flags into `setting`.
     pub fn from_metadata(xml: &str, mut setting: EntitySetting) -> Result<Self, OpenSamlError> {
@@ -229,7 +235,12 @@ impl ServiceProvider {
         ))
     }
 
-    /// Parse and validate an IdP login `<Response>` (signature required, samlify parity).
+    /// Parse and validate an unsolicited IdP login `<Response>` (signature required).
+    ///
+    /// This mode is for IdP-initiated SSO. It rejects a non-empty
+    /// `InResponseTo`; for SP-initiated SSO use
+    /// [`Self::parse_login_response_with_request_id`] to bind the response to
+    /// the AuthnRequest ID you issued.
     ///
     /// When `setting.validate_audience` is set, the assertion's `<Audience>`
     /// must include this SP's entity ID.
@@ -239,7 +250,23 @@ impl ServiceProvider {
         binding: Binding,
         request: &HttpRequest,
     ) -> Result<FlowResult, OpenSamlError> {
-        self.parse_login_response_inner(idp, binding, request, None)
+        self.parse_unsolicited_login_response(idp, binding, request)
+    }
+
+    /// Parse and validate an IdP-initiated login `<Response>` that is not bound
+    /// to an outbound AuthnRequest.
+    pub fn parse_unsolicited_login_response(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        request: &HttpRequest,
+    ) -> Result<FlowResult, OpenSamlError> {
+        self.parse_login_response_inner(
+            idp,
+            binding,
+            request,
+            LoginResponseCorrelation::Unsolicited,
+        )
     }
 
     /// Like [`Self::parse_login_response`] but also requires `InResponseTo` to
@@ -251,7 +278,15 @@ impl ServiceProvider {
         request: &HttpRequest,
         request_id: &str,
     ) -> Result<FlowResult, OpenSamlError> {
-        self.parse_login_response_inner(idp, binding, request, Some(request_id))
+        if request_id.is_empty() {
+            return Err(OpenSamlError::InvalidInResponseTo);
+        }
+        self.parse_login_response_inner(
+            idp,
+            binding,
+            request,
+            LoginResponseCorrelation::RequestId(request_id),
+        )
     }
 
     fn parse_login_response_inner(
@@ -259,7 +294,7 @@ impl ServiceProvider {
         idp: &IdentityProvider,
         binding: Binding,
         request: &HttpRequest,
-        in_response_to: Option<&str>,
+        correlation: LoginResponseCorrelation<'_>,
     ) -> Result<FlowResult, OpenSamlError> {
         let signing_certs = idp.metadata.x509_certificates(CertUse::Signing);
         let decrypt_key = if self.setting.is_assertion_encrypted {
@@ -268,7 +303,11 @@ impl ServiceProvider {
             None
         };
         let audience = self.entity_id();
-        flow(
+        let expected_in_response_to = match correlation {
+            LoginResponseCorrelation::RequestId(request_id) => Some(request_id),
+            LoginResponseCorrelation::Unsolicited => None,
+        };
+        let result = flow(
             &FlowOptions {
                 binding: Some(binding),
                 parser_type: Some(ParserType::SamlResponse),
@@ -279,10 +318,19 @@ impl ServiceProvider {
                 decrypt_key_pass: self.setting.enc_private_key_pass.as_deref(),
                 clock_drifts: self.setting.clock_drifts,
                 expected_audience: self.setting.validate_audience.then_some(audience.as_str()),
-                expected_in_response_to: in_response_to,
+                expected_in_response_to,
             },
             request,
-        )
+        )?;
+        if matches!(correlation, LoginResponseCorrelation::Unsolicited)
+            && result
+                .extract
+                .get_str("response.inResponseTo")
+                .is_some_and(|actual| !actual.is_empty())
+        {
+            return Err(OpenSamlError::InvalidInResponseTo);
+        }
+        Ok(result)
     }
 }
 
@@ -419,7 +467,12 @@ mod crypto_tests {
             "SAMLResponse".into(),
             base64_encode(RESPONSE_SIGNED.as_bytes()),
         )]);
-        let result = sp.parse_login_response(&idp, Binding::Post, &request)?;
+        let result = sp.parse_login_response_with_request_id(
+            &idp,
+            Binding::Post,
+            &request,
+            "_41e758fee373d51639552c4b040b1090e97f6685",
+        )?;
         assert_eq!(
             result.extract.get_str("nameID"),
             Some("_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7")

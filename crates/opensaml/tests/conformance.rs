@@ -119,7 +119,8 @@ mod signed {
             },
         )?;
         let request = HttpRequest::post(vec![("SAMLResponse".into(), response.context)]);
-        let parsed = sp.parse_login_response(&idp, Binding::Post, &request)?;
+        let parsed =
+            sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_r1")?;
         assert_eq!(parsed.extract.get_str("nameID"), Some("alice@example.com"));
         Ok(())
     }

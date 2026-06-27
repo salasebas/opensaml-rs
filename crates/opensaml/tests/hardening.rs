@@ -68,7 +68,7 @@ fn response_for(sp: &ServiceProvider) -> String {
 fn audience_match_accepts() -> Result<(), Box<dyn std::error::Error>> {
     let sp = sp_with("https://sp.example.com/metadata", signing());
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp))]);
-    let parsed = sp.parse_login_response(&idp(), Binding::Post, &req)?;
+    let parsed = sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("a@example.com"));
     Ok(())
 }
@@ -80,7 +80,7 @@ fn audience_mismatch_rejected() {
     let sp2 = sp_with("https://sp2.example.com/metadata", signing());
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp1))]);
     assert!(matches!(
-        sp2.parse_login_response(&idp(), Binding::Post, &req),
+        sp2.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
         Err(OpenSamlError::UnmatchAudience)
     ));
 }
@@ -93,7 +93,7 @@ fn audience_validation_opt_out() -> Result<(), Box<dyn std::error::Error>> {
     let sp2 = sp_with("https://sp2.example.com/metadata", setting);
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp1))]);
     // With audience validation disabled, sp2 accepts it (signature still checked).
-    sp2.parse_login_response(&idp(), Binding::Post, &req)?;
+    sp2.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1")?;
     Ok(())
 }
 
@@ -113,6 +113,37 @@ fn in_response_to_mismatch_rejected() {
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_wrong"),
         Err(OpenSamlError::InvalidInResponseTo)
     ));
+}
+
+#[test]
+fn default_login_response_rejects_non_empty_in_response_to() {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp))]);
+    assert!(matches!(
+        sp.parse_login_response(&idp(), Binding::Post, &req),
+        Err(OpenSamlError::InvalidInResponseTo)
+    ));
+}
+
+#[test]
+fn unsolicited_response_accepts_empty_in_response_to() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let ctx = idp().create_login_response(
+        &sp,
+        Binding::Post,
+        &User::new("unsolicited@example.com"),
+        &LoginResponseOptions {
+            in_response_to: None,
+            ..Default::default()
+        },
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+    let parsed = sp.parse_unsolicited_login_response(&idp(), Binding::Post, &req)?;
+    assert_eq!(
+        parsed.extract.get_str("nameID"),
+        Some("unsolicited@example.com")
+    );
+    Ok(())
 }
 
 #[test]
@@ -156,7 +187,7 @@ fn sign_then_encrypt_message_auto_resolves() -> Result<(), Box<dyn std::error::E
         },
     )?;
     let req = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
-    let parsed = sp.parse_login_response(&idp, Binding::Post, &req)?;
+    let parsed = sp.parse_login_response_with_request_id(&idp, Binding::Post, &req, "_req1")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("a@example.com"));
     Ok(())
 }

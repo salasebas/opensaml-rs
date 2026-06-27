@@ -445,7 +445,8 @@ mod crypto_tests {
             },
         )?;
         let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
-        let result = sp.parse_login_response(&idp, Binding::Post, &request)?;
+        let result =
+            sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_req123")?;
         assert_eq!(result.extract.get_str("nameID"), Some("user@example.com"));
         assert_eq!(
             result.extract.get_str("issuer"),
@@ -495,7 +496,8 @@ mod crypto_tests {
             },
         )?;
         let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
-        let parsed = sp.parse_login_response(&idp, Binding::Post, &request)?;
+        let parsed =
+            sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_r1")?;
         assert_eq!(
             parsed.extract.get_str("attributes.mail"),
             Some("alice@example.com")

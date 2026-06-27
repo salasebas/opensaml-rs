@@ -11,7 +11,7 @@ use opensaml::binding::base64_decode;
 use opensaml::constants::signature_algorithm::RSA_SHA256;
 use opensaml::constants::Binding;
 use opensaml::entity::{iso8601_offset, BindingContext, EntitySetting, User};
-use opensaml::flow::HttpRequest;
+use opensaml::flow::{FlowResult, HttpRequest};
 use opensaml::idp::LoginResponseOptions;
 use opensaml::logout::{
     create_logout_request, create_logout_response, parse_logout_request, parse_logout_response,
@@ -100,6 +100,17 @@ fn response_request(binding: Binding, ctx: &BindingContext) -> Result<HttpReques
         Binding::SimpleSign => simplesign_request("SAMLResponse", ctx)?,
         Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
     })
+}
+
+fn parse_response_with_request_id(
+    sp: &ServiceProvider,
+    idp: &IdentityProvider,
+    binding: Binding,
+    ctx: &BindingContext,
+    request_id: &str,
+) -> Result<FlowResult, OpenSamlError> {
+    let request = response_request(binding, ctx)?;
+    sp.parse_login_response_with_request_id(idp, binding, &request, request_id)
 }
 
 fn redirect_request(url: &str) -> Result<HttpRequest, OpenSamlError> {
@@ -455,7 +466,7 @@ fn send_signed_assertion(binding: Binding) -> Result<(), Box<dyn std::error::Err
     let idp = idp(false);
     let sp = sp(true, false);
     let ctx = idp.create_login_response(&sp, binding, &User::new("a@example.com"), &opts("_r"))?;
-    let parsed = sp.parse_login_response(&idp, binding, &response_request(binding, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, binding, &ctx, "_r")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("a@example.com"));
     Ok(())
 }
@@ -486,7 +497,7 @@ fn send_signed_assertion_custom_transforms(
     ];
     let sp = ServiceProvider::from_config(&sp_config(false, true, false), sp_setting)?;
     let ctx = idp.create_login_response(&sp, binding, &User::new("a@example.com"), &opts("_r"))?;
-    let parsed = sp.parse_login_response(&idp, binding, &response_request(binding, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, binding, &ctx, "_r")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("a@example.com"));
     Ok(())
 }
@@ -521,7 +532,7 @@ fn send_custom_signed_assertion(binding: Binding) -> Result<(), Box<dyn std::err
             ..Default::default()
         },
     )?;
-    let parsed = sp.parse_login_response(&idp, binding, &response_request(binding, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, binding, &ctx, "_req")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("custom@example.com"));
     assert_eq!(
         parsed.extract.get_str("attributes.mail"),
@@ -549,7 +560,7 @@ fn send_signed_message(binding: Binding) -> Result<(), Box<dyn std::error::Error
     let idp = idp(false);
     let sp = sp(false, false); // not assertion-signed → message is signed (POST)
     let ctx = idp.create_login_response(&sp, binding, &User::new("a@example.com"), &opts("_r"))?;
-    let parsed = sp.parse_login_response(&idp, binding, &response_request(binding, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, binding, &ctx, "_r")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("a@example.com"));
     Ok(())
 }
@@ -589,7 +600,7 @@ fn send_custom_signed_message(binding: Binding) -> Result<(), Box<dyn std::error
             ..Default::default()
         },
     )?;
-    let parsed = sp.parse_login_response(&idp, binding, &response_request(binding, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, binding, &ctx, "_req")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("cm@example.com"));
     Ok(())
 }
@@ -615,7 +626,7 @@ fn send_assertion_and_message(binding: Binding) -> Result<(), Box<dyn std::error
     sp_setting.want_message_signed = true;
     let sp = ServiceProvider::from_config(&sp_config(false, true, false), sp_setting)?;
     let ctx = idp.create_login_response(&sp, binding, &User::new("a@example.com"), &opts("_r"))?;
-    let parsed = sp.parse_login_response(&idp, binding, &response_request(binding, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, binding, &ctx, "_r")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("a@example.com"));
     Ok(())
 }
@@ -657,7 +668,7 @@ fn send_custom_assertion_and_message(binding: Binding) -> Result<(), Box<dyn std
             ..Default::default()
         },
     )?;
-    let parsed = sp.parse_login_response(&idp, binding, &response_request(binding, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, binding, &ctx, "_req")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("cam@example.com"));
     Ok(())
 }
@@ -693,8 +704,7 @@ fn encrypted_nonsigned_assertion() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         },
     )?;
-    let parsed =
-        sp.parse_login_response(&idp, Binding::Post, &response_request(Binding::Post, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, Binding::Post, &ctx, "_r")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("e@example.com"));
     Ok(())
 }
@@ -730,8 +740,8 @@ fn encrypted_signed(custom: bool, with_message: bool) -> Result<(), Box<dyn std:
     };
     let ctx =
         idp.create_login_response(&sp, Binding::Post, &User::new("es@example.com"), &options)?;
-    let parsed =
-        sp.parse_login_response(&idp, Binding::Post, &response_request(Binding::Post, &ctx)?)?;
+    let request_id = if custom { "_req" } else { "_r" };
+    let parsed = parse_response_with_request_id(&sp, &idp, Binding::Post, &ctx, request_id)?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("es@example.com"));
     Ok(())
 }
@@ -769,8 +779,7 @@ fn encrypted_nonsigned_assertion_encrypt_then_sign() -> Result<(), Box<dyn std::
             ..Default::default()
         },
     )?;
-    let parsed =
-        sp.parse_login_response(&idp, Binding::Post, &response_request(Binding::Post, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, Binding::Post, &ctx, "_r")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("ets@example.com"));
     Ok(())
 }
@@ -944,8 +953,7 @@ fn use_signed_contents_in_wrapped_response_case_2() -> Result<(), Box<dyn std::e
         &User::new("safe@example.com"),
         &opts("_r"),
     )?;
-    let parsed =
-        sp.parse_login_response(&idp, Binding::Post, &response_request(Binding::Post, &ctx)?)?;
+    let parsed = parse_response_with_request_id(&sp, &idp, Binding::Post, &ctx, "_r")?;
     assert_eq!(parsed.extract.get_str("nameID"), Some("safe@example.com"));
     Ok(())
 }
