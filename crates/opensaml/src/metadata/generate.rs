@@ -65,6 +65,8 @@ pub struct IdpMetadataConfig {
     pub single_sign_on_service: Vec<Endpoint>,
     /// `SingleLogoutService` endpoints.
     pub single_logout_service: Vec<Endpoint>,
+    /// Element ordering profile (defaults to [`elements_order::idp::DEFAULT`]).
+    pub elements_order: Option<Vec<String>>,
 }
 
 fn key_descriptor(use_: &str, cert: &str) -> String {
@@ -165,23 +167,46 @@ pub fn generate_sp_metadata(cfg: &SpMetadataConfig) -> String {
 
 /// Generate IdP metadata XML.
 pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
+    let order = cfg.elements_order.clone().unwrap_or_else(|| {
+        elements_order::idp::DEFAULT
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    });
+
     let sso: String = cfg
         .single_sign_on_service
         .iter()
         .map(|e| format!("<SingleSignOnService{}/>", endpoint_attrs(e, None)))
         .collect();
 
-    let body = format!(
-        "{keys}{formats}{sso}{slo}",
-        keys = key_descriptors(&cfg.signing_certs, &cfg.encrypt_certs),
-        formats = if is_non_empty_array(&cfg.name_id_format) {
-            name_id_formats(&cfg.name_id_format)
-        } else {
-            String::new()
-        },
-        sso = sso,
-        slo = single_logout(&cfg.single_logout_service),
-    );
+    let keys = key_descriptors(&cfg.signing_certs, &cfg.encrypt_certs);
+    let formats = if is_non_empty_array(&cfg.name_id_format) {
+        name_id_formats(&cfg.name_id_format)
+    } else {
+        String::new()
+    };
+    let slo = single_logout(&cfg.single_logout_service);
+
+    let descriptors = [
+        ("KeyDescriptor", keys),
+        ("NameIDFormat", formats),
+        ("SingleSignOnService", sso),
+        ("SingleLogoutService", slo),
+    ];
+    let mut body = String::new();
+    for name in &order {
+        if let Some((_, fragment)) = descriptors.iter().find(|(descriptor_name, fragment)| {
+            descriptor_name == &name.as_str() && !fragment.is_empty()
+        }) {
+            body.push_str(fragment);
+        }
+    }
+    for (name, fragment) in &descriptors {
+        if !fragment.is_empty() && !order.iter().any(|ordered| ordered == name) {
+            body.push_str(fragment);
+        }
+    }
 
     format!(
         "<EntityDescriptor entityID=\"{entity}\" xmlns=\"{md}\" xmlns:assertion=\"{assertion}\" xmlns:ds=\"{dsig}\"><IDPSSODescriptor WantAuthnRequestsSigned=\"{wars}\" protocolSupportEnumeration=\"{protocol}\">{body}</IDPSSODescriptor></EntityDescriptor>",
@@ -295,5 +320,127 @@ mod tests {
             Some("MIIBidp")
         );
         Ok(())
+    }
+
+    #[test]
+    fn idp_default_elements_order_matches_historical_output() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            signing_certs: vec!["MIIBsigning".into()],
+            name_id_format: vec![name_id_format::EMAIL_ADDRESS.to_string()],
+            single_sign_on_service: vec![Endpoint::new(Binding::Redirect, "https://idp/sso")],
+            single_logout_service: vec![Endpoint::new(Binding::Redirect, "https://idp/slo")],
+            ..Default::default()
+        };
+
+        let xml = generate_idp_metadata(&cfg);
+        let key = xml.find("<KeyDescriptor").unwrap_or(usize::MAX);
+        let name_id = xml.find("<NameIDFormat").unwrap_or(usize::MAX);
+        let sso = xml.find("<SingleSignOnService").unwrap_or(usize::MAX);
+        let slo = xml.find("<SingleLogoutService").unwrap_or(usize::MAX);
+
+        assert!(key < name_id);
+        assert!(name_id < sso);
+        assert!(sso < slo);
+    }
+
+    #[test]
+    fn idp_custom_elements_order_can_place_sso_before_key_descriptor() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            signing_certs: vec!["MIIBsigning".into()],
+            name_id_format: vec![name_id_format::EMAIL_ADDRESS.to_string()],
+            single_sign_on_service: vec![Endpoint::new(Binding::Redirect, "https://idp/sso")],
+            single_logout_service: vec![Endpoint::new(Binding::Redirect, "https://idp/slo")],
+            elements_order: Some(vec![
+                "SingleSignOnService".into(),
+                "KeyDescriptor".into(),
+                "NameIDFormat".into(),
+                "SingleLogoutService".into(),
+            ]),
+            ..Default::default()
+        };
+
+        let xml = generate_idp_metadata(&cfg);
+        let sso = xml.find("<SingleSignOnService").unwrap_or(usize::MAX);
+        let key = xml.find("<KeyDescriptor").unwrap_or(usize::MAX);
+        let name_id = xml.find("<NameIDFormat").unwrap_or(usize::MAX);
+        let slo = xml.find("<SingleLogoutService").unwrap_or(usize::MAX);
+
+        assert!(sso < key);
+        assert!(key < name_id);
+        assert!(name_id < slo);
+    }
+
+    #[test]
+    fn idp_elements_order_filters_empty_groups() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            single_sign_on_service: vec![Endpoint::new(Binding::Redirect, "https://idp/sso")],
+            single_logout_service: vec![Endpoint::new(Binding::Redirect, "https://idp/slo")],
+            elements_order: Some(vec![
+                "KeyDescriptor".into(),
+                "NameIDFormat".into(),
+                "SingleSignOnService".into(),
+                "SingleLogoutService".into(),
+            ]),
+            ..Default::default()
+        };
+
+        let xml = generate_idp_metadata(&cfg);
+
+        assert!(!xml.contains("<KeyDescriptor"));
+        assert!(!xml.contains("<NameIDFormat"));
+        assert!(xml.contains("<SingleSignOnService"));
+        assert!(xml.contains("<SingleLogoutService"));
+    }
+
+    #[test]
+    fn idp_custom_elements_order_preserves_omitted_populated_sso() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            signing_certs: vec!["MIIBsigning".into()],
+            single_sign_on_service: vec![Endpoint::new(Binding::Redirect, "https://idp/sso")],
+            elements_order: Some(vec!["KeyDescriptor".into()]),
+            ..Default::default()
+        };
+
+        let xml = generate_idp_metadata(&cfg);
+        let key = xml.find("<KeyDescriptor").unwrap_or(usize::MAX);
+        let sso = xml.find("<SingleSignOnService").unwrap_or(usize::MAX);
+
+        assert_eq!(xml.matches("<SingleSignOnService").count(), 1);
+        assert!(key < sso);
+    }
+
+    #[test]
+    fn idp_elements_order_profiles_match_upstream() {
+        assert_eq!(
+            elements_order::idp::DEFAULT,
+            [
+                "KeyDescriptor",
+                "NameIDFormat",
+                "SingleSignOnService",
+                "SingleLogoutService",
+            ]
+        );
+        assert_eq!(
+            elements_order::idp::ONELOGIN,
+            [
+                "KeyDescriptor",
+                "NameIDFormat",
+                "SingleLogoutService",
+                "SingleSignOnService",
+            ]
+        );
+        assert_eq!(
+            elements_order::idp::SHIBBOLETH,
+            [
+                "KeyDescriptor",
+                "SingleLogoutService",
+                "NameIDFormat",
+                "SingleSignOnService",
+            ]
+        );
     }
 }

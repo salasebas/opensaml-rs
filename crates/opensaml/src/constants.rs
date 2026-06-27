@@ -333,6 +333,31 @@ pub mod elements_order {
         "AssertionConsumerService",
         "AttributeConsumingService",
     ];
+
+    /// IdP metadata element ordering profiles.
+    pub mod idp {
+        /// Default IdP order.
+        pub const DEFAULT: &[&str] = &[
+            "KeyDescriptor",
+            "NameIDFormat",
+            "SingleSignOnService",
+            "SingleLogoutService",
+        ];
+        /// OneLogin IdP order.
+        pub const ONELOGIN: &[&str] = &[
+            "KeyDescriptor",
+            "NameIDFormat",
+            "SingleLogoutService",
+            "SingleSignOnService",
+        ];
+        /// Shibboleth IdP order.
+        pub const SHIBBOLETH: &[&str] = &[
+            "KeyDescriptor",
+            "SingleLogoutService",
+            "NameIDFormat",
+            "SingleSignOnService",
+        ];
+    }
 }
 
 #[cfg(test)]
