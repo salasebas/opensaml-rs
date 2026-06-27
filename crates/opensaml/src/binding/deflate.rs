@@ -8,6 +8,16 @@ use flate2::Compression;
 
 use crate::error::OpenSamlError;
 
+/// Default maximum inflated size accepted by [`deflate_raw_decode`].
+///
+/// SAML does not define this number. It is a conservative library default for
+/// HTTP-Redirect, where messages are decoded before XML or signature validation
+/// and normally remain well below this size. Use
+/// [`deflate_raw_decode_with_limit`] when a caller needs a different cap.
+pub const MAX_DEFLATE_RAW_DECODE_BYTES: usize = 1024 * 1024;
+
+const DEFLATE_OUTPUT_LIMIT_EXCEEDED: &str = "ERR_DEFLATE_OUTPUT_LIMIT_EXCEEDED";
+
 /// Raw-DEFLATE compress `input` (no zlib/gzip header), as required by the
 /// HTTP-Redirect binding.
 pub fn deflate_raw_encode(input: &[u8]) -> Result<Vec<u8>, OpenSamlError> {
@@ -18,8 +28,24 @@ pub fn deflate_raw_encode(input: &[u8]) -> Result<Vec<u8>, OpenSamlError> {
 
 /// Inflate raw-DEFLATE `input` produced by [`deflate_raw_encode`].
 pub fn deflate_raw_decode(input: &[u8]) -> Result<Vec<u8>, OpenSamlError> {
-    let mut decoder = DeflateDecoder::new(input);
-    let mut out = Vec::new();
-    decoder.read_to_end(&mut out)?;
+    deflate_raw_decode_with_limit(input, MAX_DEFLATE_RAW_DECODE_BYTES)
+}
+
+/// Inflate raw-DEFLATE `input`, failing if the inflated output exceeds
+/// `max_output_len` bytes.
+pub fn deflate_raw_decode_with_limit(
+    input: &[u8],
+    max_output_len: usize,
+) -> Result<Vec<u8>, OpenSamlError> {
+    let decoder = DeflateDecoder::new(input);
+    let mut out = Vec::with_capacity(input.len().min(max_output_len));
+    let read_limit = max_output_len.saturating_add(1);
+    let mut limited = decoder.take(read_limit as u64);
+    limited.read_to_end(&mut out)?;
+
+    if out.len() > max_output_len {
+        return Err(OpenSamlError::Invalid(DEFLATE_OUTPUT_LIMIT_EXCEEDED.into()));
+    }
+
     Ok(out)
 }

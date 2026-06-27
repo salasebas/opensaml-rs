@@ -1,6 +1,7 @@
 //! Entity base settings shared by [`crate::sp::ServiceProvider`] and
 //! [`crate::idp::IdentityProvider`] (samlify `entity.ts` `defaultEntitySetting`).
 
+use crate::binding::MAX_DEFLATE_RAW_DECODE_BYTES;
 use crate::constants::{
     data_encryption_algorithm, key_encryption_algorithm, signature_algorithm, transform_algorithm,
     MessageSignatureOrder,
@@ -9,6 +10,7 @@ use crate::constants::{
 /// Runtime configuration for an entity (keys, algorithms, flags).
 ///
 /// Use [`EntitySetting::default`] and tweak the fields you need.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct EntitySetting {
     /// Override entity ID (otherwise taken from metadata).
@@ -57,6 +59,11 @@ pub struct EntitySetting {
     pub enc_private_key_pass: Option<String>,
     /// Clock drift tolerance `(not_before_ms, not_on_or_after_ms)`.
     pub clock_drifts: (i64, i64),
+    /// Maximum inflated raw-DEFLATE bytes accepted for HTTP-Redirect input.
+    ///
+    /// SAML does not define this limit; the default is a conservative
+    /// resource-exhaustion guard for unauthenticated Redirect messages.
+    pub redirect_inflate_max_bytes: usize,
     /// IdP: tag prefix for the `<EncryptedAssertion>` element (default `saml`).
     pub tag_prefix_encrypted_assertion: String,
     /// IdP: login `<Response>` template + attribute configuration.
@@ -141,6 +148,7 @@ impl Default for EntitySetting {
             enc_private_key: None,
             enc_private_key_pass: None,
             clock_drifts: (0, 0),
+            redirect_inflate_max_bytes: MAX_DEFLATE_RAW_DECODE_BYTES,
             tag_prefix_encrypted_assertion: "saml".to_string(),
             login_response_template: None,
             login_request_template: None,

@@ -16,11 +16,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // A demo RSA keypair (test material; use real keys in production).
     let privkey = include_str!("../tests/fixtures/key/sp_privkey.pem");
     let cert = include_str!("../tests/fixtures/key/sp_signing_cert.cer");
-    let signing = || EntitySetting {
-        private_key: Some(privkey.into()),
-        signing_cert: Some(cert.into()),
-        request_signature_algorithm: RSA_SHA256.into(),
-        ..Default::default()
+    let signing = || {
+        let mut setting = EntitySetting::default();
+        setting.private_key = Some(privkey.into());
+        setting.signing_cert = Some(cert.into());
+        setting.request_signature_algorithm = RSA_SHA256.into();
+        setting
     };
 
     let idp = IdentityProvider::from_config(
