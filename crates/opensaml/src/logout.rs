@@ -365,16 +365,39 @@ mod tests {
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),
                 single_sign_on_service: vec![Endpoint::new(Binding::Post, "https://idp/sso")],
-                single_logout_service: vec![Endpoint::new(Binding::Redirect, "https://idp/slo")],
+                single_logout_service: vec![
+                    Endpoint::new(Binding::Redirect, "https://idp/slo"),
+                    Endpoint::new(Binding::Post, "https://idp/slo"),
+                ],
                 ..Default::default()
             },
             EntitySetting::default(),
         )
     }
 
+    fn unsigned_setting() -> EntitySetting {
+        EntitySetting {
+            want_logout_request_signed: false,
+            ..Default::default()
+        }
+    }
+
+    fn unsigned_sp(entity_id: &str) -> Result<ServiceProvider, OpenSamlError> {
+        ServiceProvider::from_config(
+            &SpMetadataConfig {
+                entity_id: entity_id.into(),
+                single_logout_service: vec![Endpoint::new(Binding::Post, "https://sp/slo")],
+                assertion_consumer_service: vec![Endpoint::new(Binding::Post, "https://sp/acs")],
+                ..Default::default()
+            },
+            unsigned_setting(),
+        )
+    }
+
     #[test]
     fn logout_request_redirect_round_trips() -> Result<(), Box<dyn std::error::Error>> {
-        let (sp, idp) = (sp()?, idp()?);
+        let (sp, mut idp) = (sp()?, idp()?);
+        idp.setting.want_logout_request_signed = false;
         let ctx = create_logout_request(
             &sp.setting,
             &sp.metadata,
@@ -402,6 +425,94 @@ mod tests {
             Some("https://sp.example.com/metadata")
         );
         Ok(())
+    }
+
+    #[test]
+    fn logout_requests_require_signatures_by_default() {
+        assert!(EntitySetting::default().want_logout_request_signed);
+    }
+
+    #[test]
+    fn unsigned_logout_request_rejects_unexpected_issuer_when_explicitly_allowed(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut idp = idp()?;
+        idp.setting.want_logout_request_signed = false;
+        let expected_sp = unsigned_sp("https://expected-sp.example.com/metadata")?;
+        let attacker_sp = unsigned_sp("https://attacker-sp.example.com/metadata")?;
+        let ctx = create_logout_request(
+            &attacker_sp.setting,
+            &attacker_sp.metadata,
+            &idp.metadata,
+            Binding::Post,
+            &User::new("victim@example.com"),
+            None,
+            false,
+        )?;
+        let request = HttpRequest::post(vec![("SAMLRequest".into(), ctx.context)]);
+
+        let result =
+            parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
+
+        assert!(matches!(result, Err(OpenSamlError::UnmatchIssuer)));
+        Ok(())
+    }
+
+    #[cfg(feature = "crypto-bergshamra")]
+    mod signed_tests {
+        use super::*;
+        use crate::constants::signature_algorithm::RSA_SHA256;
+
+        const PRIVKEY: &str = include_str!("../tests/fixtures/key/sp_privkey.pem");
+        const CERT: &str = include_str!("../tests/fixtures/key/sp_signing_cert.cer");
+
+        fn signing_setting() -> EntitySetting {
+            EntitySetting {
+                private_key: Some(PRIVKEY.into()),
+                signing_cert: Some(CERT.into()),
+                request_signature_algorithm: RSA_SHA256.into(),
+                ..Default::default()
+            }
+        }
+
+        fn signed_sp(entity_id: &str) -> Result<ServiceProvider, OpenSamlError> {
+            ServiceProvider::from_config(
+                &SpMetadataConfig {
+                    entity_id: entity_id.into(),
+                    signing_certs: vec![CERT.into()],
+                    single_logout_service: vec![Endpoint::new(Binding::Post, "https://sp/slo")],
+                    assertion_consumer_service: vec![Endpoint::new(
+                        Binding::Post,
+                        "https://sp/acs",
+                    )],
+                    ..Default::default()
+                },
+                signing_setting(),
+            )
+        }
+
+        #[test]
+        fn signed_logout_request_rejects_unexpected_issuer(
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            let idp = idp()?;
+            let expected_sp = signed_sp("https://expected-sp.example.com/metadata")?;
+            let attacker_sp = signed_sp("https://attacker-sp.example.com/metadata")?;
+            let ctx = create_logout_request(
+                &attacker_sp.setting,
+                &attacker_sp.metadata,
+                &idp.metadata,
+                Binding::Post,
+                &User::new("victim@example.com"),
+                None,
+                true,
+            )?;
+            let request = HttpRequest::post(vec![("SAMLRequest".into(), ctx.context)]);
+
+            let result =
+                parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
+
+            assert!(matches!(result, Err(OpenSamlError::UnmatchIssuer)));
+            Ok(())
+        }
     }
 
     #[test]

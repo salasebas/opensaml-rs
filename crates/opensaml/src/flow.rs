@@ -460,7 +460,10 @@ fn validate_context(
 ) -> Result<(), OpenSamlError> {
     let should_validate_issuer = matches!(
         parser_type,
-        ParserType::SamlRequest | ParserType::SamlResponse | ParserType::LogoutResponse
+        ParserType::SamlRequest
+            | ParserType::SamlResponse
+            | ParserType::LogoutRequest
+            | ParserType::LogoutResponse
     );
     if should_validate_issuer {
         if let Some(expected) = opts.from_issuer {
