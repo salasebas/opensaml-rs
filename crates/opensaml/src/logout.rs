@@ -311,12 +311,12 @@ pub fn parse_logout_request(
     )
 }
 
-/// Parse a `<LogoutResponse>` from `from` (samlify `parseLogoutResponse`).
-pub fn parse_logout_response(
+fn parse_logout_response_inner(
     self_setting: &EntitySetting,
     from_meta: &Metadata,
     binding: Binding,
     request: &HttpRequest,
+    expected_in_response_to: Option<&str>,
 ) -> Result<FlowResult, OpenSamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
     flow(
@@ -331,10 +331,42 @@ pub fn parse_logout_response(
             clock_drifts: self_setting.clock_drifts,
             redirect_inflate_max_bytes: self_setting.redirect_inflate_max_bytes,
             expected_audience: None,
-            expected_in_response_to: None,
+            expected_in_response_to,
         },
         request,
     )
+}
+
+/// Parse a `<LogoutResponse>` from `from` and require it to answer `request_id`.
+///
+/// Single Logout responses are state-machine messages. The caller must pass the
+/// ID of the `LogoutRequest` it issued so stale or unrelated responses cannot be
+/// accepted as completion for the current logout transaction.
+pub fn parse_logout_response(
+    self_setting: &EntitySetting,
+    from_meta: &Metadata,
+    binding: Binding,
+    request: &HttpRequest,
+    request_id: &str,
+) -> Result<FlowResult, OpenSamlError> {
+    if request_id.is_empty() {
+        return Err(OpenSamlError::InvalidInResponseTo);
+    }
+    parse_logout_response_inner(self_setting, from_meta, binding, request, Some(request_id))
+}
+
+/// Parse a `<LogoutResponse>` without binding it to a `LogoutRequest` ID.
+///
+/// Prefer [`parse_logout_response`] for normal SLO handling. This exists for
+/// legacy interop and custom state machines that perform request correlation
+/// outside this crate.
+pub fn parse_logout_response_without_request_id(
+    self_setting: &EntitySetting,
+    from_meta: &Metadata,
+    binding: Binding,
+    request: &HttpRequest,
+) -> Result<FlowResult, OpenSamlError> {
+    parse_logout_response_inner(self_setting, from_meta, binding, request, None)
 }
 
 #[cfg(test)]
@@ -406,7 +438,8 @@ mod tests {
 
     #[test]
     fn logout_response_post_round_trips() -> Result<(), Box<dyn std::error::Error>> {
-        let (sp, idp) = (sp()?, idp()?);
+        let (mut sp, idp) = (sp()?, idp()?);
+        sp.setting.want_logout_response_signed = false;
         // IdP responds to SP's logout; target is the SP (SLO via redirect endpoint)
         let ctx = create_logout_response(
             &idp.setting,
@@ -421,11 +454,84 @@ mod tests {
         assert!(xml.contains("<samlp:LogoutResponse"));
 
         let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
-        let result = parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request)?;
+        let result =
+            parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, "_req1")?;
         assert_eq!(
             result.extract.get_str("issuer"),
             Some("https://idp.example.com/metadata")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn logout_response_rejects_empty_request_id() -> Result<(), Box<dyn std::error::Error>> {
+        let (mut sp, idp) = (sp()?, idp()?);
+        sp.setting.want_logout_response_signed = false;
+        let ctx = create_logout_response(
+            &idp.setting,
+            &idp.metadata,
+            &sp.metadata,
+            Binding::Post,
+            Some("_req1"),
+            None,
+            false,
+        )?;
+        let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+
+        assert!(matches!(
+            parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, ""),
+            Err(OpenSamlError::InvalidInResponseTo)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn logout_response_rejects_wrong_request_id() -> Result<(), Box<dyn std::error::Error>> {
+        let (mut sp, idp) = (sp()?, idp()?);
+        sp.setting.want_logout_response_signed = false;
+        let ctx = create_logout_response(
+            &idp.setting,
+            &idp.metadata,
+            &sp.metadata,
+            Binding::Post,
+            Some("_req1"),
+            None,
+            false,
+        )?;
+        let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+
+        assert!(matches!(
+            parse_logout_response(
+                &sp.setting,
+                &idp.metadata,
+                Binding::Post,
+                &request,
+                "_other"
+            ),
+            Err(OpenSamlError::InvalidInResponseTo)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn default_logout_response_parsing_requires_signature() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let (sp, idp) = (sp()?, idp()?);
+        let ctx = create_logout_response(
+            &idp.setting,
+            &idp.metadata,
+            &sp.metadata,
+            Binding::Post,
+            Some("_req1"),
+            None,
+            false,
+        )?;
+        let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+
+        assert!(matches!(
+            parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, "_req1"),
+            Err(OpenSamlError::FailedToVerifySignature)
+        ));
         Ok(())
     }
 }
