@@ -80,8 +80,6 @@ pub struct FlowOptions<'a> {
     pub expected_audience: Option<&'a str>,
     /// Expected `InResponseTo` (originating request ID); `None` skips the check.
     pub expected_in_response_to: Option<&'a str>,
-    /// Expected bearer `<SubjectConfirmationData Recipient>` (this SP's ACS).
-    pub expected_recipient: Option<&'a str>,
 }
 
 impl<'a> Default for FlowOptions<'a> {
@@ -98,7 +96,6 @@ impl<'a> Default for FlowOptions<'a> {
             clock_drifts: (0, 0),
             expected_audience: None,
             expected_in_response_to: None,
-            expected_recipient: None,
         }
     }
 }
@@ -280,6 +277,7 @@ fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
 fn is_valid_bearer_subject_confirmation(
     xml: &str,
     opts: &FlowOptions<'_>,
+    expected_recipient: Option<&str>,
 ) -> Result<bool, OpenSamlError> {
     let fields = [
         ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
@@ -302,7 +300,7 @@ fn is_valid_bearer_subject_confirmation(
         return Ok(false);
     }
 
-    if let Some(expected) = opts.expected_recipient {
+    if let Some(expected) = expected_recipient {
         if extracted.get_str("subjectConfirmationData.recipient") != Some(expected) {
             return Ok(false);
         }
@@ -320,9 +318,10 @@ fn is_valid_bearer_subject_confirmation(
 fn validate_subject_confirmation(
     extracted: &Value,
     opts: &FlowOptions<'_>,
+    expected_recipient: Option<&str>,
 ) -> Result<(), OpenSamlError> {
     for xml in subject_confirmation_xmls(extracted) {
-        if is_valid_bearer_subject_confirmation(xml, opts)? {
+        if is_valid_bearer_subject_confirmation(xml, opts, expected_recipient)? {
             return Ok(());
         }
     }
@@ -333,6 +332,7 @@ fn validate_context(
     parser_type: ParserType,
     extracted: &Value,
     opts: &FlowOptions<'_>,
+    expected_recipient: Option<&str>,
 ) -> Result<(), OpenSamlError> {
     let should_validate_issuer = matches!(
         parser_type,
@@ -357,7 +357,7 @@ fn validate_context(
         }
     }
     if parser_type == ParserType::SamlResponse {
-        validate_subject_confirmation(extracted, opts)?;
+        validate_subject_confirmation(extracted, opts, expected_recipient)?;
         if let Some(expected) = opts.expected_audience {
             if !audience_contains(extracted, expected) {
                 return Err(OpenSamlError::UnmatchAudience);
@@ -380,8 +380,11 @@ fn validate_context(
     Ok(())
 }
 
-/// Run the inbound flow described by `opts` against `request`.
-pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult, OpenSamlError> {
+fn flow_inner(
+    opts: &FlowOptions<'_>,
+    request: &HttpRequest,
+    expected_recipient: Option<&str>,
+) -> Result<FlowResult, OpenSamlError> {
     let binding = opts.binding.ok_or(OpenSamlError::UndefinedBinding)?;
     let parser_type = opts
         .parser_type
@@ -423,11 +426,24 @@ pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult,
 
     let fields = default_fields(parser_type, assertion.as_deref())?;
     let extracted = extract(&saml_content, &fields)?;
-    validate_context(parser_type, &extracted, opts)?;
+    validate_context(parser_type, &extracted, opts, expected_recipient)?;
 
     Ok(FlowResult {
         saml_content,
         extract: extracted,
         sig_alg,
     })
+}
+
+/// Run the inbound flow described by `opts` against `request`.
+pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult, OpenSamlError> {
+    flow_inner(opts, request, None)
+}
+
+pub(crate) fn flow_with_expected_recipient(
+    opts: &FlowOptions<'_>,
+    request: &HttpRequest,
+    expected_recipient: &str,
+) -> Result<FlowResult, OpenSamlError> {
+    flow_inner(opts, request, Some(expected_recipient))
 }

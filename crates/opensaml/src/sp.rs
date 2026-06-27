@@ -6,7 +6,7 @@ use crate::entity::{
     generate_id, now_iso8601, BindingContext, CustomTagReplacement, EntitySetting,
 };
 use crate::error::OpenSamlError;
-use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
+use crate::flow::{flow_with_expected_recipient, FlowOptions, FlowResult, HttpRequest};
 use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
 use crate::template::{replace_tags_by_value, LOGIN_REQUEST_TEMPLATE};
@@ -311,7 +311,7 @@ impl ServiceProvider {
             .metadata
             .get_assertion_consumer_service(binding)
             .ok_or_else(|| OpenSamlError::MissingMetadata("AssertionConsumerService".into()))?;
-        let result = flow(
+        let result = flow_with_expected_recipient(
             &FlowOptions {
                 binding: Some(binding),
                 parser_type: Some(ParserType::SamlResponse),
@@ -324,9 +324,9 @@ impl ServiceProvider {
                 redirect_inflate_max_bytes: self.setting.redirect_inflate_max_bytes,
                 expected_audience: self.setting.validate_audience.then_some(audience.as_str()),
                 expected_in_response_to,
-                expected_recipient: Some(recipient.as_str()),
             },
             request,
+            recipient.as_str(),
         )?;
         if matches!(correlation, LoginResponseCorrelation::Unsolicited)
             && result
@@ -424,9 +424,10 @@ mod crypto_tests {
     use crate::binding::base64_decode;
     use crate::constants::signature_algorithm::RSA_SHA256;
     use crate::crypto::verify_signature;
+    use crate::entity::User;
+    use crate::idp::LoginResponseOptions;
     use crate::metadata::{Endpoint, IdpMetadataConfig};
 
-    const RESPONSE_SIGNED: &str = include_str!("../tests/fixtures/response_signed.xml");
     const IDP_CERT: &str = include_str!("../tests/fixtures/key/idp_cert.cer");
     const SP_PRIVKEY: &str = include_str!("../tests/fixtures/key/sp_privkey.pem");
     const SP_SIGNING_CERT: &str = include_str!("../tests/fixtures/key/sp_signing_cert.cer");
@@ -452,11 +453,16 @@ mod crypto_tests {
         let idp = IdentityProvider::from_config(
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),
-                signing_certs: vec![IDP_CERT.into()],
+                signing_certs: vec![SP_SIGNING_CERT.into()],
                 single_sign_on_service: vec![Endpoint::new(Binding::Post, "https://idp/sso")],
                 ..Default::default()
             },
-            EntitySetting::default(),
+            EntitySetting {
+                private_key: Some(SP_PRIVKEY.into()),
+                signing_cert: Some(SP_SIGNING_CERT.into()),
+                request_signature_algorithm: RSA_SHA256.into(),
+                ..Default::default()
+            },
         )?;
         let sp = ServiceProvider::from_config(
             &SpMetadataConfig {
@@ -467,25 +473,23 @@ mod crypto_tests {
                 )],
                 ..Default::default()
             },
-            EntitySetting {
-                clock_drifts: (0, 9_000_000_000_000),
+            EntitySetting::default(),
+        )?;
+        let request_id = "_41e758fee373d51639552c4b040b1090e97f6685";
+        let name_id = "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7";
+        let ctx = idp.create_login_response(
+            &sp,
+            Binding::Post,
+            &User::new(name_id),
+            &LoginResponseOptions {
+                in_response_to: Some(request_id),
                 ..Default::default()
             },
         )?;
-        let request = HttpRequest::post(vec![(
-            "SAMLResponse".into(),
-            base64_encode(RESPONSE_SIGNED.as_bytes()),
-        )]);
-        let result = sp.parse_login_response_with_request_id(
-            &idp,
-            Binding::Post,
-            &request,
-            "_41e758fee373d51639552c4b040b1090e97f6685",
-        )?;
-        assert_eq!(
-            result.extract.get_str("nameID"),
-            Some("_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7")
-        );
+        let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+        let result =
+            sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, request_id)?;
+        assert_eq!(result.extract.get_str("nameID"), Some(name_id));
         Ok(())
     }
 
