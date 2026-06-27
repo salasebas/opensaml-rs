@@ -452,6 +452,21 @@ fn validate_subject_confirmation(
     Err(OpenSamlError::SubjectUnconfirmed)
 }
 
+fn validate_response_destination(
+    extracted: &Value,
+    expected_recipient: Option<&str>,
+) -> Result<(), OpenSamlError> {
+    let Some(expected) = expected_recipient else {
+        return Ok(());
+    };
+    if let Some(destination) = extracted.get_str("response.destination") {
+        if destination != expected {
+            return Err(OpenSamlError::UnmatchDestination);
+        }
+    }
+    Ok(())
+}
+
 fn validate_context(
     parser_type: ParserType,
     extracted: &Value,
@@ -481,6 +496,7 @@ fn validate_context(
         }
     }
     if parser_type == ParserType::SamlResponse {
+        validate_response_destination(extracted, expected_recipient)?;
         validate_subject_confirmation(extracted, opts, expected_recipient)?;
         if let Some(expected) = opts.expected_audience {
             if !audience_contains(extracted, expected) {

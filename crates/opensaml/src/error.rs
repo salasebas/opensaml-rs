@@ -25,6 +25,9 @@ pub enum OpenSamlError {
     /// `<Audience>` does not include this Service Provider's entity ID.
     #[error("ERR_UNMATCH_AUDIENCE")]
     UnmatchAudience,
+    /// Response `Destination` does not match this Service Provider's ACS URL.
+    #[error("ERR_UNMATCH_DESTINATION")]
+    UnmatchDestination,
     /// `InResponseTo` does not match the originating request ID.
     #[error("ERR_INVALID_IN_RESPONSE_TO")]
     InvalidInResponseTo,
