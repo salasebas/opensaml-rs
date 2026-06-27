@@ -9,6 +9,8 @@ use crate::util::Value;
 use crate::validator::{check_status, verify_time};
 use crate::xml::{extract, fields, ExtractorField};
 
+const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
+
 /// Decoded HTTP request inputs for a binding.
 #[derive(Debug, Default, Clone)]
 pub struct HttpRequest {
@@ -78,6 +80,8 @@ pub struct FlowOptions<'a> {
     pub expected_audience: Option<&'a str>,
     /// Expected `InResponseTo` (originating request ID); `None` skips the check.
     pub expected_in_response_to: Option<&'a str>,
+    /// Expected bearer `<SubjectConfirmationData Recipient>` (this SP's ACS).
+    pub expected_recipient: Option<&'a str>,
 }
 
 impl<'a> Default for FlowOptions<'a> {
@@ -94,6 +98,7 @@ impl<'a> Default for FlowOptions<'a> {
             clock_drifts: (0, 0),
             expected_audience: None,
             expected_in_response_to: None,
+            expected_recipient: None,
         }
     }
 }
@@ -264,6 +269,66 @@ fn audience_contains(extracted: &Value, expected: &str) -> bool {
     }
 }
 
+fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
+    match extracted.get("subjectConfirmation") {
+        Some(Value::Str(xml)) => vec![xml.as_str()],
+        Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn is_valid_bearer_subject_confirmation(
+    xml: &str,
+    opts: &FlowOptions<'_>,
+) -> Result<bool, OpenSamlError> {
+    let fields = [
+        ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
+        ExtractorField::new(
+            "subjectConfirmationData",
+            &["SubjectConfirmation", "SubjectConfirmationData"],
+        )
+        .attrs(&["NotOnOrAfter", "Recipient", "InResponseTo"]),
+    ];
+    let extracted = extract(xml, &fields)?;
+
+    if extracted.get_str("subjectConfirmation") != Some(BEARER_SUBJECT_CONFIRMATION_METHOD) {
+        return Ok(false);
+    }
+
+    let Some(not_on_or_after) = extracted.get_str("subjectConfirmationData.notOnOrAfter") else {
+        return Ok(false);
+    };
+    if !verify_time(None, Some(not_on_or_after), opts.clock_drifts) {
+        return Ok(false);
+    }
+
+    if let Some(expected) = opts.expected_recipient {
+        if extracted.get_str("subjectConfirmationData.recipient") != Some(expected) {
+            return Ok(false);
+        }
+    }
+
+    if let Some(expected) = opts.expected_in_response_to {
+        if extracted.get_str("subjectConfirmationData.inResponseTo") != Some(expected) {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+fn validate_subject_confirmation(
+    extracted: &Value,
+    opts: &FlowOptions<'_>,
+) -> Result<(), OpenSamlError> {
+    for xml in subject_confirmation_xmls(extracted) {
+        if is_valid_bearer_subject_confirmation(xml, opts)? {
+            return Ok(());
+        }
+    }
+    Err(OpenSamlError::SubjectUnconfirmed)
+}
+
 fn validate_context(
     parser_type: ParserType,
     extracted: &Value,
@@ -292,6 +357,7 @@ fn validate_context(
         }
     }
     if parser_type == ParserType::SamlResponse {
+        validate_subject_confirmation(extracted, opts)?;
         if let Some(expected) = opts.expected_audience {
             if !audience_contains(extracted, expected) {
                 return Err(OpenSamlError::UnmatchAudience);

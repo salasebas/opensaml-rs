@@ -306,6 +306,7 @@ pub fn parse_logout_request(
             redirect_inflate_max_bytes: self_setting.redirect_inflate_max_bytes,
             expected_audience: None,
             expected_in_response_to: None,
+            expected_recipient: None,
         },
         request,
     )
@@ -332,6 +333,7 @@ pub fn parse_logout_response(
             redirect_inflate_max_bytes: self_setting.redirect_inflate_max_bytes,
             expected_audience: None,
             expected_in_response_to: None,
+            expected_recipient: None,
         },
         request,
     )

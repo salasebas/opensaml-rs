@@ -68,6 +68,12 @@ pub fn login_response_fields(assertion: &str) -> Vec<ExtractorField> {
         .with_shortcut(assertion),
         ExtractorField::new("issuer", &["Assertion", "Issuer"]).with_shortcut(assertion),
         ExtractorField::new("nameID", &["Assertion", "Subject", "NameID"]).with_shortcut(assertion),
+        ExtractorField::new(
+            "subjectConfirmation",
+            &["Assertion", "Subject", "SubjectConfirmation"],
+        )
+        .with_context()
+        .with_shortcut(assertion),
         ExtractorField::new("sessionIndex", &["Assertion", "AuthnStatement"])
             .attrs(&["AuthnInstant", "SessionNotOnOrAfter", "SessionIndex"])
             .with_shortcut(assertion),
