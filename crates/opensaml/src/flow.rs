@@ -1,7 +1,7 @@
 //! Inbound message flow (samlify `flow.ts`): decode → validate XML/status →
 //! (signature verify + optional decrypt) → extract → issuer/time validation.
 
-use crate::binding::{base64_decode, deflate_raw_decode};
+use crate::binding::{base64_decode, deflate_raw_decode_with_limit, MAX_DEFLATE_RAW_DECODE_BYTES};
 use crate::constants::{Binding, ParserType};
 use crate::context::is_valid_xml;
 use crate::error::OpenSamlError;
@@ -53,12 +53,15 @@ impl HttpRequest {
 }
 
 /// Inputs controlling a flow run.
-#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+#[derive(Debug, Clone)]
 pub struct FlowOptions<'a> {
     /// Protocol binding.
     pub binding: Option<Binding>,
     /// Message parser type.
     pub parser_type: Option<ParserType>,
+    /// Maximum inflated raw-DEFLATE bytes accepted for HTTP-Redirect input.
+    pub redirect_inflate_max_bytes: usize,
     /// Whether to require and verify a signature.
     pub check_signature: bool,
     /// Expected issuer (peer `entityID`).
@@ -75,6 +78,24 @@ pub struct FlowOptions<'a> {
     pub expected_audience: Option<&'a str>,
     /// Expected `InResponseTo` (originating request ID); `None` skips the check.
     pub expected_in_response_to: Option<&'a str>,
+}
+
+impl<'a> Default for FlowOptions<'a> {
+    fn default() -> Self {
+        Self {
+            binding: None,
+            parser_type: None,
+            redirect_inflate_max_bytes: MAX_DEFLATE_RAW_DECODE_BYTES,
+            check_signature: false,
+            from_issuer: None,
+            signing_certs: &[],
+            decrypt_key: None,
+            decrypt_key_pass: None,
+            clock_drifts: (0, 0),
+            expected_audience: None,
+            expected_in_response_to: None,
+        }
+    }
 }
 
 /// Result of a successful flow.
@@ -108,6 +129,7 @@ fn decode_message(
     binding: Binding,
     parser_type: ParserType,
     request: &HttpRequest,
+    redirect_inflate_max_bytes: usize,
 ) -> Result<String, OpenSamlError> {
     let direction = parser_type.query_param();
     let bytes = match binding {
@@ -115,7 +137,7 @@ fn decode_message(
             let content = request
                 .query_get(direction)
                 .ok_or_else(|| OpenSamlError::Invalid("ERR_REDIRECT_FLOW_BAD_ARGS".into()))?;
-            deflate_raw_decode(&base64_decode(content)?)?
+            deflate_raw_decode_with_limit(&base64_decode(content)?, redirect_inflate_max_bytes)?
         }
         Binding::Post | Binding::SimpleSign => {
             let content = request
@@ -282,7 +304,12 @@ pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult,
         .parser_type
         .ok_or_else(|| OpenSamlError::Invalid("ERR_UNDEFINED_PARSERTYPE".into()))?;
 
-    let xml = decode_message(binding, parser_type, request)?;
+    let xml = decode_message(
+        binding,
+        parser_type,
+        request,
+        opts.redirect_inflate_max_bytes,
+    )?;
     is_valid_xml(&xml)?;
     check_status(&xml, parser_type)?;
 

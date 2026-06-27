@@ -14,12 +14,11 @@ const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
 
 fn signing() -> EntitySetting {
-    EntitySetting {
-        private_key: Some(PRIVKEY.into()),
-        signing_cert: Some(CERT.into()),
-        request_signature_algorithm: RSA_SHA256.into(),
-        ..Default::default()
-    }
+    let mut setting = EntitySetting::default();
+    setting.private_key = Some(PRIVKEY.into());
+    setting.signing_cert = Some(CERT.into());
+    setting.request_signature_algorithm = RSA_SHA256.into();
+    setting
 }
 
 fn idp() -> IdentityProvider {

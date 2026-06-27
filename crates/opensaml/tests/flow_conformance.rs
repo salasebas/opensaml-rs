@@ -25,12 +25,11 @@ const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
 const FAILED: &str = include_str!("fixtures/misc/failed_response.xml");
 
 fn signing() -> EntitySetting {
-    EntitySetting {
-        private_key: Some(PRIVKEY.into()),
-        signing_cert: Some(CERT.into()),
-        request_signature_algorithm: RSA_SHA256.into(),
-        ..Default::default()
-    }
+    let mut setting = EntitySetting::default();
+    setting.private_key = Some(PRIVKEY.into());
+    setting.signing_cert = Some(CERT.into());
+    setting.request_signature_algorithm = RSA_SHA256.into();
+    setting
 }
 
 fn idp_config(want_authn_signed: bool) -> IdpMetadataConfig {
@@ -304,13 +303,11 @@ fn signed_request_with_key(
     key: &str,
     pass: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let setting = EntitySetting {
-        private_key: Some(key.into()),
-        private_key_pass: pass.map(str::to_string),
-        signing_cert: Some(CERT.into()),
-        request_signature_algorithm: RSA_SHA256.into(),
-        ..Default::default()
-    };
+    let mut setting = EntitySetting::default();
+    setting.private_key = Some(key.into());
+    setting.private_key_pass = pass.map(str::to_string);
+    setting.signing_cert = Some(CERT.into());
+    setting.request_signature_algorithm = RSA_SHA256.into();
     let sp = ServiceProvider::from_config(&sp_config(true, false, false), setting)?;
     let idp = idp(true);
     let ctx = sp.create_login_request(&idp, Binding::Redirect, None)?;
