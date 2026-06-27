@@ -160,7 +160,13 @@ let logout = create_logout_request(
 )?;
 
 let resp = HttpRequest::post(vec![("SAMLResponse".into(), saml_response_b64)]);
-let parsed = parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &resp)?;
+let parsed = parse_logout_response(
+    &sp.setting,
+    &idp.metadata,
+    Binding::Post,
+    &resp,
+    &logout.id,
+)?;
 ```
 
 ### End-to-end example (signed round-trip)
@@ -208,7 +214,10 @@ With `crypto-bergshamra` enabled (default):
 ## Security
 
 - `#![forbid(unsafe_code)]` on the crate root.
-- Inbound responses: signature (when required), issuer, `<Audience>`, assertion validity window, SAML status; optional `InResponseTo` via `parse_login_response_with_request_id`.
+- Inbound responses: signature (required by default for `LogoutResponse`),
+  issuer, `<Audience>`, assertion validity window, SAML status, and request
+  correlation via `parse_login_response_with_request_id` /
+  `parse_logout_response`.
 - DOCTYPE / XXE rejection in the XML layer; optional XSD validation via `context::set_schema_validator`.
 - **Pre-1.0** and **not externally audited** — review crypto and deployment choices before production.
 

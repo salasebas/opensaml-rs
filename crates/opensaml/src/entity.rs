@@ -139,7 +139,7 @@ impl Default for EntitySetting {
             want_message_signed: false,
             want_authn_requests_signed: false,
             want_logout_request_signed: false,
-            want_logout_response_signed: false,
+            want_logout_response_signed: true,
             name_id_format: Vec::new(),
             private_key: None,
             private_key_pass: None,

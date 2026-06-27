@@ -916,7 +916,13 @@ fn logout_response_flow(signed: bool) -> Result<(), Box<dyn std::error::Error>> 
         signed,
     )?;
     let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
-    let parsed = parse_logout_response(&idp_recv.setting, &sp.metadata, Binding::Post, &request)?;
+    let parsed = parse_logout_response(
+        &idp_recv.setting,
+        &sp.metadata,
+        Binding::Post,
+        &request,
+        "_r",
+    )?;
     assert_eq!(
         parsed.extract.get_str("issuer"),
         Some("https://sp.example.com/metadata")
@@ -931,6 +937,35 @@ fn sp_post_logout_response_unsigned() -> Result<(), Box<dyn std::error::Error>> 
 #[test]
 fn sp_post_logout_response_signed() -> Result<(), Box<dyn std::error::Error>> {
     logout_response_flow(true)
+}
+
+#[test]
+fn signed_logout_response_wrong_request_id_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let mut idp_recv = idp(false);
+    idp_recv.setting.want_logout_response_signed = true;
+    let sp = sp(false, false);
+    let ctx = create_logout_response(
+        &sp.setting,
+        &sp.metadata,
+        &idp_recv.metadata,
+        Binding::Post,
+        Some("_wrong"),
+        None,
+        true,
+    )?;
+    let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+
+    assert!(matches!(
+        parse_logout_response(
+            &idp_recv.setting,
+            &sp.metadata,
+            Binding::Post,
+            &request,
+            "_r"
+        ),
+        Err(OpenSamlError::InvalidInResponseTo)
+    ));
+    Ok(())
 }
 
 // ----- customize encrypted-assertion prefix (55-56) -----
