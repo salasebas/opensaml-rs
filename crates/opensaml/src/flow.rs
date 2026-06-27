@@ -39,19 +39,28 @@ impl HttpRequest {
         }
     }
 
-    fn query_get(&self, key: &str) -> Option<&str> {
-        self.query
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.as_str())
+    fn query_get(&self, key: &str) -> Result<Option<&str>, OpenSamlError> {
+        single_param(&self.query, key)
     }
 
-    fn body_get(&self, key: &str) -> Option<&str> {
-        self.body
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.as_str())
+    fn body_get(&self, key: &str) -> Result<Option<&str>, OpenSamlError> {
+        single_param(&self.body, key)
     }
+}
+
+fn single_param<'a>(
+    params: &'a [(String, String)],
+    key: &str,
+) -> Result<Option<&'a str>, OpenSamlError> {
+    let mut values = params
+        .iter()
+        .filter(|(candidate, _)| candidate == key)
+        .map(|(_, value)| value.as_str());
+    let first = values.next();
+    if values.next().is_some() {
+        return Err(OpenSamlError::Invalid("ERR_AMBIGUOUS_FLOW_INPUT".into()));
+    }
+    Ok(first)
 }
 
 /// Inputs controlling a flow run.
@@ -137,13 +146,13 @@ fn decode_message(
     let bytes = match binding {
         Binding::Redirect => {
             let content = request
-                .query_get(direction)
+                .query_get(direction)?
                 .ok_or_else(|| OpenSamlError::Invalid("ERR_REDIRECT_FLOW_BAD_ARGS".into()))?;
             deflate_raw_decode_with_limit(&base64_decode(content)?, redirect_inflate_max_bytes)?
         }
         Binding::Post | Binding::SimpleSign => {
             let content = request
-                .body_get(direction)
+                .body_get(direction)?
                 .ok_or_else(|| OpenSamlError::Invalid("ERR_FLOW_BAD_ARGS".into()))?;
             base64_decode(content)?
         }
@@ -161,6 +170,107 @@ fn assertion_shortcut(xml: &str) -> Result<Option<String>, OpenSamlError> {
 
 fn verified_content_not_covered() -> OpenSamlError {
     OpenSamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn decoded_octet_params(octet: &str) -> Vec<(String, String)> {
+    url::form_urlencoded::parse(octet.as_bytes())
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect()
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn detached_mismatch() -> OpenSamlError {
+    OpenSamlError::FailedMessageSignatureVerification
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn ensure_redirect_octet_matches_consumed_fields(
+    parser_type: ParserType,
+    request: &HttpRequest,
+    sig_alg: &str,
+    octet: &str,
+) -> Result<(), OpenSamlError> {
+    let direction = parser_type.query_param();
+    let signed = decoded_octet_params(octet);
+    if single_param(&signed, "Signature")?.is_some() {
+        return Err(detached_mismatch());
+    }
+
+    let signed_message = single_param(&signed, direction)?.ok_or_else(detached_mismatch)?;
+    let consumed_message = request
+        .query_get(direction)?
+        .ok_or_else(detached_mismatch)?;
+    if signed_message != consumed_message {
+        return Err(detached_mismatch());
+    }
+
+    let signed_sig_alg = single_param(&signed, "SigAlg")?.ok_or_else(detached_mismatch)?;
+    if signed_sig_alg != sig_alg {
+        return Err(detached_mismatch());
+    }
+
+    let signed_relay_state = single_param(&signed, "RelayState")?;
+    let consumed_relay_state = request.query_get("RelayState")?;
+    if signed_relay_state != consumed_relay_state {
+        return Err(detached_mismatch());
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn ensure_simplesign_octet_matches_consumed_fields(
+    parser_type: ParserType,
+    request: &HttpRequest,
+    xml: &str,
+    sig_alg: &str,
+    octet: &str,
+) -> Result<(), OpenSamlError> {
+    let direction = parser_type.query_param();
+    request.body_get(direction)?.ok_or_else(detached_mismatch)?;
+
+    let message_and_sig_alg = format!("{direction}={xml}&SigAlg={sig_alg}");
+    let message_empty_relay_and_sig_alg = format!("{direction}={xml}&RelayState=&SigAlg={sig_alg}");
+    let matches = match request.body_get("RelayState")? {
+        Some(relay_state) => {
+            let expected = format!("{direction}={xml}&RelayState={relay_state}&SigAlg={sig_alg}");
+            octet == expected
+        }
+        // Existing outbound SimpleSign signs an empty RelayState field even
+        // when the form body omits RelayState.
+        None => octet == message_and_sig_alg || octet == message_empty_relay_and_sig_alg,
+    };
+
+    if matches {
+        Ok(())
+    } else {
+        Err(detached_mismatch())
+    }
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn ensure_detached_octet_matches_consumed_fields(
+    binding: Binding,
+    parser_type: ParserType,
+    request: &HttpRequest,
+    xml: &str,
+    sig_alg: &str,
+    octet: &str,
+) -> Result<(), OpenSamlError> {
+    match binding {
+        Binding::Redirect => {
+            ensure_redirect_octet_matches_consumed_fields(parser_type, request, sig_alg, octet)
+        }
+        Binding::SimpleSign => ensure_simplesign_octet_matches_consumed_fields(
+            parser_type,
+            request,
+            xml,
+            sig_alg,
+            octet,
+        ),
+        Binding::Post | Binding::Artifact => Ok(()),
+    }
 }
 
 /// Verify (and optionally decrypt) the message, returning the authenticated
@@ -224,19 +334,31 @@ fn verify_and_prepare(
 #[cfg(feature = "crypto-bergshamra")]
 fn verify_detached(
     binding: Binding,
+    parser_type: ParserType,
     request: &HttpRequest,
     opts: &FlowOptions<'_>,
+    xml: &str,
 ) -> Result<String, OpenSamlError> {
-    let get = |k: &str| match binding {
-        Binding::Redirect => request.query_get(k),
-        _ => request.body_get(k),
+    let get = |k: &str| -> Result<Option<&str>, OpenSamlError> {
+        match binding {
+            Binding::Redirect => request.query_get(k),
+            _ => request.body_get(k),
+        }
     };
-    let signature = get("Signature").ok_or(OpenSamlError::MissingSigAlg)?;
-    let sig_alg = get("SigAlg").ok_or(OpenSamlError::MissingSigAlg)?;
+    let signature = get("Signature")?.ok_or(OpenSamlError::MissingSigAlg)?;
+    let sig_alg = get("SigAlg")?.ok_or(OpenSamlError::MissingSigAlg)?;
     let octet = request
         .octet_string
         .as_deref()
         .ok_or(OpenSamlError::MissingSigAlg)?;
+    ensure_detached_octet_matches_consumed_fields(
+        binding,
+        parser_type,
+        request,
+        xml,
+        sig_alg,
+        octet,
+    )?;
     let verified = opts.signing_certs.iter().any(|cert| {
         crate::crypto::verify_message_signature(octet, signature, cert, sig_alg).unwrap_or(false)
     });
@@ -250,8 +372,10 @@ fn verify_detached(
 #[cfg(not(feature = "crypto-bergshamra"))]
 fn verify_detached(
     _binding: Binding,
+    _parser_type: ParserType,
     _request: &HttpRequest,
     _opts: &FlowOptions<'_>,
+    _xml: &str,
 ) -> Result<String, OpenSamlError> {
     Err(OpenSamlError::Unsupported(
         "signature verification requires feature crypto-bergshamra".into(),
@@ -402,7 +526,7 @@ fn flow_inner(
     let (saml_content, assertion, sig_alg) = if opts.check_signature {
         match binding {
             Binding::Redirect | Binding::SimpleSign => {
-                let sig_alg = verify_detached(binding, request, opts)?;
+                let sig_alg = verify_detached(binding, parser_type, request, opts, &xml)?;
                 let assertion = if parser_type == ParserType::SamlResponse {
                     assertion_shortcut(&xml)?
                 } else {
