@@ -190,3 +190,47 @@ fn signed_metadata_verifies_against_trust_anchor() -> Result<(), Box<dyn std::er
     assert!(!verify_metadata_signature(&tampered, &[CERT.to_string()])?);
     Ok(())
 }
+
+#[test]
+fn metadata_signature_requires_root_coverage() -> Result<(), Box<dyn std::error::Error>> {
+    use bergshamra::{sign, DsigContext, KeysManager};
+    use opensaml::constants::{digest_for_signature, namespace, transform_algorithm};
+    use opensaml::crypto::keys::load_private_key;
+    use opensaml::crypto::verify_metadata_signature;
+    use opensaml::metadata::IdpMetadata;
+    use opensaml::util::normalize_cert_string;
+
+    let digest = digest_for_signature(RSA_SHA256).ok_or("unknown digest")?;
+    let signature = format!(
+        "<ds:Signature xmlns:ds=\"{dsig}\"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"{exc_c14n}\"/><ds:SignatureMethod Algorithm=\"{sig_alg}\"/><ds:Reference URI=\"#_signed_child\"><ds:Transforms><ds:Transform Algorithm=\"{enveloped}\"/><ds:Transform Algorithm=\"{exc_c14n}\"/></ds:Transforms><ds:DigestMethod Algorithm=\"{digest}\"/><ds:DigestValue></ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue></ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>{cert}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature>",
+        dsig = namespace::DSIG,
+        exc_c14n = transform_algorithm::EXC_C14N,
+        sig_alg = RSA_SHA256,
+        enveloped = transform_algorithm::ENVELOPED_SIGNATURE,
+        cert = normalize_cert_string(CERT),
+    );
+    let template = format!(
+        "<EntityDescriptor ID=\"_evil_root\" entityID=\"https://evil.example.com/metadata\" xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\">{signature}<IDPSSODescriptor ID=\"_signed_child\" protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"><SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\" Location=\"https://trusted.example.com/sso\"/></IDPSSODescriptor></EntityDescriptor>"
+    );
+    let key = load_private_key(PRIVKEY, None)?;
+    let mut manager = KeysManager::new();
+    manager.add_key(key);
+    let ctx = DsigContext::new(manager).with_insecure(true);
+    let wrapped_metadata = sign(&ctx, &template)?;
+
+    assert_eq!(
+        IdpMetadata::from_xml(&wrapped_metadata)?.get_entity_id(),
+        Some("https://evil.example.com/metadata")
+    );
+    match verify_metadata_signature(&wrapped_metadata, &[CERT.to_string()]) {
+        Err(OpenSamlError::Crypto(message))
+            if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "metadata verification must reject signatures that do not cover the consumed root: {other:?}"
+        )
+        .into()),
+    }
+}
