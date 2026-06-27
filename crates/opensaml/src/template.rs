@@ -1,8 +1,7 @@
 //! Default SAML message templates and tag substitution (samlify `libsaml.ts`).
 //!
-//! `{Tag}` placeholders are filled by [`replace_tags_by_value`]; values used in
-//! an attribute (i.e. immediately preceded by `"`) are XML-escaped, while
-//! element-text values are inserted verbatim — matching samlify exactly.
+//! `{Tag}` placeholders are filled by [`replace_tags_by_value`]; replacement
+//! values are XML-escaped in both attribute and element-text contexts.
 
 use crate::binding::xml_escape;
 use crate::util::camel_case;
@@ -28,8 +27,9 @@ pub const LOGOUT_RESPONSE_TEMPLATE: &str = "<samlp:LogoutResponse xmlns:samlp=\"
 
 /// Replace `{key}` placeholders in `raw_xml`.
 ///
-/// A placeholder immediately preceded by `"` is treated as an attribute value
-/// and XML-escaped; otherwise it is inserted verbatim (samlify `replaceTagsByValue`).
+/// Placeholder replacement text is XML-escaped before insertion. XML fragments
+/// such as generated attribute statements must be spliced into templates before
+/// calling this helper.
 pub fn replace_tags_by_value(raw_xml: &str, tags: &[(&str, String)]) -> String {
     let mut xml = raw_xml.to_string();
     for (key, value) in tags {
@@ -37,13 +37,8 @@ pub fn replace_tags_by_value(raw_xml: &str, tags: &[(&str, String)]) -> String {
         let mut result = String::with_capacity(xml.len());
         let mut rest = xml.as_str();
         while let Some(pos) = rest.find(&needle) {
-            let in_attribute = rest[..pos].ends_with('"');
             result.push_str(&rest[..pos]);
-            if in_attribute {
-                result.push_str(&xml_escape(value));
-            } else {
-                result.push_str(value);
-            }
+            result.push_str(&xml_escape(value));
             rest = &rest[pos + needle.len()..];
         }
         result.push_str(rest);
@@ -138,7 +133,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn attribute_values_escaped_element_text_verbatim() {
+    fn replacements_escape_attribute_and_element_text() {
         let rendered = replace_tags_by_value(
             "<a X=\"{V}\">{T}</a>",
             &[
@@ -146,7 +141,10 @@ mod tests {
                 ("T", "<raw>&amp;".to_string()),
             ],
         );
-        assert_eq!(rendered, "<a X=\"a&quot;b&amp;c&lt;d\"><raw>&amp;</a>");
+        assert_eq!(
+            rendered,
+            "<a X=\"a&quot;b&amp;c&lt;d\">&lt;raw&gt;&amp;amp;</a>"
+        );
     }
 
     #[test]

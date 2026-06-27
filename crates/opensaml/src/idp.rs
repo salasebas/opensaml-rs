@@ -565,6 +565,64 @@ mod crypto_tests {
     }
 
     #[test]
+    fn login_response_escapes_attribute_xml_markup() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::binding::base64_decode;
+        use crate::template::{LoginResponseAttribute, LoginResponseTemplate};
+
+        let mut setting = signing_setting();
+        setting.login_response_template = Some(LoginResponseTemplate {
+            context: None,
+            attributes: vec![LoginResponseAttribute {
+                name: "mail".into(),
+                name_format: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic".into(),
+                value_xsi_type: "xs:string".into(),
+                value_tag: "email".into(),
+                value_xmlns_xs: None,
+                value_xmlns_xsi: None,
+            }],
+        });
+        let idp = IdentityProvider::from_config(
+            &IdpMetadataConfig {
+                entity_id: "https://idp.example.com/metadata".into(),
+                signing_certs: vec![CERT.into()],
+                want_authn_requests_signed: true,
+                single_sign_on_service: vec![Endpoint::new(Binding::Post, "https://idp/sso")],
+                ..Default::default()
+            },
+            setting,
+        )?;
+        let sp = sp()?;
+        let injection = "alpha</saml:AttributeValue><saml:AttributeValue xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"xs:string\">omega";
+        let user = User {
+            name_id: "alice@example.com".into(),
+            attributes: vec![("email".into(), injection.into())],
+            session_index: None,
+        };
+        let ctx = idp.create_login_response(
+            &sp,
+            Binding::Post,
+            &user,
+            &LoginResponseOptions {
+                in_response_to: Some("_r1"),
+                ..Default::default()
+            },
+        )?;
+
+        let xml = String::from_utf8(base64_decode(&ctx.context)?)?;
+        assert!(xml.contains("<ds:Signature"));
+        assert!(xml.contains("alpha&lt;/saml:AttributeValue&gt;"));
+        assert!(xml.contains("&lt;saml:AttributeValue xmlns:xs=&quot;"));
+        assert!(!xml.contains("alpha</saml:AttributeValue><saml:AttributeValue"));
+        assert_eq!(xml.matches("<saml:AttributeValue ").count(), 1);
+
+        let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+        let parsed =
+            sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_r1")?;
+        assert_eq!(parsed.extract.get_str("attributes.mail"), Some(injection));
+        Ok(())
+    }
+
+    #[test]
     fn parse_signed_login_request() -> Result<(), Box<dyn std::error::Error>> {
         use crate::binding::base64_decode;
         let (idp, sp) = (idp()?, sp()?);
