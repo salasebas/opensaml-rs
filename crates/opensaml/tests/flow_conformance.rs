@@ -79,6 +79,7 @@ fn sp(want_assertions_signed: bool, enc: bool) -> ServiceProvider {
     if enc {
         setting.is_assertion_encrypted = true;
         setting.enc_private_key = Some(PRIVKEY.into());
+        setting.allow_insecure_software_rsa_key_transport_decryption = true;
     }
     ServiceProvider::from_config(&sp_config(false, want_assertions_signed, enc), setting).unwrap()
 }
@@ -788,6 +789,7 @@ fn encrypted_signed(custom: bool, with_message: bool) -> Result<(), Box<dyn std:
     let mut sp_setting = signing();
     sp_setting.is_assertion_encrypted = true;
     sp_setting.enc_private_key = Some(PRIVKEY.into());
+    sp_setting.allow_insecure_software_rsa_key_transport_decryption = true;
     sp_setting.want_message_signed = with_message;
     let sp = ServiceProvider::from_config(&sp_config(false, true, true), sp_setting)?;
     let idp_id = "https://idp.example.com/metadata";
@@ -827,6 +829,32 @@ fn encrypted_signed_assertion_and_message() -> Result<(), Box<dyn std::error::Er
 #[test]
 fn encrypted_custom_signed_assertion_and_message() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(true, true)
+}
+
+#[test]
+fn encrypted_assertion_rejects_default_software_rsa() -> Result<(), Box<dyn std::error::Error>> {
+    let mut idp_setting = signing();
+    idp_setting.is_assertion_encrypted = true;
+    let idp = IdentityProvider::from_config(&idp_config(false), idp_setting)?;
+    let mut sp_setting = signing();
+    sp_setting.is_assertion_encrypted = true;
+    sp_setting.enc_private_key = Some(PRIVKEY.into());
+    let sp = ServiceProvider::from_config(&sp_config(false, true, true), sp_setting)?;
+    let ctx = idp.create_login_response(
+        &sp,
+        Binding::Post,
+        &User::new("blocked@example.com"),
+        &LoginResponseOptions {
+            in_response_to: Some("_r"),
+            ..Default::default()
+        },
+    )?;
+    let request = response_request(Binding::Post, &ctx)?;
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_r"),
+        Err(OpenSamlError::Unsupported(message)) if message.contains("RUSTSEC-2023-0071")
+    ));
+    Ok(())
 }
 
 #[test]
@@ -978,6 +1006,7 @@ fn encrypted_prefix(prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut sp_setting = signing();
     sp_setting.is_assertion_encrypted = true;
     sp_setting.enc_private_key = Some(PRIVKEY.into());
+    sp_setting.allow_insecure_software_rsa_key_transport_decryption = true;
     let sp = ServiceProvider::from_config(&sp_config(false, true, true), sp_setting)?;
     let ctx =
         idp.create_login_response(&sp, Binding::Post, &User::new("p@example.com"), &opts("_r"))?;

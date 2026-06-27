@@ -83,6 +83,11 @@ pub struct FlowOptions<'a> {
     pub decrypt_key: Option<&'a str>,
     /// Passphrase for `decrypt_key`.
     pub decrypt_key_pass: Option<&'a str>,
+    /// Allow XML-Enc RSA key-transport decryption with the bundled software RSA backend.
+    ///
+    /// Disabled by default because that path reaches `RUSTSEC-2023-0071`-affected
+    /// code when an attacker can observe timing.
+    pub allow_insecure_software_rsa_key_transport_decryption: bool,
     /// Clock drift tolerance `(not_before_ms, not_on_or_after_ms)`.
     pub clock_drifts: (i64, i64),
     /// Expected `<Audience>` (this SP's entity ID); `None` skips the check.
@@ -102,6 +107,7 @@ impl<'a> Default for FlowOptions<'a> {
             signing_certs: &[],
             decrypt_key: None,
             decrypt_key_pass: None,
+            allow_insecure_software_rsa_key_transport_decryption: false,
             clock_drifts: (0, 0),
             expected_audience: None,
             expected_in_response_to: None,
@@ -281,23 +287,35 @@ fn verify_and_prepare(
     parser_type: ParserType,
     opts: &FlowOptions<'_>,
 ) -> Result<(String, Option<String>), OpenSamlError> {
-    use crate::crypto::{decrypt_assertion, keys::load_private_key, verify_signature};
+    use crate::crypto::{
+        decrypt_assertion,
+        enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
+        keys::load_private_key,
+        verify_signature,
+    };
 
     let (verified, verified_node) = verify_signature(xml, opts.signing_certs)?;
     let decrypt_required = opts.decrypt_key.is_some();
+    if decrypt_required && !opts.allow_insecure_software_rsa_key_transport_decryption {
+        return Err(software_rsa_decryption_disabled());
+    }
+    let decrypt_options = AssertionDecryptionOptions {
+        allow_insecure_software_rsa_key_transport_decryption: opts
+            .allow_insecure_software_rsa_key_transport_decryption,
+    };
     let load_key = || load_private_key(opts.decrypt_key.unwrap_or_default(), opts.decrypt_key_pass);
 
     if decrypt_required && verified && parser_type == ParserType::SamlResponse {
         if let Some(node) = verified_node {
             // signed-then-encrypted: the verified content is a Response carrying
             // an EncryptedAssertion.
-            let (content, assertion) = decrypt_assertion(&node, &load_key()?)?;
+            let (content, assertion) = decrypt_assertion(&node, &load_key()?, decrypt_options)?;
             return Ok((content, Some(assertion)));
         }
     }
     if decrypt_required && !verified {
         // encrypted-then-signed: decrypt first, then verify the result.
-        let (content, _) = decrypt_assertion(xml, &load_key()?)?;
+        let (content, _) = decrypt_assertion(xml, &load_key()?, decrypt_options)?;
         let (re_verified, re_node) = verify_signature(&content, opts.signing_certs)?;
         return if re_verified {
             Ok((content, re_node))
