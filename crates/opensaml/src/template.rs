@@ -1,7 +1,8 @@
 //! Default SAML message templates and tag substitution (samlify `libsaml.ts`).
 //!
-//! `{Tag}` placeholders are filled by [`replace_tags_by_value`]; replacement
-//! values are XML-escaped in both attribute and element-text contexts.
+//! `{Tag}` placeholders are filled by [`replace_tags_by_value`]. Replacement
+//! values are XML-escaped in both attribute and element-text positions so
+//! caller-provided data cannot become signed SAML markup.
 
 use crate::binding::xml_escape;
 use crate::util::camel_case;
@@ -133,7 +134,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn replacements_escape_attribute_and_element_text() {
+    fn replacement_values_are_escaped_in_attributes_and_element_text() {
         let rendered = replace_tags_by_value(
             "<a X=\"{V}\">{T}</a>",
             &[
