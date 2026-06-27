@@ -4,10 +4,11 @@
 
 use opensaml::constants::signature_algorithm::RSA_SHA256;
 use opensaml::constants::Binding;
-use opensaml::entity::{EntitySetting, User};
+use opensaml::entity::{iso8601_offset, EntitySetting, User};
 use opensaml::flow::HttpRequest;
 use opensaml::idp::LoginResponseOptions;
 use opensaml::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
+use opensaml::template::replace_tags_by_value;
 use opensaml::{IdentityProvider, OpenSamlError, ServiceProvider};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
@@ -61,6 +62,84 @@ fn response_for(sp: &ServiceProvider) -> String {
         )
         .unwrap()
         .context
+}
+
+struct SubjectConfirmationCase<'a> {
+    method: &'a str,
+    recipient: &'a str,
+    not_on_or_after: String,
+    response_in_response_to: &'a str,
+    subject_in_response_to: &'a str,
+}
+
+fn response_for_subject_confirmation(
+    sp: &ServiceProvider,
+    case: &SubjectConfirmationCase<'_>,
+) -> Result<String, OpenSamlError> {
+    let idp = idp();
+    let cb = |template: &str| {
+        let id = "_response_subject_confirmation".to_string();
+        let now = iso8601_offset(-60);
+        let later = iso8601_offset(300);
+        let prepared = template
+            .replacen(
+                "Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"",
+                &format!("Method=\"{}\"", case.method),
+                1,
+            )
+            .replacen(
+                "Recipient=\"{SubjectRecipient}\" InResponseTo=\"{InResponseTo}\"",
+                "Recipient=\"{SubjectRecipient}\" InResponseTo=\"{SubjectInResponseTo}\"",
+                1,
+            );
+        let xml = replace_tags_by_value(
+            &prepared,
+            &[
+                ("ID", id.clone()),
+                ("AssertionID", "_assertion_subject_confirmation".into()),
+                ("Destination", "https://sp/acs".into()),
+                ("SubjectRecipient", case.recipient.to_string()),
+                ("AssertionConsumerServiceURL", "https://sp/acs".into()),
+                ("Audience", "https://sp.example.com/metadata".into()),
+                ("Issuer", "https://idp.example.com/metadata".into()),
+                ("IssueInstant", now.clone()),
+                (
+                    "StatusCode",
+                    "urn:oasis:names:tc:SAML:2.0:status:Success".into(),
+                ),
+                ("ConditionsNotBefore", now),
+                ("ConditionsNotOnOrAfter", later),
+                (
+                    "SubjectConfirmationDataNotOnOrAfter",
+                    case.not_on_or_after.clone(),
+                ),
+                (
+                    "NameIDFormat",
+                    "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress".into(),
+                ),
+                ("NameID", "a@example.com".into()),
+                ("InResponseTo", case.response_in_response_to.to_string()),
+                (
+                    "SubjectInResponseTo",
+                    case.subject_in_response_to.to_string(),
+                ),
+                ("AuthnStatement", String::new()),
+            ],
+        );
+        (id, xml)
+    };
+    Ok(idp
+        .create_login_response(
+            sp,
+            Binding::Post,
+            &User::new("a@example.com"),
+            &LoginResponseOptions {
+                in_response_to: Some(case.response_in_response_to),
+                custom: Some(&cb),
+                ..Default::default()
+            },
+        )?
+        .context)
 }
 
 #[test]
@@ -142,6 +221,90 @@ fn unsolicited_response_accepts_empty_in_response_to() -> Result<(), Box<dyn std
         parsed.extract.get_str("nameID"),
         Some("unsolicited@example.com")
     );
+    Ok(())
+}
+
+#[test]
+fn subject_confirmation_method_must_be_bearer() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_subject_confirmation(
+        &sp,
+        &SubjectConfirmationCase {
+            method: "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key",
+            recipient: "https://sp/acs",
+            not_on_or_after: iso8601_offset(300),
+            response_in_response_to: "_req1",
+            subject_in_response_to: "_req1",
+        },
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(OpenSamlError::SubjectUnconfirmed)
+    ));
+    Ok(())
+}
+
+#[test]
+fn subject_confirmation_data_expiry_is_enforced() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_subject_confirmation(
+        &sp,
+        &SubjectConfirmationCase {
+            method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+            recipient: "https://sp/acs",
+            not_on_or_after: iso8601_offset(-300),
+            response_in_response_to: "_req1",
+            subject_in_response_to: "_req1",
+        },
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(OpenSamlError::SubjectUnconfirmed)
+    ));
+    Ok(())
+}
+
+#[test]
+fn subject_confirmation_recipient_must_match_acs() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_subject_confirmation(
+        &sp,
+        &SubjectConfirmationCase {
+            method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+            recipient: "https://evil.example/acs",
+            not_on_or_after: iso8601_offset(300),
+            response_in_response_to: "_req1",
+            subject_in_response_to: "_req1",
+        },
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(OpenSamlError::SubjectUnconfirmed)
+    ));
+    Ok(())
+}
+
+#[test]
+fn subject_confirmation_request_id_must_match() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_subject_confirmation(
+        &sp,
+        &SubjectConfirmationCase {
+            method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+            recipient: "https://sp/acs",
+            not_on_or_after: iso8601_offset(300),
+            response_in_response_to: "_req1",
+            subject_in_response_to: "_wrong",
+        },
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(OpenSamlError::SubjectUnconfirmed)
+    ));
     Ok(())
 }
 
