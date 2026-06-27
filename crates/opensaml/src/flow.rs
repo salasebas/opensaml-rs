@@ -157,6 +157,10 @@ fn assertion_shortcut(xml: &str) -> Result<Option<String>, OpenSamlError> {
         .map(str::to_string))
 }
 
+fn verified_content_not_covered() -> OpenSamlError {
+    OpenSamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
+}
+
 /// Verify (and optionally decrypt) the message, returning the authenticated
 /// `(saml_content, assertion)` (samlify `postFlow`). Requires `crypto-bergshamra`.
 #[cfg(feature = "crypto-bergshamra")]
@@ -190,6 +194,13 @@ fn verify_and_prepare(
         };
     }
     if verified {
+        if matches!(
+            parser_type,
+            ParserType::SamlRequest | ParserType::LogoutRequest | ParserType::LogoutResponse
+        ) {
+            let content = verified_node.ok_or_else(verified_content_not_covered)?;
+            return Ok((content, None));
+        }
         return Ok((xml.to_string(), verified_node));
     }
     Err(OpenSamlError::FailedToVerifySignature)
