@@ -258,16 +258,22 @@ fn validate_context(
     extracted: &Value,
     opts: &FlowOptions<'_>,
 ) -> Result<(), OpenSamlError> {
-    let is_response = matches!(
+    let should_validate_issuer = matches!(
         parser_type,
-        ParserType::SamlResponse | ParserType::LogoutResponse
+        ParserType::SamlRequest | ParserType::SamlResponse | ParserType::LogoutResponse
     );
-    if is_response {
+    if should_validate_issuer {
         if let Some(expected) = opts.from_issuer {
             if extracted.get_str("issuer") != Some(expected) {
                 return Err(OpenSamlError::UnmatchIssuer);
             }
         }
+    }
+    let is_response = matches!(
+        parser_type,
+        ParserType::SamlResponse | ParserType::LogoutResponse
+    );
+    if is_response {
         if let Some(expected) = opts.expected_in_response_to {
             if extracted.get_str("response.inResponseTo") != Some(expected) {
                 return Err(OpenSamlError::InvalidInResponseTo);
