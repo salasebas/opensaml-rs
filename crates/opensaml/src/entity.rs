@@ -39,7 +39,7 @@ pub struct EntitySetting {
     pub want_message_signed: bool,
     /// IdP: requires signed AuthnRequests.
     pub want_authn_requests_signed: bool,
-    /// Requires signed LogoutRequest.
+    /// Requires signed LogoutRequest (default `true`).
     pub want_logout_request_signed: bool,
     /// Requires signed LogoutResponse.
     pub want_logout_response_signed: bool,
@@ -138,7 +138,7 @@ impl Default for EntitySetting {
             validate_audience: true,
             want_message_signed: false,
             want_authn_requests_signed: false,
-            want_logout_request_signed: false,
+            want_logout_request_signed: true,
             want_logout_response_signed: true,
             name_id_format: Vec::new(),
             private_key: None,

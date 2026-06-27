@@ -218,6 +218,10 @@ With `crypto-bergshamra` enabled (default):
   issuer, `<Audience>`, assertion validity window, SAML status, and request
   correlation via `parse_login_response_with_request_id` /
   `parse_logout_response`.
+- Inbound `LogoutRequest` parsing requires signatures by default and always
+  checks the request `<Issuer>` against the expected peer metadata. Set
+  `want_logout_request_signed = false` only for legacy peers that cannot sign
+  logout requests.
 - DOCTYPE / XXE rejection in the XML layer; optional XSD validation via `context::set_schema_validator`.
 - **Pre-1.0** and **not externally audited** — review crypto and deployment choices before production.
 
