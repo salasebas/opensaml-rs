@@ -142,6 +142,66 @@ fn response_for_subject_confirmation(
         .context)
 }
 
+fn response_for_destination(
+    sp: &ServiceProvider,
+    destination: Option<&str>,
+) -> Result<String, OpenSamlError> {
+    let idp = idp();
+    let cb = |template: &str| {
+        let id = "_response_destination".to_string();
+        let now = iso8601_offset(-60);
+        let later = iso8601_offset(300);
+        let prepared = if destination.is_some() {
+            template.to_string()
+        } else {
+            template.replacen(" Destination=\"{Destination}\"", "", 1)
+        };
+        let xml = replace_tags_by_value(
+            &prepared,
+            &[
+                ("ID", id.clone()),
+                ("AssertionID", "_assertion_destination".into()),
+                (
+                    "Destination",
+                    destination.unwrap_or("https://sp/acs").to_string(),
+                ),
+                ("SubjectRecipient", "https://sp/acs".into()),
+                ("AssertionConsumerServiceURL", "https://sp/acs".into()),
+                ("Audience", "https://sp.example.com/metadata".into()),
+                ("Issuer", "https://idp.example.com/metadata".into()),
+                ("IssueInstant", now.clone()),
+                (
+                    "StatusCode",
+                    "urn:oasis:names:tc:SAML:2.0:status:Success".into(),
+                ),
+                ("ConditionsNotBefore", now),
+                ("ConditionsNotOnOrAfter", later.clone()),
+                ("SubjectConfirmationDataNotOnOrAfter", later),
+                (
+                    "NameIDFormat",
+                    "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress".into(),
+                ),
+                ("NameID", "a@example.com".into()),
+                ("InResponseTo", "_req1".into()),
+                ("AuthnStatement", String::new()),
+            ],
+        );
+        (id, xml)
+    };
+    Ok(idp
+        .create_login_response(
+            sp,
+            Binding::Post,
+            &User::new("a@example.com"),
+            &LoginResponseOptions {
+                in_response_to: Some("_req1"),
+                custom: Some(&cb),
+                ..Default::default()
+            },
+        )?
+        .context)
+}
+
 #[test]
 fn audience_match_accepts() -> Result<(), Box<dyn std::error::Error>> {
     let sp = sp_with("https://sp.example.com/metadata", signing());
@@ -284,6 +344,28 @@ fn subject_confirmation_recipient_must_match_acs() -> Result<(), Box<dyn std::er
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
         Err(OpenSamlError::SubjectUnconfirmed)
     ));
+    Ok(())
+}
+
+#[test]
+fn response_destination_must_match_acs_when_present() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_destination(&sp, Some("https://evil.example/acs"))?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(OpenSamlError::UnmatchDestination)
+    ));
+    Ok(())
+}
+
+#[test]
+fn missing_destination_accepts_matching_recipient() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_destination(&sp, None)?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+    let parsed = sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1")?;
+    assert_eq!(parsed.extract.get_str("nameID"), Some("a@example.com"));
     Ok(())
 }
 
