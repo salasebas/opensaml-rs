@@ -303,11 +303,11 @@ impl ServiceProvider {
             None
         };
         let audience = self.entity_id();
-        let (expected_in_response_to, reject_unexpected_in_response_to) = match correlation {
-            LoginResponseCorrelation::RequestId(request_id) => (Some(request_id), false),
-            LoginResponseCorrelation::Unsolicited => (None, true),
+        let expected_in_response_to = match correlation {
+            LoginResponseCorrelation::RequestId(request_id) => Some(request_id),
+            LoginResponseCorrelation::Unsolicited => None,
         };
-        flow(
+        let result = flow(
             &FlowOptions {
                 binding: Some(binding),
                 parser_type: Some(ParserType::SamlResponse),
@@ -319,10 +319,18 @@ impl ServiceProvider {
                 clock_drifts: self.setting.clock_drifts,
                 expected_audience: self.setting.validate_audience.then_some(audience.as_str()),
                 expected_in_response_to,
-                reject_unexpected_in_response_to,
             },
             request,
-        )
+        )?;
+        if matches!(correlation, LoginResponseCorrelation::Unsolicited)
+            && result
+                .extract
+                .get_str("response.inResponseTo")
+                .is_some_and(|actual| !actual.is_empty())
+        {
+            return Err(OpenSamlError::InvalidInResponseTo);
+        }
+        Ok(result)
     }
 }
 

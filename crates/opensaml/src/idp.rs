@@ -359,7 +359,6 @@ impl IdentityProvider {
                 clock_drifts: self.setting.clock_drifts,
                 expected_audience: None,
                 expected_in_response_to: None,
-                reject_unexpected_in_response_to: false,
             },
             request,
         )
