@@ -7,7 +7,7 @@
 #![cfg(feature = "crypto-bergshamra")]
 #![allow(clippy::unwrap_used)]
 
-use opensaml::binding::base64_decode;
+use opensaml::binding::{base64_decode, base64_encode, deflate_raw_encode};
 use opensaml::constants::signature_algorithm::RSA_SHA256;
 use opensaml::constants::Binding;
 use opensaml::entity::{iso8601_offset, BindingContext, EntitySetting, User};
@@ -211,6 +211,21 @@ fn opts(in_response_to: &str) -> LoginResponseOptions<'_> {
     }
 }
 
+fn attacker_authn_request() -> &'static str {
+    "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"_attacker_req\" Version=\"2.0\" IssueInstant=\"2026-06-27T19:15:08Z\" Destination=\"https://idp/sso\" AssertionConsumerServiceURL=\"https://evil.example/acs\"><saml:Issuer>https://evil.example/metadata</saml:Issuer></samlp:AuthnRequest>"
+}
+
+fn assert_failed_message_signature(
+    result: Result<opensaml::flow::FlowResult, OpenSamlError>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match result {
+        Err(OpenSamlError::FailedMessageSignatureVerification) => Ok(()),
+        other => {
+            Err(format!("expected detached signature verification failure, got {other:?}").into())
+        }
+    }
+}
+
 // ----- create login request (1-3): default template round-trip -----
 
 fn login_request_round_trip(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
@@ -295,6 +310,60 @@ fn login_request_post_custom() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn login_request_simplesign_custom() -> Result<(), Box<dyn std::error::Error>> {
     login_request_custom(Binding::SimpleSign)
+}
+
+// ----- detached message signature binding -----
+
+fn detached_signature_rejects_mismatched_login_request(
+    binding: Binding,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = ServiceProvider::from_config(&sp_config(true, false, false), signing())?;
+    let idp = idp(true);
+    let ctx = sp.create_login_request(&idp, binding, None)?;
+    let mut request = match binding {
+        Binding::Redirect => redirect_request(&ctx.context)?,
+        Binding::SimpleSign => simplesign_request("SAMLRequest", &ctx)?,
+        _ => return Err("unsupported binding for detached regression".into()),
+    };
+
+    let parsed = idp.parse_login_request(&sp, binding, &request)?;
+    assert_eq!(parsed.extract.get_str("request.id"), Some(ctx.id.as_str()));
+
+    match binding {
+        Binding::Redirect => {
+            let attacker = base64_encode(&deflate_raw_encode(attacker_authn_request().as_bytes())?);
+            let (_, saml_request) = request
+                .query
+                .iter_mut()
+                .find(|(key, _)| key == "SAMLRequest")
+                .ok_or("missing SAMLRequest")?;
+            *saml_request = attacker;
+        }
+        Binding::SimpleSign => {
+            let attacker = base64_encode(attacker_authn_request().as_bytes());
+            let (_, saml_request) = request
+                .body
+                .iter_mut()
+                .find(|(key, _)| key == "SAMLRequest")
+                .ok_or("missing SAMLRequest")?;
+            *saml_request = attacker;
+        }
+        _ => return Err("unsupported binding for detached regression".into()),
+    }
+
+    assert_failed_message_signature(idp.parse_login_request(&sp, binding, &request))
+}
+
+#[test]
+fn redirect_signature_rejects_mismatched_consumed_request() -> Result<(), Box<dyn std::error::Error>>
+{
+    detached_signature_rejects_mismatched_login_request(Binding::Redirect)
+}
+
+#[test]
+fn simplesign_signature_rejects_mismatched_consumed_request(
+) -> Result<(), Box<dyn std::error::Error>> {
+    detached_signature_rejects_mismatched_login_request(Binding::SimpleSign)
 }
 
 // ----- create login request signed with PKCS#8 keys (8,9) -----
