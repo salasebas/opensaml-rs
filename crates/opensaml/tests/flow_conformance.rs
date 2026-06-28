@@ -45,6 +45,7 @@ fn idp_config(want_authn_signed: bool) -> IdpMetadataConfig {
         single_logout_service: vec![
             Endpoint::new(Binding::Post, "https://idp/slo"),
             Endpoint::new(Binding::Redirect, "https://idp/slo"),
+            Endpoint::new(Binding::SimpleSign, "https://idp/slo"),
         ],
         ..Default::default()
     }
@@ -60,6 +61,7 @@ fn sp_config(authn_signed: bool, want_assertions_signed: bool, enc: bool) -> SpM
         single_logout_service: vec![
             Endpoint::new(Binding::Post, "https://sp/slo"),
             Endpoint::new(Binding::Redirect, "https://sp/slo"),
+            Endpoint::new(Binding::SimpleSign, "https://sp/slo"),
         ],
         assertion_consumer_service: vec![
             Endpoint::new(Binding::Post, "https://sp/acs"),
@@ -132,15 +134,17 @@ fn simplesign_request(param: &str, ctx: &BindingContext) -> Result<HttpRequest, 
     let raw_xml = String::from_utf8(base64_decode(&ctx.context)?)
         .map_err(|e| OpenSamlError::Xml(e.to_string()))?;
     let sig_alg = ctx.sig_alg.clone().unwrap_or_default();
-    let octet = format!("{param}={raw_xml}&RelayState=&SigAlg={sig_alg}");
-    let body = vec![
-        (param.to_string(), ctx.context.clone()),
-        ("SigAlg".into(), sig_alg),
-        (
-            "Signature".into(),
-            ctx.signature.clone().unwrap_or_default(),
-        ),
-    ];
+    let relay_state = ctx.relay_state.as_deref().unwrap_or_default();
+    let octet = format!("{param}={raw_xml}&RelayState={relay_state}&SigAlg={sig_alg}");
+    let mut body = vec![(param.to_string(), ctx.context.clone())];
+    if let Some(relay_state) = &ctx.relay_state {
+        body.push(("RelayState".into(), relay_state.clone()));
+    }
+    body.push(("SigAlg".into(), sig_alg));
+    body.push((
+        "Signature".into(),
+        ctx.signature.clone().unwrap_or_default(),
+    ));
     Ok(HttpRequest {
         body,
         octet_string: Some(octet),
@@ -908,8 +912,60 @@ fn logout_request_to_http(
 ) -> Result<HttpRequest, OpenSamlError> {
     Ok(match binding {
         Binding::Redirect => redirect_request(&ctx.context)?,
-        _ => HttpRequest::post(vec![("SAMLRequest".into(), ctx.context.clone())]),
+        Binding::Post => HttpRequest::post(vec![("SAMLRequest".into(), ctx.context.clone())]),
+        Binding::SimpleSign => simplesign_request("SAMLRequest", ctx)?,
+        Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
     })
+}
+
+fn logout_response_to_http(
+    binding: Binding,
+    ctx: &BindingContext,
+) -> Result<HttpRequest, OpenSamlError> {
+    Ok(match binding {
+        Binding::Redirect => redirect_request(&ctx.context)?,
+        Binding::Post => HttpRequest::post(vec![("SAMLResponse".into(), ctx.context.clone())]),
+        Binding::SimpleSign => simplesign_request("SAMLResponse", ctx)?,
+        Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
+    })
+}
+
+fn body_param<'a>(request: &'a HttpRequest, param: &str) -> Result<&'a str, OpenSamlError> {
+    request
+        .body
+        .iter()
+        .find(|(key, _)| key == param)
+        .map(|(_, value)| value.as_str())
+        .ok_or_else(|| OpenSamlError::Invalid(format!("missing {param}")))
+}
+
+fn body_param_mut<'a>(
+    request: &'a mut HttpRequest,
+    param: &str,
+) -> Result<&'a mut String, OpenSamlError> {
+    request
+        .body
+        .iter_mut()
+        .find(|(key, _)| key == param)
+        .map(|(_, value)| value)
+        .ok_or_else(|| OpenSamlError::Invalid(format!("missing {param}")))
+}
+
+fn tamper_body_message(
+    request: &mut HttpRequest,
+    param: &str,
+    from: &str,
+    to: &str,
+) -> Result<(), OpenSamlError> {
+    let encoded = body_param_mut(request, param)?;
+    let xml = String::from_utf8(base64_decode(encoded.as_str())?)
+        .map_err(|e| OpenSamlError::Xml(e.to_string()))?;
+    let tampered = xml.replace(from, to);
+    if tampered == xml {
+        return Err(OpenSamlError::Invalid("tamper target not found".into()));
+    }
+    *encoded = base64_encode(tampered.as_bytes());
+    Ok(())
 }
 
 #[test]
@@ -927,6 +983,108 @@ fn idp_post_logout_request_unsigned() -> Result<(), Box<dyn std::error::Error>> 
 #[test]
 fn idp_post_logout_request_signed() -> Result<(), Box<dyn std::error::Error>> {
     logout_request_flow(Binding::Post, true)
+}
+
+#[test]
+fn signed_simplesign_logout_request_returns_detached_signature_fields(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let sp = sp(false, false);
+    let ctx = create_logout_request(
+        &idp.setting,
+        &idp.metadata,
+        &sp.metadata,
+        Binding::SimpleSign,
+        &User::new("a@e.com"),
+        None,
+        true,
+    )?;
+    assert!(
+        matches!((&ctx.signature, &ctx.sig_alg), (Some(_), Some(_))),
+        "expected detached Signature and SigAlg"
+    );
+    Ok(())
+}
+
+#[test]
+fn signed_simplesign_logout_request_parses_when_required() -> Result<(), Box<dyn std::error::Error>>
+{
+    let idp = idp(false);
+    let mut sp = sp(false, false);
+    sp.setting.want_logout_request_signed = true;
+    let ctx = create_logout_request(
+        &idp.setting,
+        &idp.metadata,
+        &sp.metadata,
+        Binding::SimpleSign,
+        &User::new("a@e.com"),
+        None,
+        true,
+    )?;
+    let request = logout_request_to_http(Binding::SimpleSign, &ctx)?;
+    let parsed = parse_logout_request(&sp.setting, &idp.metadata, Binding::SimpleSign, &request)?;
+    assert_eq!(
+        parsed.extract.get_str("issuer"),
+        Some("https://idp.example.com/metadata")
+    );
+    Ok(())
+}
+
+#[test]
+fn tampered_simplesign_logout_request_body_fails_signature_verification(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let mut sp = sp(false, false);
+    sp.setting.want_logout_request_signed = true;
+    let ctx = create_logout_request(
+        &idp.setting,
+        &idp.metadata,
+        &sp.metadata,
+        Binding::SimpleSign,
+        &User::new("a@e.com"),
+        None,
+        true,
+    )?;
+    let mut request = logout_request_to_http(Binding::SimpleSign, &ctx)?;
+    tamper_body_message(
+        &mut request,
+        "SAMLRequest",
+        "https://idp.example.com/metadata",
+        "https://attacker.example.com/metadata",
+    )?;
+    assert_failed_message_signature(parse_logout_request(
+        &sp.setting,
+        &idp.metadata,
+        Binding::SimpleSign,
+        &request,
+    ))
+}
+
+#[test]
+fn signed_simplesign_logout_request_with_relay_state_includes_body_and_octet(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let sp = sp(false, false);
+    let ctx = create_logout_request(
+        &idp.setting,
+        &idp.metadata,
+        &sp.metadata,
+        Binding::SimpleSign,
+        &User::new("a@e.com"),
+        Some("relay-123"),
+        true,
+    )?;
+    let request = logout_request_to_http(Binding::SimpleSign, &ctx)?;
+    let octet = request
+        .octet_string
+        .as_deref()
+        .ok_or_else(|| OpenSamlError::Invalid("missing octet".into()))?;
+    assert_eq!(body_param(&request, "RelayState")?, "relay-123");
+    assert!(
+        octet.contains("&RelayState=relay-123&SigAlg="),
+        "expected RelayState in signed octet"
+    );
+    Ok(())
 }
 
 fn logout_response_flow(signed: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -965,6 +1123,115 @@ fn sp_post_logout_response_unsigned() -> Result<(), Box<dyn std::error::Error>> 
 #[test]
 fn sp_post_logout_response_signed() -> Result<(), Box<dyn std::error::Error>> {
     logout_response_flow(true)
+}
+
+#[test]
+fn signed_simplesign_logout_response_returns_detached_signature_fields(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let sp = sp(false, false);
+    let ctx = create_logout_response(
+        &sp.setting,
+        &sp.metadata,
+        &idp.metadata,
+        Binding::SimpleSign,
+        Some("_r"),
+        None,
+        true,
+    )?;
+    assert!(
+        matches!((&ctx.signature, &ctx.sig_alg), (Some(_), Some(_))),
+        "expected detached Signature and SigAlg"
+    );
+    Ok(())
+}
+
+#[test]
+fn signed_simplesign_logout_response_parses_when_required() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut idp_recv = idp(false);
+    idp_recv.setting.want_logout_response_signed = true;
+    let sp = sp(false, false);
+    let ctx = create_logout_response(
+        &sp.setting,
+        &sp.metadata,
+        &idp_recv.metadata,
+        Binding::SimpleSign,
+        Some("_r"),
+        None,
+        true,
+    )?;
+    let request = logout_response_to_http(Binding::SimpleSign, &ctx)?;
+    let parsed = parse_logout_response(
+        &idp_recv.setting,
+        &sp.metadata,
+        Binding::SimpleSign,
+        &request,
+        "_r",
+    )?;
+    assert_eq!(
+        parsed.extract.get_str("issuer"),
+        Some("https://sp.example.com/metadata")
+    );
+    Ok(())
+}
+
+#[test]
+fn tampered_simplesign_logout_response_body_fails_signature_verification(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut idp_recv = idp(false);
+    idp_recv.setting.want_logout_response_signed = true;
+    let sp = sp(false, false);
+    let ctx = create_logout_response(
+        &sp.setting,
+        &sp.metadata,
+        &idp_recv.metadata,
+        Binding::SimpleSign,
+        Some("_r"),
+        None,
+        true,
+    )?;
+    let mut request = logout_response_to_http(Binding::SimpleSign, &ctx)?;
+    tamper_body_message(
+        &mut request,
+        "SAMLResponse",
+        "https://sp.example.com/metadata",
+        "https://attacker.example.com/metadata",
+    )?;
+    assert_failed_message_signature(parse_logout_response(
+        &idp_recv.setting,
+        &sp.metadata,
+        Binding::SimpleSign,
+        &request,
+        "_r",
+    ))
+}
+
+#[test]
+fn signed_simplesign_logout_response_with_relay_state_includes_body_and_octet(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let sp = sp(false, false);
+    let ctx = create_logout_response(
+        &sp.setting,
+        &sp.metadata,
+        &idp.metadata,
+        Binding::SimpleSign,
+        Some("_r"),
+        Some("relay-456"),
+        true,
+    )?;
+    let request = logout_response_to_http(Binding::SimpleSign, &ctx)?;
+    let octet = request
+        .octet_string
+        .as_deref()
+        .ok_or_else(|| OpenSamlError::Invalid("missing octet".into()))?;
+    assert_eq!(body_param(&request, "RelayState")?, "relay-456");
+    assert!(
+        octet.contains("&RelayState=relay-456&SigAlg="),
+        "expected RelayState in signed octet"
+    );
+    Ok(())
 }
 
 #[test]
