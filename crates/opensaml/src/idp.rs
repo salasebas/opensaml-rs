@@ -7,7 +7,7 @@ use crate::entity::{
 };
 use crate::error::OpenSamlError;
 use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
-use crate::metadata::{generate_idp_metadata, IdpMetadata, IdpMetadataConfig};
+use crate::metadata::{try_generate_idp_metadata, IdpMetadata, IdpMetadataConfig};
 use crate::sp::ServiceProvider;
 use crate::template::{
     attr_tag, attribute_statement_builder, replace_tags_by_value, ATTRIBUTE_STATEMENT_TEMPLATE,
@@ -57,7 +57,8 @@ impl IdentityProvider {
         config: &IdpMetadataConfig,
         setting: EntitySetting,
     ) -> Result<Self, OpenSamlError> {
-        Self::from_metadata(&generate_idp_metadata(config), setting)
+        let metadata_xml = try_generate_idp_metadata(config)?;
+        Self::from_metadata(&metadata_xml, setting)
     }
 
     /// The IdP metadata XML.
@@ -409,6 +410,21 @@ mod tests {
             Some("https://idp.example.org/sso/SingleSignOnService")
         );
         Ok(())
+    }
+
+    #[test]
+    fn idp_from_config_rejects_missing_sso() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            ..Default::default()
+        };
+
+        let result = IdentityProvider::from_config(&cfg, EntitySetting::default());
+
+        assert!(matches!(
+            result,
+            Err(OpenSamlError::MissingMetadata(name)) if name == "SingleSignOnService"
+        ));
     }
 
     #[test]

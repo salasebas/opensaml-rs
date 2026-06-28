@@ -1,6 +1,7 @@
 //! SAML metadata generation (samlify `metadata-sp.ts` / `metadata-idp.ts`).
 
 use crate::constants::{elements_order, name_id_format, namespace, Binding};
+use crate::error::OpenSamlError;
 use crate::util::{is_non_empty_array, normalize_cert_string};
 
 /// A protocol endpoint (`SingleSignOnService` / `SingleLogoutService` / ACS).
@@ -219,6 +220,16 @@ pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
     )
 }
 
+/// Generate IdP metadata XML, validating required config-driven metadata first.
+pub fn try_generate_idp_metadata(cfg: &IdpMetadataConfig) -> Result<String, OpenSamlError> {
+    if !is_non_empty_array(&cfg.single_sign_on_service) {
+        return Err(OpenSamlError::MissingMetadata(
+            "SingleSignOnService".to_string(),
+        ));
+    }
+    Ok(generate_idp_metadata(cfg))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +331,21 @@ mod tests {
             Some("MIIBidp")
         );
         Ok(())
+    }
+
+    #[test]
+    fn try_generate_idp_metadata_rejects_missing_sso() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            ..Default::default()
+        };
+
+        let result = try_generate_idp_metadata(&cfg);
+
+        assert!(matches!(
+            result,
+            Err(OpenSamlError::MissingMetadata(name)) if name == "SingleSignOnService"
+        ));
     }
 
     #[test]
