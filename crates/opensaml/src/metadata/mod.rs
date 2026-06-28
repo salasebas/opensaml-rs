@@ -5,7 +5,8 @@ pub mod idp;
 pub mod sp;
 
 pub use generate::{
-    generate_idp_metadata, generate_sp_metadata, Endpoint, IdpMetadataConfig, SpMetadataConfig,
+    generate_idp_metadata, generate_sp_metadata, try_generate_idp_metadata, Endpoint,
+    IdpMetadataConfig, SpMetadataConfig,
 };
 pub use idp::IdpMetadata;
 pub use sp::SpMetadata;
