@@ -168,6 +168,7 @@ pub fn generate_sp_metadata(cfg: &SpMetadataConfig) -> String {
 
 /// Generate IdP metadata XML.
 pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
+    let is_custom_order = cfg.elements_order.is_some();
     let order = cfg.elements_order.clone().unwrap_or_else(|| {
         elements_order::idp::DEFAULT
             .iter()
@@ -203,9 +204,15 @@ pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
             body.push_str(fragment);
         }
     }
-    for (name, fragment) in &descriptors {
-        if !fragment.is_empty() && !order.iter().any(|ordered| ordered == name) {
-            body.push_str(fragment);
+    if is_custom_order {
+        if !order.iter().any(|ordered| ordered == "SingleSignOnService") {
+            body.push_str(&descriptors[2].1);
+        }
+    } else {
+        for (name, fragment) in &descriptors {
+            if !fragment.is_empty() && !order.iter().any(|ordered| ordered == name) {
+                body.push_str(fragment);
+            }
         }
     }
 
@@ -419,6 +426,26 @@ mod tests {
         assert!(!xml.contains("<NameIDFormat"));
         assert!(xml.contains("<SingleSignOnService"));
         assert!(xml.contains("<SingleLogoutService"));
+    }
+
+    #[test]
+    fn idp_custom_elements_order_omits_unlisted_optional_groups() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            signing_certs: vec!["MIIBsigning".into()],
+            name_id_format: vec![name_id_format::EMAIL_ADDRESS.to_string()],
+            single_sign_on_service: vec![Endpoint::new(Binding::Redirect, "https://idp/sso")],
+            single_logout_service: vec![Endpoint::new(Binding::Redirect, "https://idp/slo")],
+            elements_order: Some(vec!["SingleSignOnService".into()]),
+            ..Default::default()
+        };
+
+        let xml = generate_idp_metadata(&cfg);
+
+        assert_eq!(xml.matches("<SingleSignOnService").count(), 1);
+        assert!(!xml.contains("<KeyDescriptor"));
+        assert!(!xml.contains("<NameIDFormat"));
+        assert!(!xml.contains("<SingleLogoutService"));
     }
 
     #[test]
