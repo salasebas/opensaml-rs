@@ -10,8 +10,8 @@ use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::{try_generate_idp_metadata, IdpMetadata, IdpMetadataConfig};
 use crate::sp::ServiceProvider;
 use crate::template::{
-    attr_tag, attribute_statement_builder, replace_tags_by_value, ATTRIBUTE_STATEMENT_TEMPLATE,
-    ATTRIBUTE_TEMPLATE, LOGIN_RESPONSE_TEMPLATE,
+    apply_tag_prefixes, attr_tag, attribute_statement_builder, replace_tags_by_value,
+    validate_tag_prefix, ATTRIBUTE_STATEMENT_TEMPLATE, ATTRIBUTE_TEMPLATE, LOGIN_RESPONSE_TEMPLATE,
 };
 
 /// Optional inputs for [`IdentityProvider::create_login_response`]
@@ -85,7 +85,9 @@ impl IdentityProvider {
         user: &User,
         acs: &str,
         custom: Option<CustomTagReplacement<'_>>,
-    ) -> (String, String) {
+    ) -> Result<(String, String), OpenSamlError> {
+        validate_tag_prefix("protocol", &self.setting.tag_prefix_protocol)?;
+        validate_tag_prefix("assertion", &self.setting.tag_prefix_assertion)?;
         let tmpl = self.setting.login_response_template.as_ref();
         let base = tmpl
             .and_then(|t| t.context.as_deref())
@@ -101,8 +103,13 @@ impl IdentityProvider {
             )
         };
         let prepared = base.replacen("{AttributeStatement}", &attribute_statement, 1);
+        let prepared = apply_tag_prefixes(
+            &prepared,
+            &self.setting.tag_prefix_protocol,
+            &self.setting.tag_prefix_assertion,
+        );
         if let Some(f) = custom {
-            return f(&prepared);
+            return Ok(f(&prepared));
         }
         let now = now_iso8601();
         let later = iso8601_offset(300);
@@ -147,7 +154,7 @@ impl IdentityProvider {
         for (key, value) in &attr_pairs {
             tags.push((key.as_str(), value.clone()));
         }
-        (id, replace_tags_by_value(&prepared, &tags))
+        Ok((id, replace_tags_by_value(&prepared, &tags)))
     }
 
     /// Generate a login `<Response>` for `sp` over `binding` (samlify `createLoginResponse`).
@@ -168,7 +175,7 @@ impl IdentityProvider {
             .get_assertion_consumer_service(binding)
             .ok_or_else(|| OpenSamlError::MissingMetadata("AssertionConsumerService".into()))?;
         let (id, raw) =
-            self.render_login_response(sp, options.in_response_to, user, &acs, options.custom);
+            self.render_login_response(sp, options.in_response_to, user, &acs, options.custom)?;
         let signed = self.finalize_login_response(sp, binding, &raw, options.encrypt_then_sign)?;
         let relay = options.relay_state.map(str::to_string);
         let (context, signature, sig_alg) =

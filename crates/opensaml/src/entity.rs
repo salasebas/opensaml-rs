@@ -75,6 +75,10 @@ pub struct EntitySetting {
     pub redirect_inflate_max_bytes: usize,
     /// XML parser resource limits for inbound messages and metadata parsing.
     pub xml_limits: XmlLimits,
+    /// IdP: protocol tag prefix for generated IdP messages (default `samlp`).
+    pub tag_prefix_protocol: String,
+    /// IdP: assertion tag prefix for generated IdP messages (default `saml`).
+    pub tag_prefix_assertion: String,
     /// IdP: tag prefix for the `<EncryptedAssertion>` element (default `saml`).
     pub tag_prefix_encrypted_assertion: String,
     /// IdP: login `<Response>` template + attribute configuration.
@@ -162,6 +166,8 @@ impl Default for EntitySetting {
             clock_drifts: (0, 0),
             redirect_inflate_max_bytes: MAX_DEFLATE_RAW_DECODE_BYTES,
             xml_limits: XmlLimits::default(),
+            tag_prefix_protocol: "samlp".to_string(),
+            tag_prefix_assertion: "saml".to_string(),
             tag_prefix_encrypted_assertion: "saml".to_string(),
             login_response_template: None,
             login_request_template: None,
