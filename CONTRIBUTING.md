@@ -31,7 +31,7 @@ cargo nextest run -p <crate>
 
 `samlify` (npm, pinned in `reference/upstream-samlify/VERSION.md`) is the
 behavioral/porting reference. The original conformance port targets v2.10.2;
-new parity work tracks the active pin. When porting behavior:
+new porting work compares against the active pin. When porting behavior:
 
 1. Read the active pin in `reference/upstream-samlify/VERSION.md`.
 2. Inspect the matching sources under
