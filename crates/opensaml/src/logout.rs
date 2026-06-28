@@ -8,8 +8,8 @@ use crate::error::OpenSamlError;
 use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::Metadata;
 use crate::template::{
-    replace_tags_by_optional_value, replace_tags_by_value, LOGOUT_REQUEST_TEMPLATE,
-    LOGOUT_RESPONSE_TEMPLATE,
+    apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
+    LOGOUT_REQUEST_TEMPLATE, LOGOUT_RESPONSE_TEMPLATE,
 };
 
 fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
@@ -163,8 +163,15 @@ pub fn create_logout_request_with_id(
         .logout_request_template
         .as_deref()
         .unwrap_or(LOGOUT_REQUEST_TEMPLATE);
-    let xml = replace_tags_by_optional_value(
+    validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
+    validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
+    let template = apply_tag_prefixes(
         template,
+        &init_setting.tag_prefix_protocol,
+        &init_setting.tag_prefix_assertion,
+    );
+    let xml = replace_tags_by_optional_value(
+        &template,
         &[
             ("ID", Some(id.clone())),
             ("IssueInstant", Some(now_iso8601())),
@@ -254,8 +261,15 @@ pub fn create_logout_response_with_id(
         .logout_response_template
         .as_deref()
         .unwrap_or(LOGOUT_RESPONSE_TEMPLATE);
-    let xml = replace_tags_by_value(
+    validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
+    validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
+    let template = apply_tag_prefixes(
         template,
+        &init_setting.tag_prefix_protocol,
+        &init_setting.tag_prefix_assertion,
+    );
+    let xml = replace_tags_by_value(
+        &template,
         &[
             ("ID", id.clone()),
             ("IssueInstant", now_iso8601()),

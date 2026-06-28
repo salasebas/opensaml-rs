@@ -6,6 +6,7 @@
 //! become signed SAML markup.
 
 use crate::binding::xml_escape;
+use crate::error::OpenSamlError;
 use crate::util::camel_case;
 
 /// Default `<AuthnRequest>` template.
@@ -26,6 +27,37 @@ pub const LOGIN_RESPONSE_TEMPLATE: &str = "<samlp:Response xmlns:samlp=\"urn:oas
 
 /// Default `<LogoutResponse>` template.
 pub const LOGOUT_RESPONSE_TEMPLATE: &str = "<samlp:LogoutResponse xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\" InResponseTo=\"{InResponseTo}\"><saml:Issuer>{Issuer}</saml:Issuer><samlp:Status><samlp:StatusCode Value=\"{StatusCode}\"/></samlp:Status></samlp:LogoutResponse>";
+
+/// Rewrite known SAML template prefixes while preserving namespace URIs.
+pub(crate) fn apply_tag_prefixes(
+    xml: &str,
+    protocol_prefix: &str,
+    assertion_prefix: &str,
+) -> String {
+    xml.replace("<samlp:", &format!("<{protocol_prefix}:"))
+        .replace("</samlp:", &format!("</{protocol_prefix}:"))
+        .replace("xmlns:samlp=", &format!("xmlns:{protocol_prefix}="))
+        .replace("<saml:", &format!("<{assertion_prefix}:"))
+        .replace("</saml:", &format!("</{assertion_prefix}:"))
+        .replace("xmlns:saml=", &format!("xmlns:{assertion_prefix}="))
+}
+
+pub(crate) fn validate_tag_prefix(name: &str, prefix: &str) -> Result<(), OpenSamlError> {
+    if prefix.is_empty() {
+        return Err(OpenSamlError::Invalid(format!(
+            "{name} tag prefix cannot be empty"
+        )));
+    }
+    if prefix
+        .chars()
+        .any(|ch| ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '\'' | '/' | ':'))
+    {
+        return Err(OpenSamlError::Invalid(format!(
+            "{name} tag prefix contains an invalid character"
+        )));
+    }
+    Ok(())
+}
 
 /// Replace `{key}` placeholders in `raw_xml`.
 ///
