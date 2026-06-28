@@ -9,7 +9,7 @@ use crate::binding::xml_escape;
 use crate::util::camel_case;
 
 /// Default `<AuthnRequest>` template.
-pub const LOGIN_REQUEST_TEMPLATE: &str = "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\" ProtocolBinding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\" AssertionConsumerServiceURL=\"{AssertionConsumerServiceURL}\"><saml:Issuer>{Issuer}</saml:Issuer><samlp:NameIDPolicy Format=\"{NameIDFormat}\" AllowCreate=\"{AllowCreate}\"/></samlp:AuthnRequest>";
+pub const LOGIN_REQUEST_TEMPLATE: &str = "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\" ForceAuthn=\"{ForceAuthn}\" ProtocolBinding=\"{ProtocolBinding}\" AssertionConsumerServiceURL=\"{AssertionConsumerServiceURL}\" AssertionConsumerServiceIndex=\"{AssertionConsumerServiceIndex}\"><saml:Issuer>{Issuer}</saml:Issuer><samlp:NameIDPolicy Format=\"{NameIDFormat}\" AllowCreate=\"{AllowCreate}\"/></samlp:AuthnRequest>";
 
 /// Default `<LogoutRequest>` template.
 pub const LOGOUT_REQUEST_TEMPLATE: &str = "<samlp:LogoutRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\"><saml:Issuer>{Issuer}</saml:Issuer><saml:NameID Format=\"{NameIDFormat}\">{NameID}</saml:NameID><samlp:SessionIndex>{SessionIndex}</samlp:SessionIndex></samlp:LogoutRequest>";
@@ -345,28 +345,42 @@ mod tests {
 
     #[test]
     fn renders_full_authn_request() {
-        let xml = replace_tags_by_value(
+        let xml = replace_tags_by_optional_value(
             LOGIN_REQUEST_TEMPLATE,
             &[
-                ("ID", "_abc".to_string()),
-                ("IssueInstant", "2024-01-01T00:00:00Z".to_string()),
-                ("Destination", "https://idp.example.com/sso".to_string()),
-                ("Issuer", "https://sp.example.com/metadata".to_string()),
+                ("ID", Some("_abc".to_string())),
+                ("IssueInstant", Some("2024-01-01T00:00:00Z".to_string())),
+                (
+                    "Destination",
+                    Some("https://idp.example.com/sso".to_string()),
+                ),
+                ("ForceAuthn", Some("true".to_string())),
+                (
+                    "ProtocolBinding",
+                    Some("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST".to_string()),
+                ),
                 (
                     "AssertionConsumerServiceURL",
-                    "https://sp.example.com/acs".to_string(),
+                    Some("https://sp.example.com/acs".to_string()),
+                ),
+                ("AssertionConsumerServiceIndex", None),
+                (
+                    "Issuer",
+                    Some("https://sp.example.com/metadata".to_string()),
                 ),
                 (
                     "NameIDFormat",
-                    "urn:oasis:names:tc:SAML:2.0:nameid-format:transient".to_string(),
+                    Some("urn:oasis:names:tc:SAML:2.0:nameid-format:transient".to_string()),
                 ),
-                ("AllowCreate", "true".to_string()),
+                ("AllowCreate", Some("true".to_string())),
             ],
         );
         assert!(xml.starts_with("<samlp:AuthnRequest"));
         assert!(xml.contains("ID=\"_abc\""));
         assert!(xml.contains("Destination=\"https://idp.example.com/sso\""));
+        assert!(xml.contains("ForceAuthn=\"true\""));
         assert!(xml.contains("<saml:Issuer>https://sp.example.com/metadata</saml:Issuer>"));
+        assert!(!xml.contains("AssertionConsumerServiceIndex="));
         assert!(!xml.contains('{'));
     }
 
