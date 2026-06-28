@@ -34,15 +34,15 @@ fn sign_logout(
         construct_message_signature, construct_saml_signature, keys::load_private_key,
     };
 
+    if matches!(binding, Binding::Artifact) {
+        return Err(OpenSamlError::UndefinedBinding);
+    }
+
+    let sig_alg = &setting.request_signature_algorithm;
     let key_pem = setting
         .private_key
         .as_deref()
         .ok_or_else(|| OpenSamlError::MissingKey("private_key".into()))?;
-    let cert = setting
-        .signing_cert
-        .as_deref()
-        .ok_or_else(|| OpenSamlError::MissingKey("signing_cert".into()))?;
-    let sig_alg = &setting.request_signature_algorithm;
     let key = load_private_key(key_pem, setting.private_key_pass.as_deref())?;
     match binding {
         Binding::Redirect => {
@@ -50,7 +50,11 @@ fn sign_logout(
             let sig = construct_message_signature(&octet, &key, sig_alg)?;
             Ok((append_signature(destination, &octet, &sig), None, None))
         }
-        _ => {
+        Binding::Post => {
+            let cert = setting
+                .signing_cert
+                .as_deref()
+                .ok_or_else(|| OpenSamlError::MissingKey("signing_cert".into()))?;
             let signed = construct_saml_signature(
                 xml,
                 true,
@@ -62,6 +66,20 @@ fn sign_logout(
             )?;
             Ok((base64_encode(signed.as_bytes()), None, None))
         }
+        Binding::SimpleSign => {
+            let relay = relay.unwrap_or_default();
+            let octet = format!(
+                "{}={xml}&RelayState={relay}&SigAlg={sig_alg}",
+                parser_type.query_param()
+            );
+            let sig = construct_message_signature(&octet, &key, sig_alg)?;
+            Ok((
+                base64_encode(xml.as_bytes()),
+                Some(sig),
+                Some(sig_alg.clone()),
+            ))
+        }
+        Binding::Artifact => Err(OpenSamlError::UndefinedBinding),
     }
 }
 
