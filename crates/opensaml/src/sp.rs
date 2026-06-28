@@ -9,7 +9,7 @@ use crate::error::OpenSamlError;
 use crate::flow::{flow_with_expected_recipient, FlowOptions, FlowResult, HttpRequest};
 use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
-use crate::template::{replace_tags_by_value, LOGIN_REQUEST_TEMPLATE};
+use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
 
 /// A SAML 2.0 Service Provider: runtime [`EntitySetting`] plus parsed [`SpMetadata`].
 #[derive(Debug, Clone)]
@@ -18,6 +18,20 @@ pub struct ServiceProvider {
     pub setting: EntitySetting,
     /// Parsed SP metadata.
     pub metadata: SpMetadata,
+}
+
+/// Per-call options for [`ServiceProvider::create_login_request_with_options`].
+#[derive(Default)]
+pub struct LoginRequestOptions<'a> {
+    /// RelayState for this request. `Some("")` is preserved as an empty RelayState.
+    pub relay_state: Option<&'a str>,
+    /// Custom request renderer, equivalent to samlify `customTagReplacement`.
+    pub custom: Option<CustomTagReplacement<'a>>,
+    /// Optional `ForceAuthn` attribute.
+    pub force_authn: Option<bool>,
+    /// Optional `AssertionConsumerServiceIndex`; when present, ACS URL and
+    /// `ProtocolBinding` are omitted.
+    pub assertion_consumer_service_index: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,10 +89,26 @@ impl ServiceProvider {
         binding: Binding,
         custom: Option<CustomTagReplacement<'_>>,
     ) -> Result<BindingContext, OpenSamlError> {
+        let options = LoginRequestOptions {
+            custom,
+            ..Default::default()
+        };
+        self.create_login_request_with_options(idp, binding, &options)
+    }
+
+    /// Build a login `<AuthnRequest>` for `idp` over `binding` with per-call options.
+    pub fn create_login_request_with_options(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        options: &LoginRequestOptions<'_>,
+    ) -> Result<BindingContext, OpenSamlError> {
         if self.metadata.is_authn_request_signed() != idp.metadata.is_want_authn_requests_signed() {
-            return Err(OpenSamlError::Invalid(
-                "ERR_METADATA_CONFLICT_REQUEST_SIGNED_FLAG".into(),
-            ));
+            return Err(OpenSamlError::Invalid(format!(
+                "ERR_METADATA_CONFLICT_REQUEST_SIGNED_FLAG: SP AuthnRequestsSigned={} but IdP WantAuthnRequestsSigned={}",
+                self.metadata.is_authn_request_signed(),
+                idp.metadata.is_want_authn_requests_signed()
+            )));
         }
         let destination = idp
             .metadata
@@ -89,13 +119,19 @@ impl ServiceProvider {
             .login_request_template
             .as_deref()
             .unwrap_or(LOGIN_REQUEST_TEMPLATE);
-        let (id, xml) = match custom {
+        let (id, xml) = match options.custom {
             Some(f) => f(template),
             None => {
-                let acs = self
-                    .metadata
-                    .get_assertion_consumer_service(Binding::Post)
-                    .unwrap_or_default();
+                let uses_acs_index = options.assertion_consumer_service_index.is_some();
+                let acs_url = (!uses_acs_index).then(|| {
+                    self.metadata
+                        .get_assertion_consumer_service(Binding::Post)
+                        .unwrap_or_default()
+                });
+                let protocol_binding = (!uses_acs_index).then(|| Binding::Post.urn().to_string());
+                let acs_index = options
+                    .assertion_consumer_service_index
+                    .map(|index| index.to_string());
                 let name_id_format = self
                     .setting
                     .name_id_format
@@ -103,23 +139,35 @@ impl ServiceProvider {
                     .cloned()
                     .unwrap_or_default();
                 let id = generate_id();
-                let xml = replace_tags_by_value(
+                let xml = replace_tags_by_optional_value(
                     template,
                     &[
-                        ("ID", id.clone()),
-                        ("IssueInstant", now_iso8601()),
-                        ("Destination", destination.clone()),
-                        ("AssertionConsumerServiceURL", acs),
-                        ("Issuer", self.entity_id()),
-                        ("NameIDFormat", name_id_format),
-                        ("AllowCreate", self.setting.allow_create.to_string()),
+                        ("ID", Some(id.clone())),
+                        ("IssueInstant", Some(now_iso8601())),
+                        ("Destination", Some(destination.clone())),
+                        (
+                            "ForceAuthn",
+                            options
+                                .force_authn
+                                .map(|force_authn| force_authn.to_string()),
+                        ),
+                        ("ProtocolBinding", protocol_binding),
+                        ("AssertionConsumerServiceURL", acs_url),
+                        ("AssertionConsumerServiceIndex", acs_index),
+                        ("Issuer", Some(self.entity_id())),
+                        ("NameIDFormat", Some(name_id_format)),
+                        ("AllowCreate", Some(self.setting.allow_create.to_string())),
                     ],
                 );
                 (id, xml)
             }
         };
-        let relay_state =
-            (!self.setting.relay_state.is_empty()).then(|| self.setting.relay_state.clone());
+        let relay_state = match options.relay_state {
+            Some(value) => Some(value.to_string()),
+            None => {
+                (!self.setting.relay_state.is_empty()).then(|| self.setting.relay_state.clone())
+            }
+        };
 
         if self.metadata.is_authn_request_signed() {
             return self.signed_request_context(binding, &xml, destination, relay_state, id);
