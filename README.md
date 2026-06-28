@@ -13,8 +13,8 @@ behind the default `crypto-bergshamra` feature.
 
 The original conformance port targets npm
 [`samlify`](https://www.npmjs.com/package/samlify) v2.10.2. The active upstream
-reference is pinned to `samlify` v2.13.1 for ongoing parity work; see
-[`PARITY.md`](PARITY.md) and [`reference/upstream-samlify/VERSION.md`](reference/upstream-samlify/VERSION.md).
+behavioral reference is pinned to `samlify` v2.13.1; see
+[`reference/upstream-samlify/VERSION.md`](reference/upstream-samlify/VERSION.md).
 
 ```toml
 [dependencies]
@@ -246,7 +246,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo nextest run --workspace
 ```
 
-Fetch the pinned upstream reference sources when doing parity work:
+Fetch the pinned upstream reference sources when comparing or porting behavior:
 
 ```sh
 ./scripts/fetch-upstream-samlify.sh
