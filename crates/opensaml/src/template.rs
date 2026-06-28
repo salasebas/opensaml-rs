@@ -1,8 +1,9 @@
 //! Default SAML message templates and tag substitution (samlify `libsaml.ts`).
 //!
-//! `{Tag}` placeholders are filled by [`replace_tags_by_value`]. Replacement
-//! values are XML-escaped in both attribute and element-text positions so
-//! caller-provided data cannot become signed SAML markup.
+//! `{Tag}` placeholders are filled by [`replace_tags_by_value`] or
+//! [`replace_tags_by_optional_value`]. Replacement values are XML-escaped in
+//! both attribute and element-text positions so caller-provided data cannot
+//! become signed SAML markup.
 
 use crate::binding::xml_escape;
 use crate::util::camel_case;
@@ -11,7 +12,7 @@ use crate::util::camel_case;
 pub const LOGIN_REQUEST_TEMPLATE: &str = "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\" ProtocolBinding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\" AssertionConsumerServiceURL=\"{AssertionConsumerServiceURL}\"><saml:Issuer>{Issuer}</saml:Issuer><samlp:NameIDPolicy Format=\"{NameIDFormat}\" AllowCreate=\"{AllowCreate}\"/></samlp:AuthnRequest>";
 
 /// Default `<LogoutRequest>` template.
-pub const LOGOUT_REQUEST_TEMPLATE: &str = "<samlp:LogoutRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\"><saml:Issuer>{Issuer}</saml:Issuer><saml:NameID Format=\"{NameIDFormat}\">{NameID}</saml:NameID></samlp:LogoutRequest>";
+pub const LOGOUT_REQUEST_TEMPLATE: &str = "<samlp:LogoutRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\"><saml:Issuer>{Issuer}</saml:Issuer><saml:NameID Format=\"{NameIDFormat}\">{NameID}</saml:NameID><samlp:SessionIndex>{SessionIndex}</samlp:SessionIndex></samlp:LogoutRequest>";
 
 /// Default `<AttributeStatement>` wrapper template.
 pub const ATTRIBUTE_STATEMENT_TEMPLATE: &str =
@@ -34,18 +35,168 @@ pub const LOGOUT_RESPONSE_TEMPLATE: &str = "<samlp:LogoutResponse xmlns:samlp=\"
 pub fn replace_tags_by_value(raw_xml: &str, tags: &[(&str, String)]) -> String {
     let mut xml = raw_xml.to_string();
     for (key, value) in tags {
-        let needle = format!("{{{key}}}");
-        let mut result = String::with_capacity(xml.len());
-        let mut rest = xml.as_str();
-        while let Some(pos) = rest.find(&needle) {
-            result.push_str(&rest[..pos]);
-            result.push_str(&xml_escape(value));
-            rest = &rest[pos + needle.len()..];
-        }
-        result.push_str(rest);
-        xml = result;
+        xml = replace_tag(&xml, key, Some(value));
     }
     xml
+}
+
+/// Replace `{key}` placeholders in `raw_xml`, omitting optional placeholders.
+///
+/// `Some(value)` is XML-escaped and inserted, including `Some(String::new())`.
+/// `None` removes attributes whose complete value is the placeholder, removes
+/// elements whose complete body is the placeholder, and renders any remaining
+/// occurrences as an empty string.
+pub fn replace_tags_by_optional_value(raw_xml: &str, tags: &[(&str, Option<String>)]) -> String {
+    let mut xml = raw_xml.to_string();
+    for (key, value) in tags {
+        xml = replace_tag(&xml, key, value.as_deref());
+    }
+    xml
+}
+
+fn replace_tag(raw_xml: &str, key: &str, value: Option<&str>) -> String {
+    let needle = format!("{{{key}}}");
+    match value {
+        Some(value) => replace_all(raw_xml, &needle, &xml_escape(value)),
+        None => {
+            let xml = remove_optional_attributes(raw_xml, &needle);
+            let xml = remove_optional_elements(&xml, &needle);
+            replace_all(&xml, &needle, "")
+        }
+    }
+}
+
+fn replace_all(raw_xml: &str, needle: &str, replacement: &str) -> String {
+    let mut result = String::with_capacity(raw_xml.len());
+    let mut rest = raw_xml;
+    while let Some(pos) = rest.find(needle) {
+        result.push_str(&rest[..pos]);
+        result.push_str(replacement);
+        rest = &rest[pos + needle.len()..];
+    }
+    result.push_str(rest);
+    result
+}
+
+fn remove_optional_attributes(raw_xml: &str, needle: &str) -> String {
+    remove_optional_ranges(raw_xml, needle, optional_attribute_range)
+}
+
+fn remove_optional_elements(raw_xml: &str, needle: &str) -> String {
+    remove_optional_ranges(raw_xml, needle, optional_element_range)
+}
+
+fn remove_optional_ranges(
+    raw_xml: &str,
+    needle: &str,
+    range_for_match: fn(&str, usize, usize) -> Option<(usize, usize)>,
+) -> String {
+    let mut result = String::with_capacity(raw_xml.len());
+    let mut cursor = 0;
+    while let Some(relative_pos) = raw_xml[cursor..].find(needle) {
+        let pos = cursor + relative_pos;
+        if let Some((start, end)) = range_for_match(raw_xml, pos, needle.len()) {
+            if start >= cursor {
+                result.push_str(&raw_xml[cursor..start]);
+                cursor = end;
+                continue;
+            }
+        }
+        let next = pos + needle.len();
+        result.push_str(&raw_xml[cursor..next]);
+        cursor = next;
+    }
+    result.push_str(&raw_xml[cursor..]);
+    result
+}
+
+fn optional_attribute_range(
+    raw_xml: &str,
+    needle_start: usize,
+    needle_len: usize,
+) -> Option<(usize, usize)> {
+    let bytes = raw_xml.as_bytes();
+    let needle_end = needle_start + needle_len;
+    if needle_start == 0 || needle_end >= bytes.len() {
+        return None;
+    }
+
+    let quote = bytes[needle_start - 1];
+    if !matches!(quote, b'"' | b'\'') || bytes[needle_end] != quote {
+        return None;
+    }
+
+    let mut cursor = needle_start - 1;
+    while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
+        cursor -= 1;
+    }
+    if cursor == 0 || bytes[cursor - 1] != b'=' {
+        return None;
+    }
+
+    let mut name_end = cursor - 1;
+    while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
+        name_end -= 1;
+    }
+
+    let mut name_start = name_end;
+    while name_start > 0 && is_attribute_name_byte(bytes[name_start - 1]) {
+        name_start -= 1;
+    }
+    if name_start == name_end {
+        return None;
+    }
+
+    let mut remove_start = name_start;
+    while remove_start > 0 && bytes[remove_start - 1].is_ascii_whitespace() {
+        remove_start -= 1;
+    }
+
+    Some((remove_start, needle_end + 1))
+}
+
+fn is_attribute_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-' | b'.')
+}
+
+fn optional_element_range(
+    raw_xml: &str,
+    needle_start: usize,
+    needle_len: usize,
+) -> Option<(usize, usize)> {
+    let bytes = raw_xml.as_bytes();
+    let needle_end = needle_start + needle_len;
+    if needle_start == 0
+        || needle_end >= bytes.len()
+        || bytes[needle_start - 1] != b'>'
+        || bytes[needle_end] != b'<'
+    {
+        return None;
+    }
+
+    let open_start = raw_xml[..needle_start - 1].rfind('<')?;
+    let name_start = open_start + 1;
+    let first_name_byte = *bytes.get(name_start)?;
+    if matches!(first_name_byte, b'/' | b'!' | b'?') {
+        return None;
+    }
+
+    let mut name_end = name_start;
+    while name_end < bytes.len()
+        && !bytes[name_end].is_ascii_whitespace()
+        && !matches!(bytes[name_end], b'/' | b'>')
+    {
+        name_end += 1;
+    }
+    if name_start == name_end {
+        return None;
+    }
+
+    let element_name = &raw_xml[name_start..name_end];
+    let close_tag = format!("</{element_name}>");
+    raw_xml[needle_end..]
+        .starts_with(&close_tag)
+        .then_some((open_start, needle_end + close_tag.len()))
 }
 
 /// A single `<Attribute>` to render in a login response (samlify `LoginResponseAttribute`).
@@ -146,6 +297,50 @@ mod tests {
             rendered,
             "<a X=\"a&quot;b&amp;c&lt;d\">&lt;raw&gt;&amp;amp;</a>"
         );
+    }
+
+    #[test]
+    fn optional_replacement_values_are_escaped_in_attributes_and_element_text() {
+        let rendered = replace_tags_by_optional_value(
+            "<a X=\"{V}\">{T}</a>",
+            &[
+                ("V", Some("a\"b&c<d".to_string())),
+                ("T", Some("<raw>&amp;".to_string())),
+            ],
+        );
+        assert_eq!(
+            rendered,
+            "<a X=\"a&quot;b&amp;c&lt;d\">&lt;raw&gt;&amp;amp;</a>"
+        );
+    }
+
+    #[test]
+    fn optional_none_removes_placeholder_attribute_but_keeps_visible_text() {
+        let rendered =
+            replace_tags_by_optional_value("<a id=\"{Id}\">visible</a>", &[("Id", None)]);
+        assert_eq!(rendered, "<a>visible</a>");
+    }
+
+    #[test]
+    fn optional_none_removes_element_when_placeholder_is_only_body() {
+        let rendered =
+            replace_tags_by_optional_value("<root><a>{Body}</a><b>x</b></root>", &[("Body", None)]);
+        assert_eq!(rendered, "<root><b>x</b></root>");
+    }
+
+    #[test]
+    fn optional_none_in_mixed_text_becomes_empty_string() {
+        let rendered = replace_tags_by_optional_value("<a>Hello {Name}</a>", &[("Name", None)]);
+        assert_eq!(rendered, "<a>Hello </a>");
+    }
+
+    #[test]
+    fn optional_empty_string_keeps_empty_attribute_value() {
+        let rendered = replace_tags_by_optional_value(
+            "<a id=\"{Id}\">visible</a>",
+            &[("Id", Some(String::new()))],
+        );
+        assert_eq!(rendered, "<a id=\"\">visible</a>");
     }
 
     #[test]
