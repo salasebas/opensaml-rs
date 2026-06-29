@@ -2,6 +2,7 @@
 
 use crate::constants::{elements_order, name_id_format, namespace, Binding};
 use crate::error::OpenSamlError;
+use crate::metadata::write::MetadataWriter;
 use crate::util::{is_non_empty_array, normalize_cert_string};
 
 /// A protocol endpoint (`SingleSignOnService` / `SingleLogoutService` / ACS).
@@ -70,161 +71,197 @@ pub struct IdpMetadataConfig {
     pub elements_order: Option<Vec<String>>,
 }
 
-fn key_descriptor(use_: &str, cert: &str) -> String {
-    format!(
-        "<KeyDescriptor use=\"{use_}\"><ds:KeyInfo xmlns:ds=\"{dsig}\"><ds:X509Data><ds:X509Certificate>{cert}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></KeyDescriptor>",
-        dsig = namespace::DSIG,
-        cert = normalize_cert_string(cert),
-    )
+fn write_key_descriptor(w: &mut MetadataWriter, use_: &str, cert: &str) {
+    let cert = normalize_cert_string(cert);
+    w.start("KeyDescriptor", &[("use", use_)]);
+    w.start("ds:KeyInfo", &[("xmlns:ds", namespace::DSIG)]);
+    w.start("ds:X509Data", &[]);
+    w.text_element("ds:X509Certificate", &cert);
+    w.end("ds:X509Data");
+    w.end("ds:KeyInfo");
+    w.end("KeyDescriptor");
 }
 
-fn key_descriptors(signing: &[String], encrypt: &[String]) -> String {
-    let mut out = String::new();
+fn write_key_descriptors(w: &mut MetadataWriter, signing: &[String], encrypt: &[String]) {
     for cert in signing {
-        out.push_str(&key_descriptor("signing", cert));
+        write_key_descriptor(w, "signing", cert);
     }
     for cert in encrypt {
-        out.push_str(&key_descriptor("encryption", cert));
+        write_key_descriptor(w, "encryption", cert);
     }
-    out
 }
 
-fn name_id_formats(formats: &[String]) -> String {
-    let defaulted: Vec<String> = if is_non_empty_array(formats) {
-        formats.to_vec()
-    } else {
-        vec![name_id_format::EMAIL_ADDRESS.to_string()]
-    };
-    defaulted
-        .iter()
-        .map(|f| format!("<NameIDFormat>{f}</NameIDFormat>"))
-        .collect()
+fn write_name_id_formats(w: &mut MetadataWriter, formats: &[String], default_to_email: bool) {
+    if is_non_empty_array(formats) {
+        for format in formats {
+            w.text_element("NameIDFormat", format);
+        }
+    } else if default_to_email {
+        w.text_element("NameIDFormat", name_id_format::EMAIL_ADDRESS);
+    }
 }
 
-fn endpoint_attrs(e: &Endpoint, index: Option<usize>) -> String {
-    use crate::binding::xml_escape;
-    let mut attrs = String::new();
+fn write_endpoint_attrs(w: &mut MetadataWriter, name: &str, e: &Endpoint, index: Option<usize>) {
+    let index_string;
+    let mut attrs = Vec::with_capacity(4);
     if let Some(i) = index {
-        attrs.push_str(&format!(" index=\"{i}\""));
+        index_string = i.to_string();
+        attrs.push(("index", index_string.as_str()));
     }
     if e.is_default {
-        attrs.push_str(" isDefault=\"true\"");
+        attrs.push(("isDefault", "true"));
     }
-    attrs.push_str(&format!(
-        " Binding=\"{}\" Location=\"{}\"",
-        e.binding.urn(),
-        xml_escape(&e.location)
-    ));
-    attrs
+    attrs.push(("Binding", e.binding.urn()));
+    attrs.push(("Location", e.location.as_str()));
+    w.empty(name, &attrs);
 }
 
-fn single_logout(endpoints: &[Endpoint]) -> String {
-    endpoints
-        .iter()
-        .map(|e| format!("<SingleLogoutService{}/>", endpoint_attrs(e, None)))
-        .collect()
+fn write_single_logout(w: &mut MetadataWriter, endpoints: &[Endpoint]) {
+    for endpoint in endpoints {
+        write_endpoint_attrs(w, "SingleLogoutService", endpoint, None);
+    }
+}
+
+fn write_assertion_consumer_service(w: &mut MetadataWriter, endpoints: &[Endpoint]) {
+    for (i, endpoint) in endpoints.iter().enumerate() {
+        write_endpoint_attrs(w, "AssertionConsumerService", endpoint, Some(i));
+    }
+}
+
+fn write_single_sign_on_service(w: &mut MetadataWriter, endpoints: &[Endpoint]) {
+    for endpoint in endpoints {
+        write_endpoint_attrs(w, "SingleSignOnService", endpoint, None);
+    }
+}
+
+fn write_sp_group(w: &mut MetadataWriter, cfg: &SpMetadataConfig, name: &str) {
+    match name {
+        "KeyDescriptor" => write_key_descriptors(w, &cfg.signing_certs, &cfg.encrypt_certs),
+        "NameIDFormat" => write_name_id_formats(w, &cfg.name_id_format, true),
+        "SingleLogoutService" => write_single_logout(w, &cfg.single_logout_service),
+        "AssertionConsumerService" => {
+            write_assertion_consumer_service(w, &cfg.assertion_consumer_service)
+        }
+        _ => {}
+    }
+}
+
+fn idp_group_has_content(cfg: &IdpMetadataConfig, name: &str) -> bool {
+    match name {
+        "KeyDescriptor" => {
+            is_non_empty_array(&cfg.signing_certs) || is_non_empty_array(&cfg.encrypt_certs)
+        }
+        "NameIDFormat" => is_non_empty_array(&cfg.name_id_format),
+        "SingleSignOnService" => is_non_empty_array(&cfg.single_sign_on_service),
+        "SingleLogoutService" => is_non_empty_array(&cfg.single_logout_service),
+        _ => false,
+    }
+}
+
+fn write_idp_group(w: &mut MetadataWriter, cfg: &IdpMetadataConfig, name: &str) {
+    match name {
+        "KeyDescriptor" => write_key_descriptors(w, &cfg.signing_certs, &cfg.encrypt_certs),
+        "NameIDFormat" => write_name_id_formats(w, &cfg.name_id_format, false),
+        "SingleSignOnService" => write_single_sign_on_service(w, &cfg.single_sign_on_service),
+        "SingleLogoutService" => write_single_logout(w, &cfg.single_logout_service),
+        _ => {}
+    }
+}
+
+fn elements_order_or_default(order: &Option<Vec<String>>, default: &[&str]) -> Vec<String> {
+    if let Some(order) = order {
+        order.clone()
+    } else {
+        default.iter().map(|s| s.to_string()).collect()
+    }
+}
+
+fn bool_str(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 /// Generate SP metadata XML.
 pub fn generate_sp_metadata(cfg: &SpMetadataConfig) -> String {
-    let order = cfg.elements_order.clone().unwrap_or_else(|| {
-        elements_order::DEFAULT
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    });
-
-    let acs: String = cfg
-        .assertion_consumer_service
-        .iter()
-        .enumerate()
-        .map(|(i, e)| format!("<AssertionConsumerService{}/>", endpoint_attrs(e, Some(i))))
-        .collect();
-
-    let mut body = String::new();
+    let order = elements_order_or_default(&cfg.elements_order, elements_order::DEFAULT);
+    let mut w = MetadataWriter::new();
+    w.start(
+        "EntityDescriptor",
+        &[
+            ("entityID", cfg.entity_id.as_str()),
+            ("xmlns", namespace::METADATA),
+            ("xmlns:assertion", namespace::ASSERTION),
+            ("xmlns:ds", namespace::DSIG),
+        ],
+    );
+    w.start(
+        "SPSSODescriptor",
+        &[
+            ("AuthnRequestsSigned", bool_str(cfg.authn_requests_signed)),
+            ("WantAssertionsSigned", bool_str(cfg.want_assertions_signed)),
+            ("protocolSupportEnumeration", namespace::PROTOCOL),
+        ],
+    );
     for name in &order {
-        match name.as_str() {
-            "KeyDescriptor" => {
-                body.push_str(&key_descriptors(&cfg.signing_certs, &cfg.encrypt_certs))
-            }
-            "NameIDFormat" => body.push_str(&name_id_formats(&cfg.name_id_format)),
-            "SingleLogoutService" => body.push_str(&single_logout(&cfg.single_logout_service)),
-            "AssertionConsumerService" => body.push_str(&acs),
-            _ => {}
-        }
+        write_sp_group(&mut w, cfg, name);
     }
-
-    format!(
-        "<EntityDescriptor entityID=\"{entity}\" xmlns=\"{md}\" xmlns:assertion=\"{assertion}\" xmlns:ds=\"{dsig}\"><SPSSODescriptor AuthnRequestsSigned=\"{ars}\" WantAssertionsSigned=\"{was}\" protocolSupportEnumeration=\"{protocol}\">{body}</SPSSODescriptor></EntityDescriptor>",
-        entity = cfg.entity_id,
-        md = namespace::METADATA,
-        assertion = namespace::ASSERTION,
-        dsig = namespace::DSIG,
-        ars = cfg.authn_requests_signed,
-        was = cfg.want_assertions_signed,
-        protocol = namespace::PROTOCOL,
-    )
+    w.end("SPSSODescriptor");
+    w.end("EntityDescriptor");
+    w.finish()
 }
 
 /// Generate IdP metadata XML.
 pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
     let is_custom_order = cfg.elements_order.is_some();
-    let order = cfg.elements_order.clone().unwrap_or_else(|| {
-        elements_order::idp::DEFAULT
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    });
-
-    let sso: String = cfg
-        .single_sign_on_service
-        .iter()
-        .map(|e| format!("<SingleSignOnService{}/>", endpoint_attrs(e, None)))
-        .collect();
-
-    let keys = key_descriptors(&cfg.signing_certs, &cfg.encrypt_certs);
-    let formats = if is_non_empty_array(&cfg.name_id_format) {
-        name_id_formats(&cfg.name_id_format)
-    } else {
-        String::new()
-    };
-    let slo = single_logout(&cfg.single_logout_service);
-
+    let order = elements_order_or_default(&cfg.elements_order, elements_order::idp::DEFAULT);
     let descriptors = [
-        ("KeyDescriptor", keys),
-        ("NameIDFormat", formats),
-        ("SingleSignOnService", sso),
-        ("SingleLogoutService", slo),
+        "KeyDescriptor",
+        "NameIDFormat",
+        "SingleSignOnService",
+        "SingleLogoutService",
     ];
-    let mut body = String::new();
+    let mut w = MetadataWriter::new();
+    w.start(
+        "EntityDescriptor",
+        &[
+            ("entityID", cfg.entity_id.as_str()),
+            ("xmlns", namespace::METADATA),
+            ("xmlns:assertion", namespace::ASSERTION),
+            ("xmlns:ds", namespace::DSIG),
+        ],
+    );
+    w.start(
+        "IDPSSODescriptor",
+        &[
+            (
+                "WantAuthnRequestsSigned",
+                bool_str(cfg.want_authn_requests_signed),
+            ),
+            ("protocolSupportEnumeration", namespace::PROTOCOL),
+        ],
+    );
     for name in &order {
-        if let Some((_, fragment)) = descriptors.iter().find(|(descriptor_name, fragment)| {
-            descriptor_name == &name.as_str() && !fragment.is_empty()
-        }) {
-            body.push_str(fragment);
+        if descriptors.contains(&name.as_str()) && idp_group_has_content(cfg, name) {
+            write_idp_group(&mut w, cfg, name);
         }
     }
     if is_custom_order {
         if !order.iter().any(|ordered| ordered == "SingleSignOnService") {
-            body.push_str(&descriptors[2].1);
+            write_idp_group(&mut w, cfg, "SingleSignOnService");
         }
     } else {
-        for (name, fragment) in &descriptors {
-            if !fragment.is_empty() && !order.iter().any(|ordered| ordered == name) {
-                body.push_str(fragment);
+        for name in descriptors {
+            if idp_group_has_content(cfg, name) && !order.iter().any(|ordered| ordered == name) {
+                write_idp_group(&mut w, cfg, name);
             }
         }
     }
-
-    format!(
-        "<EntityDescriptor entityID=\"{entity}\" xmlns=\"{md}\" xmlns:assertion=\"{assertion}\" xmlns:ds=\"{dsig}\"><IDPSSODescriptor WantAuthnRequestsSigned=\"{wars}\" protocolSupportEnumeration=\"{protocol}\">{body}</IDPSSODescriptor></EntityDescriptor>",
-        entity = cfg.entity_id,
-        md = namespace::METADATA,
-        assertion = namespace::ASSERTION,
-        dsig = namespace::DSIG,
-        wars = cfg.want_authn_requests_signed,
-        protocol = namespace::PROTOCOL,
-    )
+    w.end("IDPSSODescriptor");
+    w.end("EntityDescriptor");
+    w.finish()
 }
 
 /// Generate IdP metadata XML, validating required config-driven metadata first.
@@ -241,7 +278,11 @@ pub fn try_generate_idp_metadata(cfg: &IdpMetadataConfig) -> Result<String, Open
 mod tests {
     use super::*;
     use crate::constants::CertUse;
+    use crate::entity::EntitySetting;
     use crate::metadata::{IdpMetadata, SpMetadata};
+    use crate::sp::ServiceProvider;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     #[test]
     fn sp_metadata_round_trips() -> Result<(), Box<dyn std::error::Error>> {
@@ -353,6 +394,107 @@ mod tests {
             result,
             Err(OpenSamlError::MissingMetadata(name)) if name == "SingleSignOnService"
         ));
+    }
+
+    #[test]
+    fn sp_from_config_escapes_name_id_format_xml_markup() -> TestResult {
+        let injected_format = format!(
+            "{}</NameIDFormat><SingleLogoutService Binding=\"{}\" Location=\"https://evil.example/slo\"/><NameIDFormat>",
+            name_id_format::EMAIL_ADDRESS,
+            Binding::Redirect.urn()
+        );
+        let cfg = SpMetadataConfig {
+            entity_id: "https://sp.example.com/metadata".into(),
+            name_id_format: vec![injected_format.clone()],
+            assertion_consumer_service: vec![Endpoint::new(Binding::Post, "https://sp/acs")],
+            ..Default::default()
+        };
+
+        let sp = ServiceProvider::from_config(&cfg, EntitySetting::default())?;
+
+        assert!(sp
+            .metadata
+            .get_single_logout_service(Binding::Redirect)
+            .is_none());
+        assert_eq!(sp.setting.name_id_format, vec![injected_format]);
+        assert!(sp.metadata_xml().contains("&lt;SingleLogoutService"));
+        Ok(())
+    }
+
+    #[test]
+    fn sp_metadata_escapes_entity_id_attribute_markup() -> TestResult {
+        let entity_id = "https://sp.example.com/metadata\" ID=\"_evil";
+        let cfg = SpMetadataConfig {
+            entity_id: entity_id.into(),
+            assertion_consumer_service: vec![Endpoint::new(Binding::Post, "https://sp/acs")],
+            ..Default::default()
+        };
+
+        let xml = generate_sp_metadata(&cfg);
+        let parsed = SpMetadata::from_xml(&xml)?;
+
+        assert!(!xml.contains(" ID=\"_evil\""));
+        assert!(xml.contains("&quot; ID=&quot;_evil"));
+        assert_eq!(parsed.get_entity_id(), Some(entity_id));
+        Ok(())
+    }
+
+    #[test]
+    fn sp_metadata_escapes_certificate_text_markup() -> TestResult {
+        let injected_cert = concat!(
+            "MIIB</ds:X509Certificate></ds:X509Data></ds:KeyInfo></KeyDescriptor>",
+            "<NameIDFormat>evil</NameIDFormat>",
+            "<KeyDescriptor><ds:KeyInfo><ds:X509Data><ds:X509Certificate>tail"
+        );
+        let cfg = SpMetadataConfig {
+            entity_id: "https://sp.example.com/metadata".into(),
+            signing_certs: vec![injected_cert.into()],
+            assertion_consumer_service: vec![Endpoint::new(Binding::Post, "https://sp/acs")],
+            elements_order: Some(vec![
+                "KeyDescriptor".into(),
+                "AssertionConsumerService".into(),
+            ]),
+            ..Default::default()
+        };
+
+        let xml = generate_sp_metadata(&cfg);
+        let parsed = SpMetadata::from_xml(&xml)?;
+
+        assert!(xml.contains("&lt;NameIDFormat&gt;evil&lt;/NameIDFormat&gt;"));
+        assert!(parsed.get_name_id_format().is_empty());
+        assert_eq!(parsed.x509_certificates(CertUse::Signing).len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn idp_metadata_escapes_endpoint_location_attribute_markup() -> TestResult {
+        let injected_location = format!(
+            "https://idp/sso\"/><SingleLogoutService Binding=\"{}\" Location=\"https://evil.example/slo",
+            Binding::Redirect.urn()
+        );
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            single_sign_on_service: vec![Endpoint::new(
+                Binding::Redirect,
+                injected_location.clone(),
+            )],
+            ..Default::default()
+        };
+
+        let xml = try_generate_idp_metadata(&cfg)?;
+        let parsed = IdpMetadata::from_xml(&xml)?;
+
+        assert!(!xml.contains("<SingleLogoutService"));
+        assert_eq!(
+            parsed
+                .get_single_sign_on_service(Binding::Redirect)
+                .as_deref(),
+            Some(injected_location.as_str())
+        );
+        assert!(parsed
+            .get_single_logout_service(Binding::Redirect)
+            .is_none());
+        Ok(())
     }
 
     #[test]
