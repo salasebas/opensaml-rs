@@ -260,4 +260,19 @@ impl BindingContext {
             self.relay_state.as_deref(),
         )
     }
+
+    /// Build the POST/SimpleSign auto-submit form after validating the endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::OpenSamlError::Invalid`] when `entity_endpoint`
+    /// is not an absolute HTTP(S) URL.
+    pub fn try_post_form(&self) -> Result<String, crate::error::OpenSamlError> {
+        crate::binding::try_saml_post_binding_form(
+            &self.entity_endpoint,
+            self.request_type,
+            &self.context,
+            self.relay_state.as_deref(),
+        )
+    }
 }
