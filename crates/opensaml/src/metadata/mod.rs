@@ -3,6 +3,7 @@
 pub mod generate;
 pub mod idp;
 pub mod sp;
+mod write;
 
 pub use generate::{
     generate_idp_metadata, generate_sp_metadata, try_generate_idp_metadata, Endpoint,
