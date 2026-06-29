@@ -2,8 +2,7 @@
 //! (signature verify + optional decrypt) → extract → issuer/time validation.
 
 use crate::binding::{
-    base64_decode, base64_decode_with_limit, deflate_raw_decode_with_limit,
-    MAX_DEFLATE_RAW_DECODE_BYTES,
+    base64_decode_with_limit, deflate_raw_decode_with_limit, MAX_DEFLATE_RAW_DECODE_BYTES,
 };
 use crate::constants::{Binding, ParserType};
 use crate::context::is_valid_xml_with_limits;
@@ -74,7 +73,8 @@ pub struct FlowOptions<'a> {
     pub binding: Option<Binding>,
     /// Message parser type.
     pub parser_type: Option<ParserType>,
-    /// Maximum inflated raw-DEFLATE bytes accepted for HTTP-Redirect input.
+    /// Maximum decoded compressed and inflated raw-DEFLATE bytes accepted for
+    /// HTTP-Redirect input.
     pub redirect_inflate_max_bytes: usize,
     /// XML parser resource limits for decoded messages and DOM reparses.
     pub xml_limits: XmlLimits,
@@ -161,11 +161,9 @@ fn decode_message(
             let content = request
                 .query_get(direction)?
                 .ok_or_else(|| OpenSamlError::Invalid("ERR_REDIRECT_FLOW_BAD_ARGS".into()))?;
-            let compressed = base64_decode(content)?;
-            deflate_raw_decode_with_limit(
-                &compressed,
-                redirect_inflate_max_bytes.min(xml_limits.max_bytes),
-            )?
+            let redirect_max_bytes = redirect_inflate_max_bytes.min(xml_limits.max_bytes);
+            let compressed = base64_decode_with_limit(content, redirect_max_bytes)?;
+            deflate_raw_decode_with_limit(&compressed, redirect_max_bytes)?
         }
         Binding::Post | Binding::SimpleSign => {
             let content = request

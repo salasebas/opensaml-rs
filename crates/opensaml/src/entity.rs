@@ -68,7 +68,8 @@ pub struct EntitySetting {
     pub enc_private_key_pass: Option<String>,
     /// Clock drift tolerance `(not_before_ms, not_on_or_after_ms)`.
     pub clock_drifts: (i64, i64),
-    /// Maximum inflated raw-DEFLATE bytes accepted for HTTP-Redirect input.
+    /// Maximum decoded compressed and inflated raw-DEFLATE bytes accepted for
+    /// HTTP-Redirect input.
     ///
     /// SAML does not define this limit; the default is a conservative
     /// resource-exhaustion guard for unauthenticated Redirect messages.

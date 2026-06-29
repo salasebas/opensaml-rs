@@ -65,9 +65,34 @@ fn deflate_raw_decode_rejects_oversized_output() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+fn redirect_flow_rejects_oversized_compressed_input_before_inflate(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let request =
+        HttpRequest::redirect(vec![("SAMLRequest".to_string(), base64_encode(&[0u8; 9]))]);
+    let mut opts = FlowOptions::default();
+    opts.binding = Some(Binding::Redirect);
+    opts.parser_type = Some(ParserType::SamlRequest);
+    opts.redirect_inflate_max_bytes = 8;
+
+    let err = flow(&opts, &request)
+        .err()
+        .ok_or("redirect flow unexpectedly succeeded")?;
+
+    assert!(matches!(
+        err,
+        OpenSamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
+    ));
+    Ok(())
+}
+
+#[test]
 fn flow_options_custom_redirect_inflate_limit_is_enforced() -> Result<(), Box<dyn std::error::Error>>
 {
-    let compressed = deflate_raw_encode(b"not xml but larger than the custom cap")?;
+    let inflated = vec![b'A'; 64];
+    let compressed = deflate_raw_encode(&inflated)?;
+    if compressed.len() >= inflated.len() {
+        return Err("test payload did not compress below inflated size".into());
+    }
     let request = HttpRequest::redirect(vec![(
         "SAMLRequest".to_string(),
         base64_encode(&compressed),
@@ -75,7 +100,7 @@ fn flow_options_custom_redirect_inflate_limit_is_enforced() -> Result<(), Box<dy
     let mut opts = FlowOptions::default();
     opts.binding = Some(Binding::Redirect);
     opts.parser_type = Some(ParserType::SamlRequest);
-    opts.redirect_inflate_max_bytes = 8;
+    opts.redirect_inflate_max_bytes = compressed.len();
 
     let err = flow(&opts, &request)
         .err()
@@ -89,14 +114,13 @@ fn flow_options_custom_redirect_inflate_limit_is_enforced() -> Result<(), Box<dy
 }
 
 #[test]
-fn entity_setting_custom_redirect_inflate_limit_is_enforced(
+fn entity_setting_custom_redirect_compressed_limit_is_enforced(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sp = unsigned_sp()?;
-    let mut setting = EntitySetting::default();
-    setting.redirect_inflate_max_bytes = 8;
-    let idp = unsigned_idp(setting)?;
+    let mut idp = unsigned_idp(EntitySetting::default())?;
     let ctx = sp.create_login_request(&idp, Binding::Redirect, None)?;
     let request = redirect_request(&ctx.context)?;
+    idp.setting.redirect_inflate_max_bytes = 8;
 
     let err = idp
         .parse_login_request(&sp, Binding::Redirect, &request)
@@ -105,7 +129,7 @@ fn entity_setting_custom_redirect_inflate_limit_is_enforced(
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message == LIMIT_ERROR
+        OpenSamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
     ));
     Ok(())
 }
