@@ -7,6 +7,44 @@ Versioning while the API is still pre-1.0.
 
 ## Unreleased
 
+## [0.2.0](https://github.com/salasebas/opensaml-rs/compare/v0.1.4...v0.2.0) - 2026-06-29
+
+### Added
+
+- *(opensaml)* support idp protocol assertion tag prefixes ([#28](https://github.com/salasebas/opensaml-rs/pull/28))
+- *(opensaml)* add authn request options
+- *(opensaml)* align IdP metadata ordering behavior
+- *(opensaml)* support rsa pss sha256 signatures
+
+### Fixed
+
+- fix metadata xml escaping ([#32](https://github.com/salasebas/opensaml-rs/pull/32))
+- *(opensaml)* limit redirect base64 decode ([#30](https://github.com/salasebas/opensaml-rs/pull/30))
+- *(opensaml)* render optional logout session index
+- *(security)* bound XML parsing before authentication
+- gate XML-Enc software RSA decryption
+- *(opensaml)* escape SAML template values
+- *(opensaml)* validate logout request issuer
+- *(opensaml)* escape SAML attribute values
+- *(opensaml)* validate SAML response destination
+- *(opensaml)* require logout response correlation
+- *(opensaml)* bind detached SAML signatures to consumed fields
+- *(opensaml)* validate bearer subject confirmation
+- *(opensaml)* require AuthnRequest root signature coverage
+- *(opensaml)* validate AuthnRequest issuer
+- *(opensaml)* [**breaking**] limit HTTP-Redirect DEFLATE output
+- *(opensaml)* require explicit SAML response correlation
+- *(opensaml)* require metadata signature root coverage
+- *(security)* bind extracted SAML content to verified reference
+
+### Other
+
+- add validated POST binding form variant ([#31](https://github.com/salasebas/opensaml-rs/pull/31))
+- update agent guidance ([#29](https://github.com/salasebas/opensaml-rs/pull/29))
+- Merge pull request #27 from salasebas/advisor/002-authn-request-options
+- refresh README and upstream samlify reference ([#22](https://github.com/salasebas/opensaml-rs/pull/22))
+- add release-plz workflow
+
 ## [0.1.4] - 2026-06-21
 
 ### Changed
