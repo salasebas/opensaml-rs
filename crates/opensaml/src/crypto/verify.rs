@@ -360,7 +360,13 @@ pub fn verify_metadata_signature_with_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::signature_algorithm::RSA_SHA256;
+    use crate::constants::{digest_for_signature, namespace, transform_algorithm};
+    use crate::crypto::construct_saml_signature;
+    use crate::crypto::keys::load_private_key;
+    use crate::util::normalize_cert_string;
     use crate::xml::{extract, ExtractorField};
+    use bergshamra::sign;
 
     #[test]
     fn external_reference_detection() {
@@ -441,10 +447,72 @@ mod tests {
     const SIGNED_REQUEST: &str = include_str!("../../tests/fixtures/signed_request_sha256.xml");
     const ATTACK: &str = include_str!("../../tests/fixtures/attack_response_signed.xml");
     const FALSE_SIGNED: &str = include_str!("../../tests/fixtures/false_signed_request_sha256.xml");
+    const RESPONSE: &str = include_str!("../../tests/fixtures/response.xml");
+    const SP_PRIVKEY: &str = include_str!("../../tests/fixtures/key/sp_privkey.pem");
     // IdP signing cert (matches the response_signed.xml signer / idpmeta).
     const IDP_CERT: &str = include_str!("../../tests/fixtures/key/idp_cert.cer");
     // SP signing cert (matches signed_request_sha256.xml signer).
     const SP_CERT: &str = include_str!("../../tests/fixtures/key/sp_cert.cer");
+    const SP_SIGNING_CERT: &str = include_str!("../../tests/fixtures/key/sp_signing_cert.cer");
+
+    fn response_with_first_invalid_signature() -> Result<String, Box<dyn std::error::Error>> {
+        let cert = normalize_cert_string(IDP_CERT);
+        let digest = digest_for_signature(RSA_SHA256).ok_or("unknown digest")?;
+        let invalid_signature = format!(
+            "<ds:Signature xmlns:ds=\"{dsig}\"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"{exc_c14n}\"/><ds:SignatureMethod Algorithm=\"{sig_alg}\"/><ds:Reference URI=\"#_d71a3a8e9fcc45c9e9d248ef7049393fc8f04e5f75\"><ds:Transforms><ds:Transform Algorithm=\"{exc_c14n}\"/></ds:Transforms><ds:DigestMethod Algorithm=\"{digest}\"/><ds:DigestValue>AAAA</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>invalid</ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>{cert}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature>",
+            dsig = namespace::DSIG,
+            exc_c14n = transform_algorithm::EXC_C14N,
+            sig_alg = RSA_SHA256,
+        );
+        Ok(RESPONSE_SIGNED.replacen(
+            "<samlp:Status>",
+            &format!("{invalid_signature}<samlp:Status>"),
+            1,
+        ))
+    }
+
+    fn cid_reference_response() -> Result<String, Box<dyn std::error::Error>> {
+        let cert = normalize_cert_string(SP_SIGNING_CERT);
+        let signature = format!(
+            "<ds:Signature xmlns:ds=\"{dsig}\"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"{exc_c14n}\"/><ds:SignatureMethod Algorithm=\"{sig_alg}\"/><ds:Reference URI=\"cid:attachment-1@example.com\"><ds:DigestMethod Algorithm=\"{digest}\"/><ds:DigestValue>AAAA</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue></ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>{cert}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature>",
+            dsig = namespace::DSIG,
+            exc_c14n = transform_algorithm::EXC_C14N,
+            sig_alg = RSA_SHA256,
+            digest = digest_for_signature(RSA_SHA256).ok_or("unknown digest")?,
+        );
+        let template =
+            RESPONSE.replacen("<samlp:Status>", &format!("{signature}<samlp:Status>"), 1);
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let mut manager = KeysManager::new();
+        manager.add_key(key);
+        let ctx = DsigContext::new(manager).with_insecure(true);
+        Ok(sign(&ctx, &template)?)
+    }
+
+    fn assert_crypto_message(
+        result: Result<(bool, Option<String>), OpenSamlError>,
+        expected: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match result {
+            Err(OpenSamlError::Crypto(message)) if message == expected => Ok(()),
+            other => Err(format!("expected crypto error {expected}, got {other:?}").into()),
+        }
+    }
+
+    #[test]
+    fn dsig_context_secure_defaults_survive_insecure_builder() {
+        let ctx = DsigContext::new(KeysManager::new());
+        assert!(ctx.trusted_keys_only);
+        assert!(ctx.strict_verification);
+        assert_eq!(ctx.hmac_min_out_len, 160);
+        assert!(!ctx.insecure);
+
+        let insecure = ctx.with_insecure(true);
+        assert!(insecure.insecure);
+        assert!(insecure.trusted_keys_only);
+        assert!(insecure.strict_verification);
+        assert_eq!(insecure.hmac_min_out_len, 160);
+    }
 
     #[test]
     fn verifies_signed_response_with_metadata_cert() -> Result<(), Box<dyn std::error::Error>> {
@@ -457,6 +525,55 @@ mod tests {
             .ok_or("expected signed assertion")?
             .contains("Assertion"));
         Ok(())
+    }
+
+    #[test]
+    fn verifies_generated_same_document_signature() -> Result<(), Box<dyn std::error::Error>> {
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let signed = construct_saml_signature(
+            RESPONSE,
+            false,
+            &key,
+            SP_SIGNING_CERT,
+            RSA_SHA256,
+            &[],
+            None,
+        )?;
+        let (verified, content) = verify_signature(&signed, &[SP_SIGNING_CERT.to_string()])?;
+        assert!(verified);
+        assert!(content
+            .ok_or("expected signed assertion")?
+            .contains("Assertion"));
+        Ok(())
+    }
+
+    #[test]
+    fn inline_certificate_is_not_used_without_metadata_pin(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match verify_signature(RESPONSE_SIGNED, &[]) {
+            Err(OpenSamlError::Crypto(message)) if message == "NO_SELECTED_CERTIFICATE" => Ok(()),
+            other => Err(format!("expected missing pinned certificate, got {other:?}").into()),
+        }
+    }
+
+    #[test]
+    fn first_invalid_signature_prevents_later_valid_signature_from_authorizing_response(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let result = verify_signature(
+            &response_with_first_invalid_signature()?,
+            &[IDP_CERT.to_string()],
+        )?;
+        assert_eq!(result, (false, None));
+        Ok(())
+    }
+
+    #[test]
+    fn signed_cid_reference_is_rejected_before_content_extraction(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        assert_crypto_message(
+            verify_signature(&cid_reference_response()?, &[SP_SIGNING_CERT.to_string()]),
+            "ERR_EXTERNAL_REFERENCE",
+        )
     }
 
     #[test]
