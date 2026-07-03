@@ -215,6 +215,9 @@ With `default-features = false`, the protocol layer still builds messages,
 parses metadata, and runs extraction. Operations that need signing,
 verification, or encryption return `OpenSamlError::Unsupported`.
 
+The default `crypto-bergshamra` feature currently requires Rust 1.83 because
+`bergshamra` 0.6.3 depends on `kryptering` 0.4.1.
+
 With `crypto-bergshamra` enabled:
 
 - XML signatures can be verified against metadata-declared keys.
@@ -244,7 +247,8 @@ Security-sensitive defaults and checks include:
   flow parser.
 - HTTP-Redirect raw DEFLATE output limits.
 - XML-Enc software RSA key-transport decryption disabled by default because the
-  bundled RustCrypto RSA backend is affected by RUSTSEC-2023-0071.
+  bundled RustCrypto RSA backend, reached through `bergshamra` / `kryptering`,
+  is affected by RUSTSEC-2023-0071.
 
 Schema validation is optional defense in depth via
 `context::set_schema_validator`.
