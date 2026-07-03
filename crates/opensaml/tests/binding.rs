@@ -6,6 +6,41 @@ use opensaml::constants::Binding;
 use opensaml::entity::BindingContext;
 use opensaml::OpenSamlError;
 
+fn form_action(form: &str) -> Result<&str, Box<dyn std::error::Error>> {
+    let (_, rest) = form
+        .split_once("<form method=\"post\" action=\"")
+        .ok_or("missing form action")?;
+    let (action, _) = rest.split_once("\">").ok_or("unterminated form action")?;
+    Ok(action)
+}
+
+fn hidden_fields(form: &str) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+    let mut fields = Vec::new();
+    let mut rest = form;
+    while let Some((_, after_marker)) = rest.split_once("<input type=\"hidden\" name=\"") {
+        let (name, after_name) = after_marker
+            .split_once("\" value=\"")
+            .ok_or("unterminated hidden input name")?;
+        let (value, after_value) = after_name
+            .split_once("\"/>")
+            .ok_or("unterminated hidden input value")?;
+        fields.push((name.to_string(), value.to_string()));
+        rest = after_value;
+    }
+    Ok(fields)
+}
+
+fn hidden_field_value<'a>(
+    fields: &'a [(String, String)],
+    name: &str,
+) -> Result<&'a str, Box<dyn std::error::Error>> {
+    fields
+        .iter()
+        .find(|(field_name, _)| field_name == name)
+        .map(|(_, value)| value.as_str())
+        .ok_or_else(|| format!("missing hidden field {name}").into())
+}
+
 #[test]
 fn deflate_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
     let original = b"<samlp:AuthnRequest ID=\"_abc\" Version=\"2.0\"/>";
@@ -24,22 +59,90 @@ fn xml_escape_golden() {
 }
 
 #[test]
-fn post_form_escapes_value_and_includes_fields() {
+fn post_form_renders_escaped_action_and_hidden_fields() -> Result<(), Box<dyn std::error::Error>> {
     let form = saml_post_binding_form(
-        "https://idp.example.org/acs",
+        "https://idp.example.org/acs?next=1&label=\"<'",
         "SAMLResponse",
-        "PHNhbWxwOlJlc3BvbnNlLz4=",
-        Some("next=<script>"),
+        "PHNhbWxwOlJlc3BvbnNlLz4=&<script>\"'",
+        Some("relay=&<>\"'<script>"),
     );
 
-    // Includes the action and the hidden SAML input.
-    assert!(form.contains("action=\"https://idp.example.org/acs\""));
-    assert!(form.contains("name=\"SAMLResponse\""));
-    assert!(form.contains("value=\"PHNhbWxwOlJlc3BvbnNlLz4=\""));
+    assert_eq!(
+        form_action(&form)?,
+        "https://idp.example.org/acs?next=1&amp;label=&quot;&lt;&#39;"
+    );
+    assert_eq!(
+        hidden_fields(&form)?,
+        vec![
+            (
+                "SAMLResponse".to_string(),
+                "PHNhbWxwOlJlc3BvbnNlLz4=&amp;&lt;script&gt;&quot;&#39;".to_string(),
+            ),
+            (
+                "RelayState".to_string(),
+                "relay=&amp;&lt;&gt;&quot;&#39;&lt;script&gt;".to_string(),
+            ),
+        ]
+    );
 
-    // A `<` in a value must be HTML-escaped, never emitted raw.
-    assert!(form.contains("next=&lt;script&gt;"));
     assert!(!form.contains("<script>"));
+    Ok(())
+}
+
+#[test]
+fn post_form_escapes_param_name() -> Result<(), Box<dyn std::error::Error>> {
+    let form = saml_post_binding_form(
+        "https://idp.example.org/acs",
+        "SAML<Response>&\"'",
+        "payload",
+        None,
+    );
+
+    assert_eq!(
+        hidden_fields(&form)?,
+        vec![(
+            "SAML&lt;Response&gt;&amp;&quot;&#39;".to_string(),
+            "payload".to_string(),
+        )]
+    );
+    Ok(())
+}
+
+#[test]
+fn binding_context_post_form_renders_simplesign_fields_when_present(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = BindingContext {
+        id: "_id".into(),
+        context: "PHNhbWxwOlJlc3BvbnNlLz4=".into(),
+        relay_state: Some("relay=&<>\"'".into()),
+        entity_endpoint: "https://idp.example.org/sso".into(),
+        binding: Binding::SimpleSign,
+        request_type: "SAMLRequest",
+        signature: Some("sig=&<>\"'".into()),
+        sig_alg: Some("alg=&<>\"'".into()),
+    };
+
+    let form = context.post_form();
+    let fields = hidden_fields(&form)?;
+
+    assert_eq!(
+        hidden_field_value(&fields, "SAMLRequest")?,
+        "PHNhbWxwOlJlc3BvbnNlLz4="
+    );
+    assert_eq!(
+        hidden_field_value(&fields, "RelayState")?,
+        "relay=&amp;&lt;&gt;&quot;&#39;"
+    );
+    assert_eq!(
+        hidden_field_value(&fields, "SigAlg")?,
+        "alg=&amp;&lt;&gt;&quot;&#39;"
+    );
+    assert_eq!(
+        hidden_field_value(&fields, "Signature")?,
+        "sig=&amp;&lt;&gt;&quot;&#39;"
+    );
+    assert!(!form.contains("<script>"));
+    Ok(())
 }
 
 #[test]
@@ -97,6 +200,30 @@ fn binding_context_try_post_form_rejects_active_endpoint() {
         matches!(
             &result,
             Err(OpenSamlError::Invalid(message)) if message == "ERR_UNSAFE_POST_BINDING_ACTION_URL"
+        ),
+        "unexpected result: {result:?}"
+    );
+}
+
+#[test]
+fn binding_context_try_post_form_rejects_partial_signature_state() {
+    let context = BindingContext {
+        id: "_id".into(),
+        context: "PHNhbWxwOlJlc3BvbnNlLz4=".into(),
+        relay_state: None,
+        entity_endpoint: "https://idp.example.org/sso".into(),
+        binding: Binding::SimpleSign,
+        request_type: "SAMLRequest",
+        signature: Some("signature".into()),
+        sig_alg: None,
+    };
+
+    let result = context.try_post_form();
+
+    assert!(
+        matches!(
+            &result,
+            Err(OpenSamlError::Invalid(message)) if message == "ERR_PARTIAL_POST_BINDING_SIGNATURE"
         ),
         "unexpected result: {result:?}"
     );
