@@ -9,7 +9,7 @@ use opensaml::idp::LoginResponseOptions;
 use opensaml::logout::create_logout_request;
 use opensaml::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use opensaml::template::{LoginResponseAttribute, LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
-use opensaml::{IdentityProvider, ServiceProvider};
+use opensaml::{IdentityProvider, OpenSamlError, ServiceProvider};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -139,6 +139,148 @@ fn login_response_attribute_values_escape_xml_markup_before_signing() -> TestRes
     assert!(xml.contains("&lt;/saml:AttributeValue&gt;"));
     assert!(xml.contains("&lt;saml:Attribute Name=&quot;admin&quot;"));
     assert!(!xml.contains("<saml:Attribute Name=\"admin\""));
+    Ok(())
+}
+
+#[test]
+fn login_response_attribute_default_rendering_uses_exact_value_tags() -> TestResult {
+    const DOT_EMAIL: &str = "dot@example.com";
+    const UNDERSCORE_EMAIL: &str = "underscore@example.com";
+
+    let mut setting = signing();
+    setting.login_response_template = Some(LoginResponseTemplate {
+        context: None,
+        attributes: vec![
+            LoginResponseAttribute {
+                name: "dot-email".into(),
+                name_format: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic".into(),
+                value_xsi_type: "xs:string".into(),
+                value_tag: "user.email".into(),
+                value_xmlns_xs: None,
+                value_xmlns_xsi: None,
+            },
+            LoginResponseAttribute {
+                name: "underscore-email".into(),
+                name_format: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic".into(),
+                value_xsi_type: "xs:string".into(),
+                value_tag: "user_email".into(),
+                value_xmlns_xs: None,
+                value_xmlns_xsi: None,
+            },
+        ],
+    });
+    let idp = idp(setting)?;
+    let sp = sp()?;
+    let user = User {
+        name_id: "attacker@example.com".into(),
+        attributes: vec![
+            ("user.email".into(), DOT_EMAIL.into()),
+            ("user_email".into(), UNDERSCORE_EMAIL.into()),
+        ],
+        session_index: None,
+    };
+
+    let ctx = idp.create_login_response(
+        &sp,
+        Binding::Post,
+        &user,
+        &LoginResponseOptions {
+            in_response_to: Some("_req1"),
+            ..Default::default()
+        },
+    )?;
+    let xml = decode_binding_context(&ctx.context)?;
+    assert!(!xml.contains("{attr"));
+
+    let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+    let parsed = sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_req1")?;
+    let attributes = parsed
+        .extract
+        .get("attributes")
+        .ok_or("missing parsed attributes")?;
+    assert_eq!(
+        attributes
+            .get_key("dot-email")
+            .and_then(|value| value.as_str()),
+        Some(DOT_EMAIL)
+    );
+    assert_eq!(
+        attributes
+            .get_key("underscore-email")
+            .and_then(|value| value.as_str()),
+        Some(UNDERSCORE_EMAIL)
+    );
+    Ok(())
+}
+
+#[test]
+fn login_response_attribute_missing_value_fails_before_signing() -> TestResult {
+    let mut setting = signing();
+    setting.login_response_template = Some(LoginResponseTemplate {
+        context: None,
+        attributes: vec![LoginResponseAttribute {
+            name: "mail".into(),
+            name_format: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic".into(),
+            value_xsi_type: "xs:string".into(),
+            value_tag: "user.email".into(),
+            value_xmlns_xs: None,
+            value_xmlns_xsi: None,
+        }],
+    });
+    let idp = idp(setting)?;
+    let sp = sp()?;
+
+    let result = idp.create_login_response(
+        &sp,
+        Binding::Post,
+        &User::new("attacker@example.com"),
+        &LoginResponseOptions {
+            in_response_to: Some("_req1"),
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        matches!(result, Err(OpenSamlError::Invalid(_))),
+        "expected missing attribute to fail closed, got {result:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn login_response_attribute_default_rendering_leaves_no_attr_placeholders() -> TestResult {
+    let mut setting = signing();
+    setting.login_response_template = Some(LoginResponseTemplate {
+        context: None,
+        attributes: vec![LoginResponseAttribute {
+            name: "mail".into(),
+            name_format: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic".into(),
+            value_xsi_type: "xs:string".into(),
+            value_tag: "user.email".into(),
+            value_xmlns_xs: None,
+            value_xmlns_xsi: None,
+        }],
+    });
+    let idp = idp(setting)?;
+    let sp = sp()?;
+    let user = User {
+        name_id: "attacker@example.com".into(),
+        attributes: vec![("user.email".into(), "user@example.com".into())],
+        session_index: None,
+    };
+
+    let ctx = idp.create_login_response(
+        &sp,
+        Binding::Post,
+        &user,
+        &LoginResponseOptions {
+            in_response_to: Some("_req1"),
+            ..Default::default()
+        },
+    )?;
+    let xml = decode_binding_context(&ctx.context)?;
+
+    assert!(!xml.contains("{attr"));
     Ok(())
 }
 
