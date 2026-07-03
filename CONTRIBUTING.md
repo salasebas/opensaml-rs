@@ -27,59 +27,6 @@ cargo nextest run -p <crate>
 `-D warnings` they fail the build — including tests. Prefer returning
 `Result<_, Box<dyn std::error::Error>>` and `?` in tests over `.unwrap()`.
 
-## Dependency Updates
-
-Do not update every dependency to the latest version in one PR. Parser,
-crypto, and routine maintenance updates need separate review lanes.
-
-For `quick-xml` PRs, inspect `crates/opensaml/src/xml/dom.rs` and
-`crates/opensaml/src/xml/extract.rs`. Add parser regression tests when behavior
-changes, then run the parser and flow checks from plan 007:
-
-```bash
-cargo nextest run -p opensaml xml::dom
-cargo nextest run -p opensaml --test robustness
-cargo nextest run -p opensaml --test redirect_inflate_limit
-cargo nextest run -p opensaml
-cargo check -p opensaml --no-default-features
-cargo deny check advisories
-cargo audit --ignore RUSTSEC-2023-0071
-```
-
-For `bergshamra` or crypto-adjacent PRs, inspect `DsigContext`, `verify`,
-`verify_all`, `VerifiedReference`, XML-Enc RSA key transport, and the
-`RUSTSEC-2023-0071` policy. Run the matrix from plans 008 and 009, including:
-
-```bash
-cargo nextest run -p opensaml --test xsw
-cargo nextest run -p opensaml --test hardening
-cargo nextest run -p opensaml --test flow_conformance
-cargo nextest run -p opensaml
-cargo nextest run --workspace
-cargo check -p opensaml --no-default-features
-cargo tree -p opensaml -i rsa
-cargo deny check advisories
-cargo audit
-```
-
-Once plan 008 lands, also test no-default behavior with
-`cargo nextest run -p opensaml --no-default-features`. If
-`RUSTSEC-2023-0071` remains no-fixed, explain in the PR summary why the deny
-ignore remains and confirm software RSA key-transport decryption is still
-disabled by default. If the advisory becomes fixed or the dependency graph no
-longer reaches `rsa`, remove the stale ignore and update README or security
-text.
-
-Alias crates should remain thin re-exports. Workspace checks cover them when
-root dependency metadata changes. Dependency PRs may change compatibility code,
-tests, and directly relevant docs only; rebrand, typed SAML models,
-Artifact/SOAP/ECP/query/NameID management, and metadata federation work require
-separate plans.
-
-Fixture private keys are public test fixtures only. Never paste their values
-into generated reports, plans, or PR bodies. Rotate any fixture credential that
-was ever reused outside tests.
-
 ## Porting Work
 
 `samlify` (npm, pinned in `reference/upstream-samlify/VERSION.md`) is the
