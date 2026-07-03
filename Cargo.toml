@@ -20,7 +20,7 @@ homepage = "https://github.com/salasebas/opensaml-rs"
 [workspace.dependencies]
 base64 = "0.22"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-quick-xml = "0.40"
+quick-xml = "0.41"
 thiserror = "2"
 time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 url = "2"
