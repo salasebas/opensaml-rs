@@ -4,7 +4,8 @@
 //! (feature `crypto-bergshamra`).
 
 use super::keys::load_certificate;
-use crate::binding::{base64_decode, base64_encode};
+use super::xml_syntax::validate_crypto_xml_prefix;
+use crate::binding::{base64_decode, base64_encode, xml_escape};
 use crate::constants::{digest_for_signature, namespace, transform_algorithm};
 use crate::entity::{SignatureAction, SignatureConfig};
 use crate::error::OpenSamlError;
@@ -103,7 +104,10 @@ pub fn construct_saml_signature(
         .ok_or_else(|| OpenSamlError::Crypto(format!("unknown signature algorithm: {sig_alg}")))?;
 
     let prefix = config.map(|c| c.prefix.as_str()).unwrap_or("ds");
-    let cert_b64 = normalize_cert_string(cert);
+    validate_crypto_xml_prefix("SignatureConfig.prefix", prefix)?;
+    let cert_b64 = xml_escape(&normalize_cert_string(cert));
+    let id = xml_escape(id);
+    let sig_alg = xml_escape(sig_alg);
     let default_transforms = [
         transform_algorithm::ENVELOPED_SIGNATURE.to_string(),
         transform_algorithm::EXC_C14N.to_string(),
@@ -115,7 +119,10 @@ pub fn construct_saml_signature(
     };
     let transforms_xml: String = effective
         .iter()
-        .map(|t| format!("<{prefix}:Transform Algorithm=\"{t}\"/>"))
+        .map(|t| {
+            let transform = xml_escape(t);
+            format!("<{prefix}:Transform Algorithm=\"{transform}\"/>")
+        })
         .collect();
     let signature = format!(
         "<{p}:Signature xmlns:{p}=\"{dsig}\"><{p}:SignedInfo><{p}:CanonicalizationMethod Algorithm=\"{exc}\"/><{p}:SignatureMethod Algorithm=\"{sig_alg}\"/><{p}:Reference URI=\"#{id}\"><{p}:Transforms>{transforms_xml}</{p}:Transforms><{p}:DigestMethod Algorithm=\"{digest}\"/><{p}:DigestValue></{p}:DigestValue></{p}:Reference></{p}:SignedInfo><{p}:SignatureValue></{p}:SignatureValue><{p}:KeyInfo><{p}:X509Data><{p}:X509Certificate>{cert_b64}</{p}:X509Certificate></{p}:X509Data></{p}:KeyInfo></{p}:Signature>",

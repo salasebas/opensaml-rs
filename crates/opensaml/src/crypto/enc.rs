@@ -2,6 +2,8 @@
 //! delegating XML-Enc to `bergshamra` (feature `crypto-bergshamra`).
 
 use super::keys::load_certificate;
+use super::xml_syntax::validate_crypto_xml_prefix;
+use crate::binding::xml_escape;
 use crate::constants::namespace;
 use crate::error::OpenSamlError;
 use crate::xml::dom::{self, Node, XmlLimits};
@@ -48,10 +50,13 @@ pub fn encrypt_assertion(
     key_alg: &str,
     tag_prefix: &str,
 ) -> Result<String, OpenSamlError> {
+    validate_crypto_xml_prefix("EncryptedAssertion", tag_prefix)?;
     let doc = dom::parse(xml)?;
     let assertion = child(&doc.root, "Assertion")
         .ok_or_else(|| OpenSamlError::MissingMetadata("Assertion to encrypt".into()))?;
     let assertion_xml = &xml[assertion.start..assertion.end];
+    let data_alg = xml_escape(data_alg);
+    let key_alg = xml_escape(key_alg);
 
     let template = format!(
         "<xenc:EncryptedData xmlns:xenc=\"{enc}\" Type=\"{enc}Element\"><xenc:EncryptionMethod Algorithm=\"{data_alg}\"/><ds:KeyInfo xmlns:ds=\"{dsig}\"><xenc:EncryptedKey><xenc:EncryptionMethod Algorithm=\"{key_alg}\"/><xenc:CipherData><xenc:CipherValue></xenc:CipherValue></xenc:CipherData></xenc:EncryptedKey></ds:KeyInfo><xenc:CipherData><xenc:CipherValue></xenc:CipherValue></xenc:CipherData></xenc:EncryptedData>",
