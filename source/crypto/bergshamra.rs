@@ -1,7 +1,7 @@
 //! `bergshamra`-backed XML security (feature `crypto-bergshamra`).
 
 use crate::crypto::backend::XmlSecurityBackend;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 
 /// [`XmlSecurityBackend`] implementation backed by the `bergshamra` crate.
 ///
@@ -12,10 +12,10 @@ use crate::error::OpenSamlError;
 pub struct BergshamraBackend;
 
 impl XmlSecurityBackend for BergshamraBackend {
-    fn verify_signature(&self, xml: &str, cert_pem: &str) -> Result<(), OpenSamlError> {
+    fn verify_signature(&self, xml: &str, cert_pem: &str) -> Result<(), SamlError> {
         match crate::crypto::verify::verify_signature(xml, &[cert_pem.to_string()])? {
             (true, _) => Ok(()),
-            (false, _) => Err(OpenSamlError::FailedToVerifySignature),
+            (false, _) => Err(SamlError::FailedToVerifySignature),
         }
     }
 }

@@ -6,7 +6,7 @@
 //! context capture, `index`+`attributePath` aggregation, and multi-path union.
 
 use super::dom::{self, Node, XmlLimits};
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::util::{camel_case, uniq, zip_object, Value};
 
 /// Element path: a single chain, or several chains whose text is unioned.
@@ -236,7 +236,7 @@ fn extract_field(src: &str, root: &Node, field: &ExtractorField) -> Value {
 }
 
 /// Extract `fields` from `xml`, returning a [`Value::Object`] keyed by field key.
-pub fn extract(xml: &str, fields: &[ExtractorField]) -> Result<Value, OpenSamlError> {
+pub fn extract(xml: &str, fields: &[ExtractorField]) -> Result<Value, SamlError> {
     extract_with_limits(xml, fields, XmlLimits::default())
 }
 
@@ -245,7 +245,7 @@ pub fn extract_with_limits(
     xml: &str,
     fields: &[ExtractorField],
     limits: XmlLimits,
-) -> Result<Value, OpenSamlError> {
+) -> Result<Value, SamlError> {
     let root_doc = dom::parse_with_limits(xml, limits)?;
     let mut out: Vec<(String, Value)> = Vec::new();
     for field in fields {

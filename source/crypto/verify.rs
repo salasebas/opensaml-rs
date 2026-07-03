@@ -12,7 +12,7 @@
 //! - Only content covered by a verified reference is returned for extraction.
 
 use super::keys::load_certificate;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::util::normalize_cert_string;
 use crate::xml::dom::{self, Node, XmlLimits};
 use bergshamra::{verify, DsigContext, KeysManager, VerifiedReference, VerifyResult};
@@ -72,58 +72,48 @@ enum VerifiedTarget {
     Id(String),
 }
 
-fn verified_target_from_uri(uri: &str) -> Result<VerifiedTarget, OpenSamlError> {
+fn verified_target_from_uri(uri: &str) -> Result<VerifiedTarget, SamlError> {
     if uri.is_empty() || uri == "#xpointer(/)" {
         return Ok(VerifiedTarget::WholeDocument);
     }
 
     let fragment = uri
         .strip_prefix('#')
-        .ok_or_else(|| OpenSamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()))?;
+        .ok_or_else(|| SamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()))?;
     if fragment.is_empty() {
-        return Err(OpenSamlError::Crypto(
-            "ERR_UNSUPPORTED_REFERENCE_URI".into(),
-        ));
+        return Err(SamlError::Crypto("ERR_UNSUPPORTED_REFERENCE_URI".into()));
     }
     if let Some(id) = fragment
         .strip_prefix("xpointer(id('")
         .and_then(|rest| rest.strip_suffix("'))"))
     {
         if id.is_empty() {
-            return Err(OpenSamlError::Crypto(
-                "ERR_UNSUPPORTED_REFERENCE_URI".into(),
-            ));
+            return Err(SamlError::Crypto("ERR_UNSUPPORTED_REFERENCE_URI".into()));
         }
         return Ok(VerifiedTarget::Id(id.to_string()));
     }
     if fragment.starts_with("xpointer(") {
-        return Err(OpenSamlError::Crypto(
-            "ERR_UNSUPPORTED_REFERENCE_URI".into(),
-        ));
+        return Err(SamlError::Crypto("ERR_UNSUPPORTED_REFERENCE_URI".into()));
     }
     Ok(VerifiedTarget::Id(fragment.to_string()))
 }
 
-fn verified_targets(
-    references: &[VerifiedReference],
-) -> Result<Vec<VerifiedTarget>, OpenSamlError> {
+fn verified_targets(references: &[VerifiedReference]) -> Result<Vec<VerifiedTarget>, SamlError> {
     if references.is_empty() {
-        return Err(OpenSamlError::Crypto("NO_SIGNATURE_REFERENCES".into()));
+        return Err(SamlError::Crypto("NO_SIGNATURE_REFERENCES".into()));
     }
 
     let mut targets = Vec::with_capacity(references.len());
     for reference in references {
         if is_external_reference(&reference.uri) {
-            return Err(OpenSamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()));
+            return Err(SamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()));
         }
         if !reference.digest_verified {
-            return Err(OpenSamlError::Crypto(
-                "ERR_UNVERIFIED_REFERENCE_DIGEST".into(),
-            ));
+            return Err(SamlError::Crypto("ERR_UNVERIFIED_REFERENCE_DIGEST".into()));
         }
         let target = verified_target_from_uri(&reference.uri)?;
         if matches!(target, VerifiedTarget::Id(_)) && reference.resolved_node.is_none() {
-            return Err(OpenSamlError::Crypto("ERR_UNRESOLVED_REFERENCE".into()));
+            return Err(SamlError::Crypto("ERR_UNRESOLVED_REFERENCE".into()));
         }
         targets.push(target);
     }
@@ -152,15 +142,15 @@ fn response_is_covered(targets: &[VerifiedTarget], root: &Node) -> bool {
     target_matches_node(targets, root)
 }
 
-fn verified_content_not_covered() -> OpenSamlError {
-    OpenSamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
+fn verified_content_not_covered() -> SamlError {
+    SamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
 }
 
 fn verified_root_content(
     root: &Node,
     xml: &str,
     targets: &[VerifiedTarget],
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     if target_matches_node(targets, root) {
         return Ok(xml[root.start..root.end].to_string());
     }
@@ -174,14 +164,14 @@ fn verified_content(
     root: &Node,
     xml: &str,
     targets: &[VerifiedTarget],
-) -> Result<Option<String>, OpenSamlError> {
+) -> Result<Option<String>, SamlError> {
     if root.local_name == "Assertion" {
         return verified_root_content(root, xml, targets).map(Some);
     }
     if root.local_name.contains("Response") {
         let assertions = children_named(root, "Assertion");
         if assertions.len() > 1 {
-            return Err(OpenSamlError::PotentialWrappingAttack);
+            return Err(SamlError::PotentialWrappingAttack);
         }
         if assertions.len() == 1 {
             let a = assertions[0];
@@ -240,7 +230,7 @@ fn inline_signature_cert(node: &Node, in_signature: bool) -> Option<String> {
 pub fn verify_signature(
     xml: &str,
     metadata_certs: &[String],
-) -> Result<(bool, Option<String>), OpenSamlError> {
+) -> Result<(bool, Option<String>), SamlError> {
     verify_signature_with_limits(xml, metadata_certs, XmlLimits::default())
 }
 
@@ -249,17 +239,17 @@ pub fn verify_signature_with_limits(
     xml: &str,
     metadata_certs: &[String],
     limits: XmlLimits,
-) -> Result<(bool, Option<String>), OpenSamlError> {
+) -> Result<(bool, Option<String>), SamlError> {
     let doc = dom::parse_with_limits(xml, limits)?;
     let root = &doc.root;
 
     if root.local_name.contains("Response") && wrapping_detected(root) {
-        return Err(OpenSamlError::PotentialWrappingAttack);
+        return Err(SamlError::PotentialWrappingAttack);
     }
 
     let mut seen_ids = HashSet::new();
     if duplicate_saml_id(root, &mut seen_ids).is_some() {
-        return Err(OpenSamlError::PotentialWrappingAttack);
+        return Err(SamlError::PotentialWrappingAttack);
     }
 
     // Candidate signatures: message-level (root > Signature) or assertion-level.
@@ -281,7 +271,7 @@ pub fn verify_signature_with_limits(
                 .iter()
                 .any(|c| normalize_cert_string(c) == inline)
         {
-            return Err(OpenSamlError::UnmatchCertificate);
+            return Err(SamlError::UnmatchCertificate);
         }
     }
 
@@ -289,7 +279,7 @@ pub fn verify_signature_with_limits(
     // signature verifies if any one of the declared keys matches.
     let mut have_key = false;
     let mut tried_invalid = false;
-    let mut last_err: Option<OpenSamlError> = None;
+    let mut last_err: Option<SamlError> = None;
     for cert in metadata_certs {
         let key = match load_certificate(cert) {
             Ok(key) => key,
@@ -330,11 +320,11 @@ pub fn verify_signature_with_limits(
                 return Ok((true, verified_content(root, xml, &targets)?));
             }
             Ok(VerifyResult::Invalid { .. }) => tried_invalid = true,
-            Err(e) => last_err = Some(OpenSamlError::Crypto(e.to_string())),
+            Err(e) => last_err = Some(SamlError::Crypto(e.to_string())),
         }
     }
     if !have_key {
-        return Err(OpenSamlError::Crypto("NO_SELECTED_CERTIFICATE".into()));
+        return Err(SamlError::Crypto("NO_SELECTED_CERTIFICATE".into()));
     }
     // A clean "invalid" (key mismatch / tampered) is a non-error false; only
     // surface a structural error when no certificate produced a verdict.
@@ -347,10 +337,7 @@ pub fn verify_signature_with_limits(
 /// Verify the enveloped XML-DSig signature on a metadata document against
 /// trusted certificate(s); returns whether it is valid and covers the consumed
 /// `<EntityDescriptor>` document.
-pub fn verify_metadata_signature(
-    xml: &str,
-    trusted_certs: &[String],
-) -> Result<bool, OpenSamlError> {
+pub fn verify_metadata_signature(xml: &str, trusted_certs: &[String]) -> Result<bool, SamlError> {
     verify_metadata_signature_with_limits(xml, trusted_certs, XmlLimits::default())
 }
 
@@ -359,7 +346,7 @@ pub fn verify_metadata_signature_with_limits(
     xml: &str,
     trusted_certs: &[String],
     limits: XmlLimits,
-) -> Result<bool, OpenSamlError> {
+) -> Result<bool, SamlError> {
     Ok(verify_signature_with_limits(xml, trusted_certs, limits)?.0)
 }
 
@@ -406,12 +393,12 @@ mod tests {
     fn unsupported_reference_target_parsing_fails() {
         assert!(matches!(
             verified_target_from_uri("#"),
-            Err(OpenSamlError::Crypto(message))
+            Err(SamlError::Crypto(message))
                 if message == "ERR_UNSUPPORTED_REFERENCE_URI"
         ));
         assert!(matches!(
             verified_target_from_uri("#xpointer(//saml:Assertion)"),
-            Err(OpenSamlError::Crypto(message))
+            Err(SamlError::Crypto(message))
                 if message == "ERR_UNSUPPORTED_REFERENCE_URI"
         ));
     }
@@ -496,11 +483,11 @@ mod tests {
     }
 
     fn assert_crypto_message(
-        result: Result<(bool, Option<String>), OpenSamlError>,
+        result: Result<(bool, Option<String>), SamlError>,
         expected: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match result {
-            Err(OpenSamlError::Crypto(message)) if message == expected => Ok(()),
+            Err(SamlError::Crypto(message)) if message == expected => Ok(()),
             other => Err(format!("expected crypto error {expected}, got {other:?}").into()),
         }
     }
@@ -557,7 +544,7 @@ mod tests {
     fn inline_certificate_is_not_used_without_metadata_pin(
     ) -> Result<(), Box<dyn std::error::Error>> {
         match verify_signature(RESPONSE_SIGNED, &[]) {
-            Err(OpenSamlError::Crypto(message)) if message == "NO_SELECTED_CERTIFICATE" => Ok(()),
+            Err(SamlError::Crypto(message)) if message == "NO_SELECTED_CERTIFICATE" => Ok(()),
             other => Err(format!("expected missing pinned certificate, got {other:?}").into()),
         }
     }
@@ -585,7 +572,7 @@ mod tests {
     #[test]
     fn rejects_signed_request_without_root_coverage() -> Result<(), Box<dyn std::error::Error>> {
         match verify_signature(SIGNED_REQUEST, &[SP_CERT.to_string()]) {
-            Err(OpenSamlError::Crypto(message))
+            Err(SamlError::Crypto(message))
                 if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
             {
                 Ok(())
@@ -601,7 +588,7 @@ mod tests {
         // RESPONSE_SIGNED embeds the IdP cert; verifying against the SP cert trips
         // the inline-vs-metadata mismatch guard (samlify UNMATCH_CERTIFICATE).
         match verify_signature(RESPONSE_SIGNED, &[SP_CERT.to_string()]) {
-            Err(OpenSamlError::UnmatchCertificate) => Ok(()),
+            Err(SamlError::UnmatchCertificate) => Ok(()),
             other => Err(format!("expected UnmatchCertificate, got {other:?}").into()),
         }
     }
@@ -619,7 +606,7 @@ mod tests {
         // attack_response_signed.xml hides a forged assertion via XSW; it must not
         // produce a trusted (verified, Some(content)) result.
         match verify_signature(ATTACK, &[IDP_CERT.to_string()]) {
-            Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+            Err(SamlError::PotentialWrappingAttack) => Ok(()),
             Ok((false, _)) => Ok(()),
             Ok((true, _)) => Err("XSW response must not verify".into()),
             Err(other) => Err(format!("unexpected error: {other:?}").into()),

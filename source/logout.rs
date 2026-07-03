@@ -4,7 +4,7 @@
 use crate::binding::{base64_encode, build_redirect_url};
 use crate::constants::{namespace, status_code, Binding, CertUse, ParserType};
 use crate::entity::{generate_id, now_iso8601, BindingContext, EntitySetting, User};
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::Metadata;
 use crate::template::{
@@ -27,7 +27,7 @@ fn render_default_logout_response(
     issue_instant: &str,
     destination: &str,
     in_response_to: Option<&str>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
     validate_tag_prefix("assertion", &setting.tag_prefix_assertion)?;
 
@@ -71,7 +71,7 @@ fn render_default_logout_request(
     destination: &str,
     user: &User,
     name_id_format: &str,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
     validate_tag_prefix("assertion", &setting.tag_prefix_assertion)?;
 
@@ -113,21 +113,21 @@ fn sign_logout(
     destination: &str,
     relay: Option<&str>,
     parser_type: ParserType,
-) -> Result<(String, Option<String>, Option<String>), OpenSamlError> {
+) -> Result<(String, Option<String>, Option<String>), SamlError> {
     use crate::binding::{append_signature, build_redirect_octet};
     use crate::crypto::{
         construct_message_signature, construct_saml_signature, keys::load_private_key,
     };
 
     if matches!(binding, Binding::Artifact) {
-        return Err(OpenSamlError::UndefinedBinding);
+        return Err(SamlError::UndefinedBinding);
     }
 
     let sig_alg = &setting.request_signature_algorithm;
     let key_pem = setting
         .private_key
         .as_deref()
-        .ok_or_else(|| OpenSamlError::MissingKey("private_key".into()))?;
+        .ok_or_else(|| SamlError::MissingKey("private_key".into()))?;
     let key = load_private_key(key_pem, setting.private_key_pass.as_deref())?;
     match binding {
         Binding::Redirect => {
@@ -139,7 +139,7 @@ fn sign_logout(
             let cert = setting
                 .signing_cert
                 .as_deref()
-                .ok_or_else(|| OpenSamlError::MissingKey("signing_cert".into()))?;
+                .ok_or_else(|| SamlError::MissingKey("signing_cert".into()))?;
             let signed = construct_saml_signature(
                 xml,
                 true,
@@ -164,7 +164,7 @@ fn sign_logout(
                 Some(sig_alg.clone()),
             ))
         }
-        Binding::Artifact => Err(OpenSamlError::UndefinedBinding),
+        Binding::Artifact => Err(SamlError::UndefinedBinding),
     }
 }
 
@@ -176,8 +176,8 @@ fn sign_logout(
     _destination: &str,
     _relay: Option<&str>,
     _parser_type: ParserType,
-) -> Result<(String, Option<String>, Option<String>), OpenSamlError> {
-    Err(OpenSamlError::Unsupported(
+) -> Result<(String, Option<String>, Option<String>), SamlError> {
+    Err(SamlError::Unsupported(
         "signing logout messages requires feature crypto-bergshamra".into(),
     ))
 }
@@ -188,11 +188,11 @@ fn unsigned_context(
     destination: &str,
     parser_type: ParserType,
     relay: Option<&str>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     match binding {
         Binding::Redirect => build_redirect_url(destination, parser_type, xml, relay),
         Binding::Post | Binding::SimpleSign => Ok(base64_encode(xml.as_bytes())),
-        Binding::Artifact => Err(OpenSamlError::UndefinedBinding),
+        Binding::Artifact => Err(SamlError::UndefinedBinding),
     }
 }
 
@@ -207,7 +207,7 @@ pub fn create_logout_request(
     user: &User,
     relay_state: Option<&str>,
     want_signed: bool,
-) -> Result<BindingContext, OpenSamlError> {
+) -> Result<BindingContext, SamlError> {
     create_logout_request_with_id(
         init_setting,
         init_meta,
@@ -231,10 +231,10 @@ pub fn create_logout_request_with_id(
     relay_state: Option<&str>,
     want_signed: bool,
     message_id: Option<&str>,
-) -> Result<BindingContext, OpenSamlError> {
+) -> Result<BindingContext, SamlError> {
     let destination = target_meta
         .get_single_logout_service(binding)
-        .ok_or_else(|| OpenSamlError::MissingMetadata("SingleLogoutService".into()))?;
+        .ok_or_else(|| SamlError::MissingMetadata("SingleLogoutService".into()))?;
     let id = message_id
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
@@ -319,7 +319,7 @@ pub fn create_logout_response(
     in_response_to: Option<&str>,
     relay_state: Option<&str>,
     want_signed: bool,
-) -> Result<BindingContext, OpenSamlError> {
+) -> Result<BindingContext, SamlError> {
     create_logout_response_with_id(
         init_setting,
         init_meta,
@@ -343,10 +343,10 @@ pub fn create_logout_response_with_id(
     relay_state: Option<&str>,
     want_signed: bool,
     message_id: Option<&str>,
-) -> Result<BindingContext, OpenSamlError> {
+) -> Result<BindingContext, SamlError> {
     let destination = target_meta
         .get_single_logout_service(binding)
-        .ok_or_else(|| OpenSamlError::MissingMetadata("SingleLogoutService".into()))?;
+        .ok_or_else(|| SamlError::MissingMetadata("SingleLogoutService".into()))?;
     let id = message_id
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
@@ -424,7 +424,7 @@ pub fn parse_logout_request(
     from_meta: &Metadata,
     binding: Binding,
     request: &HttpRequest,
-) -> Result<FlowResult, OpenSamlError> {
+) -> Result<FlowResult, SamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
     flow(
         &FlowOptions {
@@ -452,7 +452,7 @@ fn parse_logout_response_inner(
     binding: Binding,
     request: &HttpRequest,
     expected_in_response_to: Option<&str>,
-) -> Result<FlowResult, OpenSamlError> {
+) -> Result<FlowResult, SamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
     flow(
         &FlowOptions {
@@ -485,9 +485,9 @@ pub fn parse_logout_response(
     binding: Binding,
     request: &HttpRequest,
     request_id: &str,
-) -> Result<FlowResult, OpenSamlError> {
+) -> Result<FlowResult, SamlError> {
     if request_id.is_empty() {
-        return Err(OpenSamlError::InvalidInResponseTo);
+        return Err(SamlError::InvalidInResponseTo);
     }
     parse_logout_response_inner(self_setting, from_meta, binding, request, Some(request_id))
 }
@@ -502,7 +502,7 @@ pub fn parse_logout_response_without_request_id(
     from_meta: &Metadata,
     binding: Binding,
     request: &HttpRequest,
-) -> Result<FlowResult, OpenSamlError> {
+) -> Result<FlowResult, SamlError> {
     parse_logout_response_inner(self_setting, from_meta, binding, request, None)
 }
 
@@ -514,7 +514,7 @@ mod tests {
     use crate::{IdentityProvider, ServiceProvider};
     use url::Url;
 
-    fn sp() -> Result<ServiceProvider, OpenSamlError> {
+    fn sp() -> Result<ServiceProvider, SamlError> {
         ServiceProvider::from_config(
             &SpMetadataConfig {
                 entity_id: "https://sp.example.com/metadata".into(),
@@ -529,7 +529,7 @@ mod tests {
         )
     }
 
-    fn idp() -> Result<IdentityProvider, OpenSamlError> {
+    fn idp() -> Result<IdentityProvider, SamlError> {
         IdentityProvider::from_config(
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),
@@ -551,7 +551,7 @@ mod tests {
         }
     }
 
-    fn unsigned_sp(entity_id: &str) -> Result<ServiceProvider, OpenSamlError> {
+    fn unsigned_sp(entity_id: &str) -> Result<ServiceProvider, SamlError> {
         ServiceProvider::from_config(
             &SpMetadataConfig {
                 entity_id: entity_id.into(),
@@ -622,7 +622,7 @@ mod tests {
         let result =
             parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
 
-        assert!(matches!(result, Err(OpenSamlError::UnmatchIssuer)));
+        assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
         Ok(())
     }
 
@@ -643,7 +643,7 @@ mod tests {
             }
         }
 
-        fn signed_sp(entity_id: &str) -> Result<ServiceProvider, OpenSamlError> {
+        fn signed_sp(entity_id: &str) -> Result<ServiceProvider, SamlError> {
             ServiceProvider::from_config(
                 &SpMetadataConfig {
                     entity_id: entity_id.into(),
@@ -679,7 +679,7 @@ mod tests {
             let result =
                 parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
 
-            assert!(matches!(result, Err(OpenSamlError::UnmatchIssuer)));
+            assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
             Ok(())
         }
     }
@@ -728,7 +728,7 @@ mod tests {
 
         assert!(matches!(
             parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, ""),
-            Err(OpenSamlError::InvalidInResponseTo)
+            Err(SamlError::InvalidInResponseTo)
         ));
         Ok(())
     }
@@ -756,7 +756,7 @@ mod tests {
                 &request,
                 "_other"
             ),
-            Err(OpenSamlError::InvalidInResponseTo)
+            Err(SamlError::InvalidInResponseTo)
         ));
         Ok(())
     }
@@ -780,13 +780,10 @@ mod tests {
             parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, "_req1");
 
         #[cfg(feature = "crypto-bergshamra")]
-        assert!(matches!(
-            result,
-            Err(OpenSamlError::FailedToVerifySignature)
-        ));
+        assert!(matches!(result, Err(SamlError::FailedToVerifySignature)));
 
         #[cfg(not(feature = "crypto-bergshamra"))]
-        assert!(matches!(result, Err(OpenSamlError::Unsupported(_))));
+        assert!(matches!(result, Err(SamlError::Unsupported(_))));
 
         Ok(())
     }

@@ -12,7 +12,7 @@ use saml_rs::crypto::{construct_saml_signature, verify_signature};
 use saml_rs::flow::{flow, FlowOptions, HttpRequest};
 use saml_rs::util::normalize_cert_string;
 use saml_rs::xml::{extract, ExtractorField};
-use saml_rs::{constants::Binding, constants::ParserType, OpenSamlError};
+use saml_rs::{constants::Binding, constants::ParserType, SamlError};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -94,7 +94,7 @@ fn baseline_signed_response_verifies() -> Result<(), Box<dyn std::error::Error>>
 fn authn_request_reference_must_cover_consumed_root() -> Result<(), Box<dyn std::error::Error>> {
     let signed = authn_request_signed_over_issuer()?;
     match verify_signature(&signed, &[CERT.to_string()]) {
-        Err(OpenSamlError::Crypto(message))
+        Err(SamlError::Crypto(message))
             if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
         {
             // Expected rejection.
@@ -118,7 +118,7 @@ fn authn_request_reference_must_cover_consumed_root() -> Result<(), Box<dyn std:
     options.from_issuer = Some("https://sp.example.com/metadata");
     options.signing_certs = &certs;
     match flow(&options, &request) {
-        Err(OpenSamlError::Crypto(message))
+        Err(SamlError::Crypto(message))
             if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
         {
             Ok(())
@@ -138,8 +138,8 @@ fn authn_request_reference_must_cover_consumed_root() -> Result<(), Box<dyn std:
 fn reference_must_cover_returned_assertion() -> Result<(), Box<dyn std::error::Error>> {
     let signed = response_signed_over_top_level_issuer()?;
     match verify_signature(&signed, &[CERT.to_string()]) {
-        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
-        Err(OpenSamlError::Crypto(message))
+        Err(SamlError::PotentialWrappingAttack) => Ok(()),
+        Err(SamlError::Crypto(message))
             if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
         {
             Ok(())
@@ -156,7 +156,7 @@ fn reference_must_cover_returned_assertion() -> Result<(), Box<dyn std::error::E
 #[test]
 fn subjectconfirmation_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
     match verify_signature(ATTACK, &[CERT.to_string()]) {
-        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+        Err(SamlError::PotentialWrappingAttack) => Ok(()),
         Ok((false, _)) => Ok(()),
         Ok((true, content)) => {
             assert!(!content.unwrap_or_default().contains("attacker"));
@@ -173,7 +173,7 @@ fn sibling_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Erro
     let pos = signed.find("<saml:Assertion").ok_or("no assertion")?;
     let wrapped = format!("{}{}{}", &signed[..pos], FORGED, &signed[pos..]);
     match verify_signature(&wrapped, &[CERT.to_string()]) {
-        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+        Err(SamlError::PotentialWrappingAttack) => Ok(()),
         Ok((false, _)) => Ok(()),
         Ok((true, content)) => {
             assert!(!content.unwrap_or_default().contains("attacker@evil.com"));
@@ -194,7 +194,7 @@ fn duplicate_id_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let wrapped = format!("{}{}{}", &signed[..pos], duplicate, &signed[pos..]);
 
     match verify_signature(&wrapped, &[CERT.to_string()]) {
-        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+        Err(SamlError::PotentialWrappingAttack) => Ok(()),
         Ok((false, _)) => Ok(()),
         Ok((true, content)) => {
             Err(format!("duplicate-ID wrapper must not verify: {:?}", content).into())
@@ -212,7 +212,7 @@ fn trailing_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Err
         .ok_or("no response close")?;
     let wrapped = format!("{}{}{}", &signed[..pos], FORGED, &signed[pos..]);
     match verify_signature(&wrapped, &[CERT.to_string()]) {
-        Err(OpenSamlError::PotentialWrappingAttack) => Ok(()),
+        Err(SamlError::PotentialWrappingAttack) => Ok(()),
         Ok((false, _)) => Ok(()),
         Ok((true, content)) => {
             assert!(!content.unwrap_or_default().contains("attacker@evil.com"));

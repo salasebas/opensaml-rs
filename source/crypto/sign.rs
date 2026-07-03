@@ -8,14 +8,14 @@ use super::xml_syntax::validate_crypto_xml_prefix;
 use crate::binding::{base64_decode, base64_encode, xml_escape};
 use crate::constants::{digest_for_signature, namespace, transform_algorithm};
 use crate::entity::{SignatureAction, SignatureConfig};
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::util::normalize_cert_string;
 use crate::xml::dom::{self, Node};
 use bergshamra::keys::Key;
 use bergshamra::{sign, DsigContext, KeysManager};
 
-fn crypto_err(err: impl std::fmt::Display) -> OpenSamlError {
-    OpenSamlError::Crypto(err.to_string())
+fn crypto_err(err: impl std::fmt::Display) -> SamlError {
+    SamlError::Crypto(err.to_string())
 }
 
 fn find_assertion(root: &Node) -> Option<&Node> {
@@ -88,20 +88,20 @@ pub fn construct_saml_signature(
     sig_alg: &str,
     transforms: &[String],
     config: Option<&SignatureConfig>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     let doc = dom::parse(xml)?;
     let target = if sign_message {
         &doc.root
     } else {
         find_assertion(&doc.root)
-            .ok_or_else(|| OpenSamlError::MissingMetadata("Assertion to sign".into()))?
+            .ok_or_else(|| SamlError::MissingMetadata("Assertion to sign".into()))?
     };
     let id = target
         .attr("ID")
         .or_else(|| target.attr("AssertionID"))
-        .ok_or_else(|| OpenSamlError::Invalid("signing target has no ID".into()))?;
+        .ok_or_else(|| SamlError::Invalid("signing target has no ID".into()))?;
     let digest = digest_for_signature(sig_alg)
-        .ok_or_else(|| OpenSamlError::Crypto(format!("unknown signature algorithm: {sig_alg}")))?;
+        .ok_or_else(|| SamlError::Crypto(format!("unknown signature algorithm: {sig_alg}")))?;
 
     let prefix = config.map(|c| c.prefix.as_str()).unwrap_or("ds");
     validate_crypto_xml_prefix("SignatureConfig.prefix", prefix)?;
@@ -134,9 +134,8 @@ pub fn construct_saml_signature(
     let pos = match config.and_then(|c| c.reference.as_deref()) {
         Some(reference) => {
             let names = parse_local_names(reference);
-            let node = resolve_path(&doc.root, &names).ok_or_else(|| {
-                OpenSamlError::Invalid("signatureConfig reference not found".into())
-            })?;
+            let node = resolve_path(&doc.root, &names)
+                .ok_or_else(|| SamlError::Invalid("signatureConfig reference not found".into()))?;
             insert_position(xml, node, config.map(|c| c.action).unwrap_or_default())
         }
         None => {
@@ -144,7 +143,7 @@ pub fn construct_saml_signature(
                 .children
                 .iter()
                 .find(|c| c.local_name == "Issuer")
-                .ok_or_else(|| OpenSamlError::Invalid("signing target has no Issuer".into()))?
+                .ok_or_else(|| SamlError::Invalid("signing target has no Issuer".into()))?
                 .end
         }
     };
@@ -162,10 +161,10 @@ pub fn construct_message_signature(
     octet_string: &str,
     key: &Key,
     sig_alg: &str,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     let signing = key
         .to_signing_key()
-        .ok_or_else(|| OpenSamlError::MissingKey("no signing key".into()))?;
+        .ok_or_else(|| SamlError::MissingKey("no signing key".into()))?;
     let alg = bergshamra::crypto::sign::from_uri(sig_alg).map_err(crypto_err)?;
     let signature = alg
         .sign(&signing, octet_string.as_bytes())
@@ -180,11 +179,11 @@ pub fn verify_message_signature(
     signature_b64: &str,
     cert: &str,
     sig_alg: &str,
-) -> Result<bool, OpenSamlError> {
+) -> Result<bool, SamlError> {
     let key = load_certificate(cert)?;
     let verifying = key
         .to_signing_key()
-        .ok_or_else(|| OpenSamlError::MissingKey("no verification key".into()))?;
+        .ok_or_else(|| SamlError::MissingKey("no verification key".into()))?;
     let alg = bergshamra::crypto::sign::from_uri(sig_alg).map_err(crypto_err)?;
     let signature = base64_decode(signature_b64)?;
     alg.verify(&verifying, octet_string.as_bytes(), &signature)

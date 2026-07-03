@@ -3,9 +3,9 @@ use saml_rs::constants::Binding;
 use saml_rs::entity::{EntitySetting, User};
 use saml_rs::logout::{create_logout_request, create_logout_response};
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
-use saml_rs::{IdentityProvider, OpenSamlError, ServiceProvider};
+use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
-fn idp() -> Result<IdentityProvider, OpenSamlError> {
+fn idp() -> Result<IdentityProvider, SamlError> {
     IdentityProvider::from_config(
         &IdpMetadataConfig {
             entity_id: "https://idp.example.com/metadata".into(),
@@ -21,7 +21,7 @@ fn idp() -> Result<IdentityProvider, OpenSamlError> {
     )
 }
 
-fn sp() -> Result<ServiceProvider, OpenSamlError> {
+fn sp() -> Result<ServiceProvider, SamlError> {
     ServiceProvider::from_config(
         &SpMetadataConfig {
             entity_id: "https://sp.example.com/metadata".into(),

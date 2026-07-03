@@ -4,7 +4,7 @@ use saml_rs::binding::{
 };
 use saml_rs::constants::Binding;
 use saml_rs::entity::BindingContext;
-use saml_rs::OpenSamlError;
+use saml_rs::SamlError;
 
 fn form_action(form: &str) -> Result<&str, Box<dyn std::error::Error>> {
     let (_, rest) = form
@@ -173,7 +173,7 @@ fn try_post_form_rejects_active_and_non_http_action_urls() {
         assert!(
             matches!(
                 &result,
-                Err(OpenSamlError::Invalid(message))
+                Err(SamlError::Invalid(message))
                     if message == "ERR_UNSAFE_POST_BINDING_ACTION_URL"
             ),
             "unexpected result for {action}: {result:?}"
@@ -199,7 +199,7 @@ fn binding_context_try_post_form_rejects_active_endpoint() {
     assert!(
         matches!(
             &result,
-            Err(OpenSamlError::Invalid(message)) if message == "ERR_UNSAFE_POST_BINDING_ACTION_URL"
+            Err(SamlError::Invalid(message)) if message == "ERR_UNSAFE_POST_BINDING_ACTION_URL"
         ),
         "unexpected result: {result:?}"
     );
@@ -223,7 +223,7 @@ fn binding_context_try_post_form_rejects_partial_signature_state() {
     assert!(
         matches!(
             &result,
-            Err(OpenSamlError::Invalid(message)) if message == "ERR_PARTIAL_POST_BINDING_SIGNATURE"
+            Err(SamlError::Invalid(message)) if message == "ERR_PARTIAL_POST_BINDING_SIGNATURE"
         ),
         "unexpected result: {result:?}"
     );

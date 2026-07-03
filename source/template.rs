@@ -6,7 +6,7 @@
 //! become signed SAML markup.
 
 use crate::binding::xml_escape;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::util::camel_case;
 use crate::xml::write::XmlWriter;
 
@@ -46,9 +46,9 @@ pub(crate) fn apply_tag_prefixes(
         .replace("xmlns:saml=", &format!("xmlns:{assertion_prefix}="))
 }
 
-pub(crate) fn validate_tag_prefix(name: &str, prefix: &str) -> Result<(), OpenSamlError> {
+pub(crate) fn validate_tag_prefix(name: &str, prefix: &str) -> Result<(), SamlError> {
     if prefix.is_empty() {
-        return Err(OpenSamlError::Invalid(format!(
+        return Err(SamlError::Invalid(format!(
             "{name} tag prefix cannot be empty"
         )));
     }
@@ -56,7 +56,7 @@ pub(crate) fn validate_tag_prefix(name: &str, prefix: &str) -> Result<(), OpenSa
         .chars()
         .any(|ch| ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '\'' | '/' | ':'))
     {
-        return Err(OpenSamlError::Invalid(format!(
+        return Err(SamlError::Invalid(format!(
             "{name} tag prefix contains an invalid character"
         )));
     }
@@ -316,7 +316,7 @@ pub(crate) fn write_login_response_attribute_statement(
     attributes: &[LoginResponseAttribute],
     user_attributes: &[(String, String)],
     assertion_prefix: &str,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     if attributes.is_empty() {
         return Ok(());
     }
@@ -331,7 +331,7 @@ pub(crate) fn write_login_response_attribute_statement(
             .find(|(tag, _)| tag == &attribute.value_tag)
             .map(|(_, value)| value.as_str())
             .ok_or_else(|| {
-                OpenSamlError::Invalid(format!(
+                SamlError::Invalid(format!(
                     "missing login response attribute value for `{}`",
                     attribute.value_tag
                 ))

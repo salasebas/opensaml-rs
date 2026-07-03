@@ -1,7 +1,7 @@
 //! SAML metadata generation (samlify `metadata-sp.ts` / `metadata-idp.ts`).
 
 use crate::constants::{elements_order, name_id_format, namespace, Binding};
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::metadata::write::MetadataWriter;
 use crate::util::{is_non_empty_array, normalize_cert_string};
 
@@ -265,9 +265,9 @@ pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
 }
 
 /// Generate IdP metadata XML, validating required config-driven metadata first.
-pub fn try_generate_idp_metadata(cfg: &IdpMetadataConfig) -> Result<String, OpenSamlError> {
+pub fn try_generate_idp_metadata(cfg: &IdpMetadataConfig) -> Result<String, SamlError> {
     if !is_non_empty_array(&cfg.single_sign_on_service) {
-        return Err(OpenSamlError::MissingMetadata(
+        return Err(SamlError::MissingMetadata(
             "SingleSignOnService".to_string(),
         ));
     }
@@ -392,7 +392,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(OpenSamlError::MissingMetadata(name)) if name == "SingleSignOnService"
+            Err(SamlError::MissingMetadata(name)) if name == "SingleSignOnService"
         ));
     }
 

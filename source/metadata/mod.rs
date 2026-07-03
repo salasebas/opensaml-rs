@@ -13,7 +13,7 @@ pub use idp::IdpMetadata;
 pub use sp::SpMetadata;
 
 use crate::constants::{Binding, CertUse};
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::util::Value;
 use crate::xml::{dom, extract_with_limits, ExtractorField, XmlLimits};
 
@@ -78,7 +78,7 @@ impl Metadata {
     /// Parse `xml`, adding the role-specific `extra` extractor fields.
     ///
     /// Rejects documents carrying more than one top-level `<EntityDescriptor>`.
-    pub fn parse(xml: &str, extra: Vec<ExtractorField>) -> Result<Self, OpenSamlError> {
+    pub fn parse(xml: &str, extra: Vec<ExtractorField>) -> Result<Self, SamlError> {
         Self::parse_with_limits(xml, extra, XmlLimits::default())
     }
 
@@ -87,7 +87,7 @@ impl Metadata {
         xml: &str,
         extra: Vec<ExtractorField>,
         limits: XmlLimits,
-    ) -> Result<Self, OpenSamlError> {
+    ) -> Result<Self, SamlError> {
         let roots = dom::parse_roots_with_limits(xml, limits)?;
         if roots
             .iter()
@@ -95,7 +95,7 @@ impl Metadata {
             .count()
             > 1
         {
-            return Err(OpenSamlError::Xml(
+            return Err(SamlError::Xml(
                 "ERR_MULTIPLE_METADATA_ENTITYDESCRIPTOR".into(),
             ));
         }
@@ -189,7 +189,7 @@ impl Metadata {
     /// Verify this metadata document's enveloped signature against trusted
     /// certificate(s) (federation trust anchor). Requires `crypto-bergshamra`.
     #[cfg(feature = "crypto-bergshamra")]
-    pub fn verify_signature(&self, trusted_certs: &[String]) -> Result<bool, OpenSamlError> {
+    pub fn verify_signature(&self, trusted_certs: &[String]) -> Result<bool, SamlError> {
         self.verify_signature_with_limits(trusted_certs, XmlLimits::default())
     }
 
@@ -199,7 +199,7 @@ impl Metadata {
         &self,
         trusted_certs: &[String],
         limits: XmlLimits,
-    ) -> Result<bool, OpenSamlError> {
+    ) -> Result<bool, SamlError> {
         crate::crypto::verify_metadata_signature_with_limits(&self.xml, trusted_certs, limits)
     }
 }

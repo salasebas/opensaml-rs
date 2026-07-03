@@ -7,7 +7,7 @@ use saml_rs::entity::EntitySetting;
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::{IdentityProvider, ServiceProvider};
 
-fn sp(setting: EntitySetting) -> Result<ServiceProvider, saml_rs::OpenSamlError> {
+fn sp(setting: EntitySetting) -> Result<ServiceProvider, saml_rs::SamlError> {
     ServiceProvider::from_config(
         &SpMetadataConfig {
             entity_id: "https://sp.example.com/metadata".into(),
@@ -27,7 +27,7 @@ fn sp(setting: EntitySetting) -> Result<ServiceProvider, saml_rs::OpenSamlError>
 }
 
 #[cfg(feature = "crypto-bergshamra")]
-fn idp(setting: EntitySetting) -> Result<IdentityProvider, saml_rs::OpenSamlError> {
+fn idp(setting: EntitySetting) -> Result<IdentityProvider, saml_rs::SamlError> {
     IdentityProvider::from_config(
         &IdpMetadataConfig {
             entity_id: "https://idp.example.com/metadata".into(),

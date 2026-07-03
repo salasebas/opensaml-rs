@@ -5,7 +5,7 @@ use crate::entity::{
     generate_id, iso8601_offset, now_iso8601, BindingContext, CustomTagReplacement, EntitySetting,
     User,
 };
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::{try_generate_idp_metadata, IdpMetadata, IdpMetadataConfig};
 use crate::sp::ServiceProvider;
@@ -43,7 +43,7 @@ pub struct IdentityProvider {
 
 impl IdentityProvider {
     /// Build from IdP metadata XML, merging metadata-declared flags into `setting`.
-    pub fn from_metadata(xml: &str, mut setting: EntitySetting) -> Result<Self, OpenSamlError> {
+    pub fn from_metadata(xml: &str, mut setting: EntitySetting) -> Result<Self, SamlError> {
         let metadata = IdpMetadata::from_xml(xml)?;
         setting.want_authn_requests_signed = metadata.is_want_authn_requests_signed();
         let formats = metadata.get_name_id_format();
@@ -60,7 +60,7 @@ impl IdentityProvider {
     pub fn from_config(
         config: &IdpMetadataConfig,
         setting: EntitySetting,
-    ) -> Result<Self, OpenSamlError> {
+    ) -> Result<Self, SamlError> {
         let metadata_xml = try_generate_idp_metadata(config)?;
         Self::from_metadata(&metadata_xml, setting)
     }
@@ -89,7 +89,7 @@ impl IdentityProvider {
         user: &User,
         acs: &str,
         custom: Option<CustomTagReplacement<'_>>,
-    ) -> Result<(String, String), OpenSamlError> {
+    ) -> Result<(String, String), SamlError> {
         validate_tag_prefix("protocol", &self.setting.tag_prefix_protocol)?;
         validate_tag_prefix("assertion", &self.setting.tag_prefix_assertion)?;
         let tmpl = self.setting.login_response_template.as_ref();
@@ -211,11 +211,11 @@ impl IdentityProvider {
         binding: Binding,
         user: &User,
         options: &LoginResponseOptions<'_>,
-    ) -> Result<BindingContext, OpenSamlError> {
+    ) -> Result<BindingContext, SamlError> {
         let acs = sp
             .metadata
             .get_assertion_consumer_service(binding)
-            .ok_or_else(|| OpenSamlError::MissingMetadata("AssertionConsumerService".into()))?;
+            .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?;
         let (id, raw) =
             self.render_login_response(sp, options.in_response_to, user, &acs, options.custom)?;
         let signed = self.finalize_login_response(sp, binding, &raw, options.encrypt_then_sign)?;
@@ -242,7 +242,7 @@ impl IdentityProvider {
         xml: &str,
         acs: &str,
         relay_state: Option<&str>,
-    ) -> Result<(String, Option<String>, Option<String>), OpenSamlError> {
+    ) -> Result<(String, Option<String>, Option<String>), SamlError> {
         use crate::binding::{append_signature, base64_encode, build_redirect_octet};
         use crate::crypto::{construct_message_signature, keys::load_private_key};
 
@@ -274,7 +274,7 @@ impl IdentityProvider {
                     Some(sig_alg.clone()),
                 ))
             }
-            Binding::Artifact => Err(OpenSamlError::UndefinedBinding),
+            Binding::Artifact => Err(SamlError::UndefinedBinding),
         }
     }
 
@@ -285,8 +285,8 @@ impl IdentityProvider {
         _xml: &str,
         _acs: &str,
         _relay_state: Option<&str>,
-    ) -> Result<(String, Option<String>, Option<String>), OpenSamlError> {
-        Err(OpenSamlError::Unsupported(
+    ) -> Result<(String, Option<String>, Option<String>), SamlError> {
+        Err(SamlError::Unsupported(
             "createLoginResponse requires feature crypto-bergshamra".into(),
         ))
     }
@@ -298,19 +298,19 @@ impl IdentityProvider {
         binding: Binding,
         raw: &str,
         _encrypt_then_sign: bool,
-    ) -> Result<String, OpenSamlError> {
+    ) -> Result<String, SamlError> {
         use crate::crypto::{construct_saml_signature, encrypt_assertion, keys::load_private_key};
 
         let key_pem = self
             .setting
             .private_key
             .as_deref()
-            .ok_or_else(|| OpenSamlError::MissingKey("private_key".into()))?;
+            .ok_or_else(|| SamlError::MissingKey("private_key".into()))?;
         let cert = self
             .setting
             .signing_cert
             .as_deref()
-            .ok_or_else(|| OpenSamlError::MissingKey("signing_cert".into()))?;
+            .ok_or_else(|| SamlError::MissingKey("signing_cert".into()))?;
         let sig_alg = &self.setting.request_signature_algorithm;
         let key = load_private_key(key_pem, self.setting.private_key_pass.as_deref())?;
 
@@ -351,7 +351,7 @@ impl IdentityProvider {
             let encrypt_cert = sp
                 .metadata
                 .get_x509_certificate(crate::constants::CertUse::Encryption)
-                .ok_or_else(|| OpenSamlError::MissingMetadata("encryption certificate".into()))?;
+                .ok_or_else(|| SamlError::MissingMetadata("encryption certificate".into()))?;
             xml = encrypt_assertion(
                 &xml,
                 &encrypt_cert,
@@ -381,8 +381,8 @@ impl IdentityProvider {
         _binding: Binding,
         _raw: &str,
         _encrypt_then_sign: bool,
-    ) -> Result<String, OpenSamlError> {
-        Err(OpenSamlError::Unsupported(
+    ) -> Result<String, SamlError> {
+        Err(SamlError::Unsupported(
             "createLoginResponse requires feature crypto-bergshamra".into(),
         ))
     }
@@ -393,7 +393,7 @@ impl IdentityProvider {
         sp: &ServiceProvider,
         binding: Binding,
         request: &HttpRequest,
-    ) -> Result<FlowResult, OpenSamlError> {
+    ) -> Result<FlowResult, SamlError> {
         let signing_certs = sp
             .metadata
             .x509_certificates(crate::constants::CertUse::Signing);
@@ -426,7 +426,7 @@ mod tests {
 
     const IDPMETA: &str = include_str!("../tests/fixtures/idpmeta.xml");
 
-    fn unsigned_idp() -> Result<IdentityProvider, OpenSamlError> {
+    fn unsigned_idp() -> Result<IdentityProvider, SamlError> {
         IdentityProvider::from_config(
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),
@@ -437,7 +437,7 @@ mod tests {
         )
     }
 
-    fn unsigned_sp(entity_id: &str) -> Result<ServiceProvider, OpenSamlError> {
+    fn unsigned_sp(entity_id: &str) -> Result<ServiceProvider, SamlError> {
         ServiceProvider::from_config(
             &SpMetadataConfig {
                 entity_id: entity_id.into(),
@@ -472,7 +472,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(OpenSamlError::MissingMetadata(name)) if name == "SingleSignOnService"
+            Err(SamlError::MissingMetadata(name)) if name == "SingleSignOnService"
         ));
     }
 
@@ -503,7 +503,7 @@ mod tests {
 
         let result = idp.parse_login_request(&expected_sp, Binding::Post, &request);
 
-        assert!(matches!(result, Err(OpenSamlError::UnmatchIssuer)));
+        assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
         Ok(())
     }
 }
@@ -527,7 +527,7 @@ mod crypto_tests {
         }
     }
 
-    fn idp() -> Result<IdentityProvider, OpenSamlError> {
+    fn idp() -> Result<IdentityProvider, SamlError> {
         IdentityProvider::from_config(
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),
@@ -540,7 +540,7 @@ mod crypto_tests {
         )
     }
 
-    fn signed_sp(entity_id: &str) -> Result<ServiceProvider, OpenSamlError> {
+    fn signed_sp(entity_id: &str) -> Result<ServiceProvider, SamlError> {
         ServiceProvider::from_config(
             &SpMetadataConfig {
                 entity_id: entity_id.into(),
@@ -554,7 +554,7 @@ mod crypto_tests {
         )
     }
 
-    fn sp() -> Result<ServiceProvider, OpenSamlError> {
+    fn sp() -> Result<ServiceProvider, SamlError> {
         signed_sp("https://sp.example.com/metadata")
     }
 
@@ -713,7 +713,7 @@ mod crypto_tests {
 
         let result = idp.parse_login_request(&expected_sp, Binding::Post, &request);
 
-        assert!(matches!(result, Err(OpenSamlError::UnmatchIssuer)));
+        assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
         Ok(())
     }
 }

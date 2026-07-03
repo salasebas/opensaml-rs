@@ -2,7 +2,7 @@
 
 use super::Metadata;
 use crate::constants::Binding;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::util::Value;
 use crate::xml::{ExtractorField, XmlLimits};
 use std::ops::Deref;
@@ -15,12 +15,12 @@ pub struct IdpMetadata {
 
 impl IdpMetadata {
     /// Parse IdP metadata XML.
-    pub fn from_xml(xml: &str) -> Result<Self, OpenSamlError> {
+    pub fn from_xml(xml: &str) -> Result<Self, SamlError> {
         Self::from_xml_with_limits(xml, XmlLimits::default())
     }
 
     /// Parse IdP metadata XML with explicit XML parser resource limits.
-    pub fn from_xml_with_limits(xml: &str, limits: XmlLimits) -> Result<Self, OpenSamlError> {
+    pub fn from_xml_with_limits(xml: &str, limits: XmlLimits) -> Result<Self, SamlError> {
         let extra = vec![
             ExtractorField::new(
                 "wantAuthnRequestsSigned",

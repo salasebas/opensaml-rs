@@ -18,7 +18,7 @@ use saml_rs::logout::{create_logout_request, create_logout_response};
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::template::{LoginResponseAttribute, LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
 use saml_rs::xml::dom::{parse_roots, Node};
-use saml_rs::{IdentityProvider, OpenSamlError, ServiceProvider};
+use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -87,9 +87,9 @@ fn direct_children<'a>(node: &'a Node, local_name: &'a str) -> impl Iterator<Ite
         .filter(move |child| child.local_name == local_name)
 }
 
-fn assert_invalid(result: Result<String, OpenSamlError>) {
+fn assert_invalid(result: Result<String, SamlError>) {
     assert!(
-        matches!(result, Err(OpenSamlError::Invalid(_))),
+        matches!(result, Err(SamlError::Invalid(_))),
         "expected invalid input to fail before crypto rendering, got {result:?}"
     );
 }
@@ -159,7 +159,7 @@ fn crypto_signature_escapes_transform_algorithm() -> TestResult {
     );
 
     assert!(
-        matches!(result, Err(OpenSamlError::Crypto(ref message)) if message.contains("unsupported algorithm") && !message.contains("XML parsing error")),
+        matches!(result, Err(SamlError::Crypto(ref message)) if message.contains("unsupported algorithm") && !message.contains("XML parsing error")),
         "expected escaped transform to fail closed without XML parser structure errors, got {result:?}"
     );
     Ok(())
@@ -229,7 +229,7 @@ fn crypto_encrypt_assertion_escapes_algorithm_attributes() -> TestResult {
     );
 
     assert!(
-        matches!(result, Err(OpenSamlError::Crypto(ref message)) if !message.contains("XML parsing error") && !message.contains("Mismatched end tag")),
+        matches!(result, Err(SamlError::Crypto(ref message)) if !message.contains("XML parsing error") && !message.contains("Mismatched end tag")),
         "expected escaped algorithms to fail closed without XML parser structure errors, got {result:?}"
     );
     Ok(())
@@ -497,7 +497,7 @@ fn login_response_attribute_missing_value_fails_before_signing() -> TestResult {
     );
 
     assert!(
-        matches!(result, Err(OpenSamlError::Invalid(_))),
+        matches!(result, Err(SamlError::Invalid(_))),
         "expected missing attribute to fail closed, got {result:?}"
     );
     Ok(())

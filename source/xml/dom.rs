@@ -4,7 +4,7 @@
 //! original substring for `context` fields (avoiding any re-serialisation /
 //! canonicalisation concerns — verification is delegated to bergshamra).
 
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::{BytesRef, Event};
 use quick_xml::name::QName;
@@ -55,7 +55,7 @@ impl XmlLimits {
         }
     }
 
-    pub(crate) fn check_input_bytes(self, len: usize) -> Result<(), OpenSamlError> {
+    pub(crate) fn check_input_bytes(self, len: usize) -> Result<(), SamlError> {
         if len > self.max_bytes {
             return Err(limit_exceeded("max XML bytes", self.max_bytes));
         }
@@ -114,11 +114,11 @@ fn local_name_str(name: QName) -> String {
     String::from_utf8_lossy(name.local_name().as_ref()).into_owned()
 }
 
-fn limit_exceeded(limit: &str, max: usize) -> OpenSamlError {
-    OpenSamlError::Invalid(format!("{XML_LIMIT_EXCEEDED}: {limit} exceeded ({max})"))
+fn limit_exceeded(limit: &str, max: usize) -> SamlError {
+    SamlError::Invalid(format!("{XML_LIMIT_EXCEEDED}: {limit} exceeded ({max})"))
 }
 
-fn checked_node_count(count: &mut usize, limits: XmlLimits) -> Result<(), OpenSamlError> {
+fn checked_node_count(count: &mut usize, limits: XmlLimits) -> Result<(), SamlError> {
     *count = count
         .checked_add(1)
         .ok_or_else(|| limit_exceeded("max XML nodes", limits.max_nodes))?;
@@ -128,7 +128,7 @@ fn checked_node_count(count: &mut usize, limits: XmlLimits) -> Result<(), OpenSa
     Ok(())
 }
 
-fn check_depth(depth: usize, limits: XmlLimits) -> Result<(), OpenSamlError> {
+fn check_depth(depth: usize, limits: XmlLimits) -> Result<(), SamlError> {
     if depth > limits.max_depth {
         return Err(limit_exceeded("max XML depth", limits.max_depth));
     }
@@ -139,7 +139,7 @@ fn checked_append_text(
     target: &mut String,
     text: &str,
     limits: XmlLimits,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     let next_len = target
         .len()
         .checked_add(text.len())
@@ -154,7 +154,7 @@ fn checked_append_text(
 fn read_attrs(
     e: &quick_xml::events::BytesStart,
     limits: XmlLimits,
-) -> Result<Vec<(String, String)>, OpenSamlError> {
+) -> Result<Vec<(String, String)>, SamlError> {
     let mut out = Vec::new();
     for attr in e.attributes() {
         if out.len() >= limits.max_attributes_per_element {
@@ -163,11 +163,11 @@ fn read_attrs(
                 limits.max_attributes_per_element,
             ));
         }
-        let attr = attr.map_err(|err| OpenSamlError::Xml(err.to_string()))?;
+        let attr = attr.map_err(|err| SamlError::Xml(err.to_string()))?;
         let key = local_name_str(attr.key);
         let value = attr
             .decoded_and_normalized_value(XmlVersion::Implicit1_0, e.decoder())
-            .map_err(|err| OpenSamlError::Xml(err.to_string()))?
+            .map_err(|err| SamlError::Xml(err.to_string()))?
             .into_owned();
         if value.len() > limits.max_attribute_value_bytes {
             return Err(limit_exceeded(
@@ -195,46 +195,44 @@ fn push_child(stack: &mut [Node], roots: &mut Vec<Node>, node: Node) {
     }
 }
 
-fn push_general_ref(node: &mut Node, e: BytesRef, limits: XmlLimits) -> Result<(), OpenSamlError> {
+fn push_general_ref(node: &mut Node, e: BytesRef, limits: XmlLimits) -> Result<(), SamlError> {
     if let Some(ch) = e
         .resolve_char_ref()
-        .map_err(|err| OpenSamlError::Xml(err.to_string()))?
+        .map_err(|err| SamlError::Xml(err.to_string()))?
     {
         let mut buf = [0; 4];
         checked_append_text(&mut node.text, ch.encode_utf8(&mut buf), limits)?;
         return Ok(());
     }
 
-    let entity = e
-        .decode()
-        .map_err(|err| OpenSamlError::Xml(err.to_string()))?;
+    let entity = e.decode().map_err(|err| SamlError::Xml(err.to_string()))?;
     let resolved = resolve_predefined_entity(&entity)
-        .ok_or_else(|| OpenSamlError::Xml(format!("unrecognized entity `{entity}`")))?;
+        .ok_or_else(|| SamlError::Xml(format!("unrecognized entity `{entity}`")))?;
     checked_append_text(&mut node.text, resolved, limits)?;
     Ok(())
 }
 
 /// Parse `xml` into a [`Document`].
-pub fn parse(xml: &str) -> Result<Document, OpenSamlError> {
+pub fn parse(xml: &str) -> Result<Document, SamlError> {
     parse_with_limits(xml, XmlLimits::default())
 }
 
 /// Parse `xml` into a [`Document`] with explicit resource limits.
-pub fn parse_with_limits(xml: &str, limits: XmlLimits) -> Result<Document, OpenSamlError> {
+pub fn parse_with_limits(xml: &str, limits: XmlLimits) -> Result<Document, SamlError> {
     let root = parse_roots_with_limits(xml, limits)?
         .into_iter()
         .next()
-        .ok_or_else(|| OpenSamlError::Xml("no document element".into()))?;
+        .ok_or_else(|| SamlError::Xml("no document element".into()))?;
     Ok(Document { root })
 }
 
 /// Parse every top-level element (used to detect multiple root descriptors).
-pub fn parse_roots(xml: &str) -> Result<Vec<Node>, OpenSamlError> {
+pub fn parse_roots(xml: &str) -> Result<Vec<Node>, SamlError> {
     parse_roots_with_limits(xml, XmlLimits::default())
 }
 
 /// Parse every top-level element with explicit resource limits.
-pub fn parse_roots_with_limits(xml: &str, limits: XmlLimits) -> Result<Vec<Node>, OpenSamlError> {
+pub fn parse_roots_with_limits(xml: &str, limits: XmlLimits) -> Result<Vec<Node>, SamlError> {
     limits.check_input_bytes(xml.len())?;
     let mut reader = Reader::from_str(xml);
     let bytes = xml.as_bytes();
@@ -246,7 +244,7 @@ pub fn parse_roots_with_limits(xml: &str, limits: XmlLimits) -> Result<Vec<Node>
         let before = reader.buffer_position() as usize;
         let event = reader
             .read_event()
-            .map_err(|err| OpenSamlError::Xml(err.to_string()))?;
+            .map_err(|err| SamlError::Xml(err.to_string()))?;
         let after = reader.buffer_position() as usize;
         match event {
             Event::Start(e) => {
@@ -284,9 +282,7 @@ pub fn parse_roots_with_limits(xml: &str, limits: XmlLimits) -> Result<Vec<Node>
             }
             Event::Text(e) => {
                 if let Some(top) = stack.last_mut() {
-                    let txt = e
-                        .decode()
-                        .map_err(|err| OpenSamlError::Xml(err.to_string()))?;
+                    let txt = e.decode().map_err(|err| SamlError::Xml(err.to_string()))?;
                     checked_append_text(&mut top.text, &txt, limits)?;
                 }
             }
@@ -305,7 +301,7 @@ pub fn parse_roots_with_limits(xml: &str, limits: XmlLimits) -> Result<Vec<Node>
             // Hardening (adapted from openauth-saml): reject DTDs so the parser
             // can never be steered into entity-expansion / XXE territory.
             Event::DocType(_) => {
-                return Err(OpenSamlError::Xml("DOCTYPE is not allowed".into()));
+                return Err(SamlError::Xml("DOCTYPE is not allowed".into()));
             }
             Event::Eof => break,
             _ => {}
@@ -326,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_root_and_attrs() -> Result<(), OpenSamlError> {
+    fn parses_root_and_attrs() -> Result<(), SamlError> {
         let doc = parse("<a:Root xmlns:a=\"urn:x\" id=\"1\"><b>hi</b></a:Root>")?;
         assert_eq!(doc.root.local_name, "Root");
         assert_eq!(doc.root.attr("id"), Some("1"));
@@ -336,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_escaped_attribute_and_text_values() -> Result<(), OpenSamlError> {
+    fn parses_escaped_attribute_and_text_values() -> Result<(), SamlError> {
         let doc = parse("<Root value=\"one &amp; two\"><Child>three &lt; four</Child></Root>")?;
 
         assert_eq!(doc.root.attr("value"), Some("one & two"));
@@ -344,8 +340,8 @@ mod tests {
         Ok(())
     }
 
-    fn limit_hit<T>(result: Result<T, OpenSamlError>) -> bool {
-        matches!(result, Err(OpenSamlError::Invalid(message)) if message.contains(XML_LIMIT_EXCEEDED))
+    fn limit_hit<T>(result: Result<T, SamlError>) -> bool {
+        matches!(result, Err(SamlError::Invalid(message)) if message.contains(XML_LIMIT_EXCEEDED))
     }
 
     #[test]
@@ -414,7 +410,7 @@ mod tests {
     fn duplicate_attribute_returns_xml_error() {
         let result = parse("<samlp:Response ID=\"first\" ID=\"second\"/>");
 
-        assert!(matches!(result, Err(OpenSamlError::Xml(_))));
+        assert!(matches!(result, Err(SamlError::Xml(_))));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use crate::binding::{
 };
 use crate::constants::{Binding, ParserType};
 use crate::context::is_valid_xml_with_limits;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::util::Value;
 use crate::validator::{check_status_with_limits, verify_time};
 use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
@@ -41,11 +41,11 @@ impl HttpRequest {
         }
     }
 
-    fn query_get(&self, key: &str) -> Result<Option<&str>, OpenSamlError> {
+    fn query_get(&self, key: &str) -> Result<Option<&str>, SamlError> {
         single_param(&self.query, key)
     }
 
-    fn body_get(&self, key: &str) -> Result<Option<&str>, OpenSamlError> {
+    fn body_get(&self, key: &str) -> Result<Option<&str>, SamlError> {
         single_param(&self.body, key)
     }
 }
@@ -53,14 +53,14 @@ impl HttpRequest {
 fn single_param<'a>(
     params: &'a [(String, String)],
     key: &str,
-) -> Result<Option<&'a str>, OpenSamlError> {
+) -> Result<Option<&'a str>, SamlError> {
     let mut values = params
         .iter()
         .filter(|(candidate, _)| candidate == key)
         .map(|(_, value)| value.as_str());
     let first = values.next();
     if values.next().is_some() {
-        return Err(OpenSamlError::Invalid("ERR_AMBIGUOUS_FLOW_INPUT".into()));
+        return Err(SamlError::Invalid("ERR_AMBIGUOUS_FLOW_INPUT".into()));
     }
     Ok(first)
 }
@@ -135,12 +135,12 @@ pub struct FlowResult {
 fn default_fields(
     parser_type: ParserType,
     assertion: Option<&str>,
-) -> Result<Vec<ExtractorField>, OpenSamlError> {
+) -> Result<Vec<ExtractorField>, SamlError> {
     Ok(match parser_type {
         ParserType::SamlRequest => fields::login_request_fields(),
         ParserType::SamlResponse => {
             let assertion =
-                assertion.ok_or_else(|| OpenSamlError::Xml("ERR_EMPTY_ASSERTION".into()))?;
+                assertion.ok_or_else(|| SamlError::Xml("ERR_EMPTY_ASSERTION".into()))?;
             fields::login_response_fields(assertion)
         }
         ParserType::LogoutRequest => fields::logout_request_fields(),
@@ -154,13 +154,13 @@ fn decode_message(
     request: &HttpRequest,
     redirect_inflate_max_bytes: usize,
     xml_limits: XmlLimits,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     let direction = parser_type.query_param();
     let bytes = match binding {
         Binding::Redirect => {
             let content = request
                 .query_get(direction)?
-                .ok_or_else(|| OpenSamlError::Invalid("ERR_REDIRECT_FLOW_BAD_ARGS".into()))?;
+                .ok_or_else(|| SamlError::Invalid("ERR_REDIRECT_FLOW_BAD_ARGS".into()))?;
             let redirect_max_bytes = redirect_inflate_max_bytes.min(xml_limits.max_bytes);
             let compressed = base64_decode_with_limit(content, redirect_max_bytes)?;
             deflate_raw_decode_with_limit(&compressed, redirect_max_bytes)?
@@ -168,16 +168,16 @@ fn decode_message(
         Binding::Post | Binding::SimpleSign => {
             let content = request
                 .body_get(direction)?
-                .ok_or_else(|| OpenSamlError::Invalid("ERR_FLOW_BAD_ARGS".into()))?;
+                .ok_or_else(|| SamlError::Invalid("ERR_FLOW_BAD_ARGS".into()))?;
             base64_decode_with_limit(content, xml_limits.max_bytes)?
         }
-        Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
+        Binding::Artifact => return Err(SamlError::UndefinedBinding),
     };
     xml_limits.check_input_bytes(bytes.len())?;
-    String::from_utf8(bytes).map_err(|e| OpenSamlError::Xml(e.to_string()))
+    String::from_utf8(bytes).map_err(|e| SamlError::Xml(e.to_string()))
 }
 
-fn assertion_shortcut(xml: &str, limits: XmlLimits) -> Result<Option<String>, OpenSamlError> {
+fn assertion_shortcut(xml: &str, limits: XmlLimits) -> Result<Option<String>, SamlError> {
     let field = ExtractorField::new("assertion", &["Response", "Assertion"]).with_context();
     Ok(
         extract_with_limits(xml, std::slice::from_ref(&field), limits)?
@@ -187,8 +187,8 @@ fn assertion_shortcut(xml: &str, limits: XmlLimits) -> Result<Option<String>, Op
 }
 
 #[cfg(feature = "crypto-bergshamra")]
-fn verified_content_not_covered() -> OpenSamlError {
-    OpenSamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
+fn verified_content_not_covered() -> SamlError {
+    SamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
 }
 
 #[cfg(feature = "crypto-bergshamra")]
@@ -199,8 +199,8 @@ fn decoded_octet_params(octet: &str) -> Vec<(String, String)> {
 }
 
 #[cfg(feature = "crypto-bergshamra")]
-fn detached_mismatch() -> OpenSamlError {
-    OpenSamlError::FailedMessageSignatureVerification
+fn detached_mismatch() -> SamlError {
+    SamlError::FailedMessageSignatureVerification
 }
 
 #[cfg(feature = "crypto-bergshamra")]
@@ -209,7 +209,7 @@ fn ensure_redirect_octet_matches_consumed_fields(
     request: &HttpRequest,
     sig_alg: &str,
     octet: &str,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     let direction = parser_type.query_param();
     let signed = decoded_octet_params(octet);
     if single_param(&signed, "Signature")?.is_some() {
@@ -245,7 +245,7 @@ fn ensure_simplesign_octet_matches_consumed_fields(
     xml: &str,
     sig_alg: &str,
     octet: &str,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     let direction = parser_type.query_param();
     request.body_get(direction)?.ok_or_else(detached_mismatch)?;
 
@@ -276,7 +276,7 @@ fn ensure_detached_octet_matches_consumed_fields(
     xml: &str,
     sig_alg: &str,
     octet: &str,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     match binding {
         Binding::Redirect => {
             ensure_redirect_octet_matches_consumed_fields(parser_type, request, sig_alg, octet)
@@ -299,7 +299,7 @@ fn verify_and_prepare(
     xml: &str,
     parser_type: ParserType,
     opts: &FlowOptions<'_>,
-) -> Result<(String, Option<String>), OpenSamlError> {
+) -> Result<(String, Option<String>), SamlError> {
     use crate::crypto::{
         decrypt_assertion_with_limits,
         enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
@@ -341,7 +341,7 @@ fn verify_and_prepare(
         return if re_verified {
             Ok((content, re_node))
         } else {
-            Err(OpenSamlError::FailedToVerifySignature)
+            Err(SamlError::FailedToVerifySignature)
         };
     }
     if verified {
@@ -354,7 +354,7 @@ fn verify_and_prepare(
         }
         return Ok((xml.to_string(), verified_node));
     }
-    Err(OpenSamlError::FailedToVerifySignature)
+    Err(SamlError::FailedToVerifySignature)
 }
 
 #[cfg(not(feature = "crypto-bergshamra"))]
@@ -362,8 +362,8 @@ fn verify_and_prepare(
     _xml: &str,
     _parser_type: ParserType,
     _opts: &FlowOptions<'_>,
-) -> Result<(String, Option<String>), OpenSamlError> {
-    Err(OpenSamlError::Unsupported(
+) -> Result<(String, Option<String>), SamlError> {
+    Err(SamlError::Unsupported(
         "signature verification requires feature crypto-bergshamra".into(),
     ))
 }
@@ -377,19 +377,19 @@ fn verify_detached(
     request: &HttpRequest,
     opts: &FlowOptions<'_>,
     xml: &str,
-) -> Result<String, OpenSamlError> {
-    let get = |k: &str| -> Result<Option<&str>, OpenSamlError> {
+) -> Result<String, SamlError> {
+    let get = |k: &str| -> Result<Option<&str>, SamlError> {
         match binding {
             Binding::Redirect => request.query_get(k),
             _ => request.body_get(k),
         }
     };
-    let signature = get("Signature")?.ok_or(OpenSamlError::MissingSigAlg)?;
-    let sig_alg = get("SigAlg")?.ok_or(OpenSamlError::MissingSigAlg)?;
+    let signature = get("Signature")?.ok_or(SamlError::MissingSigAlg)?;
+    let sig_alg = get("SigAlg")?.ok_or(SamlError::MissingSigAlg)?;
     let octet = request
         .octet_string
         .as_deref()
-        .ok_or(OpenSamlError::MissingSigAlg)?;
+        .ok_or(SamlError::MissingSigAlg)?;
     ensure_detached_octet_matches_consumed_fields(
         binding,
         parser_type,
@@ -404,7 +404,7 @@ fn verify_detached(
     if verified {
         Ok(sig_alg.to_string())
     } else {
-        Err(OpenSamlError::FailedMessageSignatureVerification)
+        Err(SamlError::FailedMessageSignatureVerification)
     }
 }
 
@@ -415,8 +415,8 @@ fn verify_detached(
     _request: &HttpRequest,
     _opts: &FlowOptions<'_>,
     _xml: &str,
-) -> Result<String, OpenSamlError> {
-    Err(OpenSamlError::Unsupported(
+) -> Result<String, SamlError> {
+    Err(SamlError::Unsupported(
         "signature verification requires feature crypto-bergshamra".into(),
     ))
 }
@@ -441,7 +441,7 @@ fn is_valid_bearer_subject_confirmation(
     xml: &str,
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
-) -> Result<bool, OpenSamlError> {
+) -> Result<bool, SamlError> {
     let fields = [
         ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
         ExtractorField::new(
@@ -482,25 +482,25 @@ fn validate_subject_confirmation(
     extracted: &Value,
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     for xml in subject_confirmation_xmls(extracted) {
         if is_valid_bearer_subject_confirmation(xml, opts, expected_recipient)? {
             return Ok(());
         }
     }
-    Err(OpenSamlError::SubjectUnconfirmed)
+    Err(SamlError::SubjectUnconfirmed)
 }
 
 fn validate_response_destination(
     extracted: &Value,
     expected_recipient: Option<&str>,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     let Some(expected) = expected_recipient else {
         return Ok(());
     };
     if let Some(destination) = extracted.get_str("response.destination") {
         if destination != expected {
-            return Err(OpenSamlError::UnmatchDestination);
+            return Err(SamlError::UnmatchDestination);
         }
     }
     Ok(())
@@ -511,7 +511,7 @@ fn validate_context(
     extracted: &Value,
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     let should_validate_issuer = matches!(
         parser_type,
         ParserType::SamlRequest
@@ -522,7 +522,7 @@ fn validate_context(
     if should_validate_issuer {
         if let Some(expected) = opts.from_issuer {
             if extracted.get_str("issuer") != Some(expected) {
-                return Err(OpenSamlError::UnmatchIssuer);
+                return Err(SamlError::UnmatchIssuer);
             }
         }
     }
@@ -533,7 +533,7 @@ fn validate_context(
     if is_response {
         if let Some(expected) = opts.expected_in_response_to {
             if extracted.get_str("response.inResponseTo") != Some(expected) {
-                return Err(OpenSamlError::InvalidInResponseTo);
+                return Err(SamlError::InvalidInResponseTo);
             }
         }
     }
@@ -542,20 +542,20 @@ fn validate_context(
         validate_subject_confirmation(extracted, opts, expected_recipient)?;
         if let Some(expected) = opts.expected_audience {
             if !audience_contains(extracted, expected) {
-                return Err(OpenSamlError::UnmatchAudience);
+                return Err(SamlError::UnmatchAudience);
             }
         }
         if let Some(session_not_on_or_after) = extracted.get_str("sessionIndex.sessionNotOnOrAfter")
         {
             if !verify_time(None, Some(session_not_on_or_after), opts.clock_drifts) {
-                return Err(OpenSamlError::ExpiredSession);
+                return Err(SamlError::ExpiredSession);
             }
         }
         if let Some(conditions) = extracted.get("conditions") {
             let not_before = conditions.get_str("notBefore");
             let not_on_or_after = conditions.get_str("notOnOrAfter");
             if !verify_time(not_before, not_on_or_after, opts.clock_drifts) {
-                return Err(OpenSamlError::SubjectUnconfirmed);
+                return Err(SamlError::SubjectUnconfirmed);
             }
         }
     }
@@ -566,11 +566,11 @@ fn flow_inner(
     opts: &FlowOptions<'_>,
     request: &HttpRequest,
     expected_recipient: Option<&str>,
-) -> Result<FlowResult, OpenSamlError> {
-    let binding = opts.binding.ok_or(OpenSamlError::UndefinedBinding)?;
+) -> Result<FlowResult, SamlError> {
+    let binding = opts.binding.ok_or(SamlError::UndefinedBinding)?;
     let parser_type = opts
         .parser_type
-        .ok_or_else(|| OpenSamlError::Invalid("ERR_UNDEFINED_PARSERTYPE".into()))?;
+        .ok_or_else(|| SamlError::Invalid("ERR_UNDEFINED_PARSERTYPE".into()))?;
 
     let xml = decode_message(
         binding,
@@ -619,7 +619,7 @@ fn flow_inner(
 }
 
 /// Run the inbound flow described by `opts` against `request`.
-pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult, OpenSamlError> {
+pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult, SamlError> {
     flow_inner(opts, request, None)
 }
 
@@ -627,6 +627,6 @@ pub(crate) fn flow_with_expected_recipient(
     opts: &FlowOptions<'_>,
     request: &HttpRequest,
     expected_recipient: &str,
-) -> Result<FlowResult, OpenSamlError> {
+) -> Result<FlowResult, SamlError> {
     flow_inner(opts, request, Some(expected_recipient))
 }

@@ -1,20 +1,20 @@
 //! Key, certificate and KeyInfo helpers backed by `bergshamra` keys
 //! (feature `crypto-bergshamra`).
 
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::util::normalize_cert_string;
 use bergshamra::keys::keyinfo::build_x509_key_info;
 use bergshamra::keys::loader::{load_pem_auto, load_x509_cert_pem};
 use bergshamra::keys::Key;
 
-fn crypto_err(err: impl std::fmt::Display) -> OpenSamlError {
-    OpenSamlError::Crypto(err.to_string())
+fn crypto_err(err: impl std::fmt::Display) -> SamlError {
+    SamlError::Crypto(err.to_string())
 }
 
 /// Load a private key from PEM (PKCS#1/PKCS#8, optionally passphrase-protected).
 ///
 /// Wraps samlify's `readPrivateKey`.
-pub fn load_private_key(pem: &str, password: Option<&str>) -> Result<Key, OpenSamlError> {
+pub fn load_private_key(pem: &str, password: Option<&str>) -> Result<Key, SamlError> {
     load_pem_auto(pem.as_bytes(), password).map_err(crypto_err)
 }
 
@@ -37,7 +37,7 @@ fn to_cert_pem(cert: &str) -> String {
 
 /// Load an X.509 certificate (PEM or bare base64) as a verification key
 /// (wraps samlify's `getPublicKeyPemFromCertificate`).
-pub fn load_certificate(cert: &str) -> Result<Key, OpenSamlError> {
+pub fn load_certificate(cert: &str) -> Result<Key, SamlError> {
     load_x509_cert_pem(to_cert_pem(cert).as_bytes()).map_err(crypto_err)
 }
 

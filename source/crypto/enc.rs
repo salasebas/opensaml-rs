@@ -5,7 +5,7 @@ use super::keys::load_certificate;
 use super::xml_syntax::validate_crypto_xml_prefix;
 use crate::binding::xml_escape;
 use crate::constants::namespace;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::xml::dom::{self, Node, XmlLimits};
 use bergshamra::keys::Key;
 use bergshamra::{decrypt, encrypt, EncContext, KeysManager};
@@ -26,12 +26,12 @@ pub struct AssertionDecryptionOptions {
     pub allow_insecure_software_rsa_key_transport_decryption: bool,
 }
 
-fn crypto_err(err: impl std::fmt::Display) -> OpenSamlError {
-    OpenSamlError::Crypto(err.to_string())
+fn crypto_err(err: impl std::fmt::Display) -> SamlError {
+    SamlError::Crypto(err.to_string())
 }
 
-pub(crate) fn software_rsa_decryption_disabled() -> OpenSamlError {
-    OpenSamlError::Unsupported(SOFTWARE_RSA_DECRYPTION_DISABLED.into())
+pub(crate) fn software_rsa_decryption_disabled() -> SamlError {
+    SamlError::Unsupported(SOFTWARE_RSA_DECRYPTION_DISABLED.into())
 }
 
 fn child<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
@@ -49,11 +49,11 @@ pub fn encrypt_assertion(
     data_alg: &str,
     key_alg: &str,
     tag_prefix: &str,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     validate_crypto_xml_prefix("EncryptedAssertion", tag_prefix)?;
     let doc = dom::parse(xml)?;
     let assertion = child(&doc.root, "Assertion")
-        .ok_or_else(|| OpenSamlError::MissingMetadata("Assertion to encrypt".into()))?;
+        .ok_or_else(|| SamlError::MissingMetadata("Assertion to encrypt".into()))?;
     let assertion_xml = &xml[assertion.start..assertion.end];
     let data_alg = xml_escape(data_alg);
     let key_alg = xml_escape(key_alg);
@@ -90,7 +90,7 @@ pub fn decrypt_assertion(
     xml: &str,
     enc_key: &Key,
     options: AssertionDecryptionOptions,
-) -> Result<(String, String), OpenSamlError> {
+) -> Result<(String, String), SamlError> {
     decrypt_assertion_with_limits(xml, enc_key, options, XmlLimits::default())
 }
 
@@ -100,19 +100,19 @@ pub fn decrypt_assertion_with_limits(
     enc_key: &Key,
     options: AssertionDecryptionOptions,
     limits: XmlLimits,
-) -> Result<(String, String), OpenSamlError> {
+) -> Result<(String, String), SamlError> {
     if !options.allow_insecure_software_rsa_key_transport_decryption {
         return Err(software_rsa_decryption_disabled());
     }
 
     let doc = dom::parse_with_limits(xml, limits)?;
     let encrypted = child(&doc.root, "EncryptedAssertion")
-        .ok_or_else(|| OpenSamlError::Crypto("ERR_UNDEFINED_ENCRYPTED_ASSERTION".into()))?;
+        .ok_or_else(|| SamlError::Crypto("ERR_UNDEFINED_ENCRYPTED_ASSERTION".into()))?;
     // bergshamra::decrypt returns the input doc with <EncryptedData> replaced by
     // the plaintext element, so pass only the inner EncryptedData to recover the
     // bare <Assertion>, then drop the EncryptedAssertion wrapper.
     let encrypted_data = child(encrypted, "EncryptedData")
-        .ok_or_else(|| OpenSamlError::Crypto("ERR_UNDEFINED_ENCRYPTED_ASSERTION".into()))?;
+        .ok_or_else(|| SamlError::Crypto("ERR_UNDEFINED_ENCRYPTED_ASSERTION".into()))?;
     let encrypted_data_xml = &xml[encrypted_data.start..encrypted_data.end];
 
     let mut manager = KeysManager::new();
@@ -185,7 +185,7 @@ mod tests {
         let key = load_private_key(SP_PRIVKEY, None)?;
         assert!(matches!(
             decrypt_assertion(&encrypted, &key, AssertionDecryptionOptions::default()),
-            Err(OpenSamlError::Unsupported(message))
+            Err(SamlError::Unsupported(message))
                 if message.contains("RUSTSEC-2023-0071")
         ));
         Ok(())

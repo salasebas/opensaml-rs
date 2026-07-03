@@ -1,7 +1,7 @@
 //! End-to-end signed SSO: SP builds an `AuthnRequest`, the IdP parses it and
 //! issues a signed `Response`, and the SP validates it.
 //!
-//! Run with: `cargo run -p opensaml --example sso`
+//! Run with: `cargo run -p saml-rs --example sso`
 //! (the `crypto-bergshamra` feature is on by default).
 
 #[cfg(feature = "crypto-bergshamra")]

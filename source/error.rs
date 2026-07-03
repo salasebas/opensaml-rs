@@ -1,9 +1,9 @@
-//! Error types for `opensaml`.
+//! Error types for `saml-rs`.
 
-/// Errors produced by the `opensaml` Service Provider library.
+/// Errors produced by the SAML-RS library.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum OpenSamlError {
+pub enum SamlError {
     /// Raw DEFLATE (de)compression failed.
     #[error("deflate error: {0}")]
     Deflate(#[from] std::io::Error),

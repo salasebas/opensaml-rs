@@ -6,20 +6,20 @@ use saml_rs::entity::EntitySetting;
 use saml_rs::flow::{flow, FlowOptions, HttpRequest};
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::xml::XmlLimits;
-use saml_rs::{IdentityProvider, OpenSamlError, ServiceProvider};
+use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 use url::Url;
 
 const LIMIT_ERROR: &str = "ERR_DEFLATE_OUTPUT_LIMIT_EXCEEDED";
 const BASE64_LIMIT_ERROR: &str = "ERR_BASE64_OUTPUT_LIMIT_EXCEEDED";
 const XML_LIMIT_ERROR: &str = "ERR_XML_LIMIT_EXCEEDED";
 
-fn oversized_deflate_payload() -> Result<Vec<u8>, OpenSamlError> {
+fn oversized_deflate_payload() -> Result<Vec<u8>, SamlError> {
     let oversized = vec![b'A'; MAX_DEFLATE_RAW_DECODE_BYTES + 1];
     deflate_raw_encode(&oversized)
 }
 
-fn redirect_request(url: &str) -> Result<HttpRequest, OpenSamlError> {
-    let parsed = Url::parse(url).map_err(|e| OpenSamlError::Invalid(e.to_string()))?;
+fn redirect_request(url: &str) -> Result<HttpRequest, SamlError> {
+    let parsed = Url::parse(url).map_err(|e| SamlError::Invalid(e.to_string()))?;
     Ok(HttpRequest::redirect(
         parsed
             .query_pairs()
@@ -28,7 +28,7 @@ fn redirect_request(url: &str) -> Result<HttpRequest, OpenSamlError> {
     ))
 }
 
-fn unsigned_sp() -> Result<ServiceProvider, OpenSamlError> {
+fn unsigned_sp() -> Result<ServiceProvider, SamlError> {
     ServiceProvider::from_config(
         &SpMetadataConfig {
             entity_id: "https://sp.example.com/metadata".into(),
@@ -39,7 +39,7 @@ fn unsigned_sp() -> Result<ServiceProvider, OpenSamlError> {
     )
 }
 
-fn unsigned_idp(setting: EntitySetting) -> Result<IdentityProvider, OpenSamlError> {
+fn unsigned_idp(setting: EntitySetting) -> Result<IdentityProvider, SamlError> {
     IdentityProvider::from_config(
         &IdpMetadataConfig {
             entity_id: "https://idp.example.com/metadata".into(),
@@ -59,7 +59,7 @@ fn deflate_raw_decode_rejects_oversized_output() -> Result<(), Box<dyn std::erro
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message == LIMIT_ERROR
+        SamlError::Invalid(message) if message == LIMIT_ERROR
     ));
     Ok(())
 }
@@ -80,7 +80,7 @@ fn redirect_flow_rejects_oversized_compressed_input_before_inflate(
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
+        SamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
     ));
     Ok(())
 }
@@ -108,7 +108,7 @@ fn flow_options_custom_redirect_inflate_limit_is_enforced() -> Result<(), Box<dy
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message == LIMIT_ERROR
+        SamlError::Invalid(message) if message == LIMIT_ERROR
     ));
     Ok(())
 }
@@ -129,7 +129,7 @@ fn entity_setting_custom_redirect_compressed_limit_is_enforced(
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
+        SamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
     ));
     Ok(())
 }
@@ -151,7 +151,7 @@ fn redirect_flow_rejects_oversized_inflated_message() -> Result<(), Box<dyn std:
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message == LIMIT_ERROR
+        SamlError::Invalid(message) if message == LIMIT_ERROR
     ));
     Ok(())
 }
@@ -176,7 +176,7 @@ fn post_flow_rejects_decoded_xml_byte_limit() -> Result<(), Box<dyn std::error::
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
+        SamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
     ));
     Ok(())
 }
@@ -201,7 +201,7 @@ fn simplesign_flow_rejects_decoded_xml_byte_limit() -> Result<(), Box<dyn std::e
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
+        SamlError::Invalid(message) if message == BASE64_LIMIT_ERROR
     ));
     Ok(())
 }
@@ -228,7 +228,7 @@ fn post_flow_rejects_dom_node_budget_before_authentication(
 
     assert!(matches!(
         err,
-        OpenSamlError::Invalid(message) if message.contains(XML_LIMIT_ERROR)
+        SamlError::Invalid(message) if message.contains(XML_LIMIT_ERROR)
     ));
     Ok(())
 }

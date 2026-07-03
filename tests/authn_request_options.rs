@@ -4,7 +4,7 @@ use saml_rs::entity::{BindingContext, EntitySetting};
 use saml_rs::flow::HttpRequest;
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::sp::LoginRequestOptions;
-use saml_rs::{IdentityProvider, OpenSamlError, ServiceProvider};
+use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 use url::Url;
 
 fn idp_config(want_authn_requests_signed: bool) -> IdpMetadataConfig {
@@ -33,15 +33,15 @@ fn sp_config(authn_requests_signed: bool) -> SpMetadataConfig {
     }
 }
 
-fn unsigned_idp() -> Result<IdentityProvider, OpenSamlError> {
+fn unsigned_idp() -> Result<IdentityProvider, SamlError> {
     IdentityProvider::from_config(&idp_config(false), EntitySetting::default())
 }
 
-fn unsigned_sp_with_setting(setting: EntitySetting) -> Result<ServiceProvider, OpenSamlError> {
+fn unsigned_sp_with_setting(setting: EntitySetting) -> Result<ServiceProvider, SamlError> {
     ServiceProvider::from_config(&sp_config(false), setting)
 }
 
-fn unsigned_sp() -> Result<ServiceProvider, OpenSamlError> {
+fn unsigned_sp() -> Result<ServiceProvider, SamlError> {
     unsigned_sp_with_setting(EntitySetting::default())
 }
 
@@ -90,7 +90,7 @@ const HOSTILE_NAME_ID_FORMAT: &str = concat!(
     "<samlp:NameIDPolicy Format=\""
 );
 
-fn hostile_unsigned_idp() -> Result<IdentityProvider, OpenSamlError> {
+fn hostile_unsigned_idp() -> Result<IdentityProvider, SamlError> {
     IdentityProvider::from_config(
         &IdpMetadataConfig {
             entity_id: "https://idp.example.com/metadata".into(),
@@ -105,7 +105,7 @@ fn hostile_unsigned_idp() -> Result<IdentityProvider, OpenSamlError> {
     )
 }
 
-fn hostile_unsigned_sp() -> Result<ServiceProvider, OpenSamlError> {
+fn hostile_unsigned_sp() -> Result<ServiceProvider, SamlError> {
     ServiceProvider::from_config(
         &SpMetadataConfig {
             entity_id: HOSTILE_SP_ENTITY_ID.into(),
@@ -419,7 +419,7 @@ mod signed {
         setting
     }
 
-    fn signed_idp() -> Result<IdentityProvider, OpenSamlError> {
+    fn signed_idp() -> Result<IdentityProvider, SamlError> {
         IdentityProvider::from_config(
             &IdpMetadataConfig {
                 signing_certs: vec![CERT.into()],
@@ -429,7 +429,7 @@ mod signed {
         )
     }
 
-    fn signed_sp() -> Result<ServiceProvider, OpenSamlError> {
+    fn signed_sp() -> Result<ServiceProvider, SamlError> {
         ServiceProvider::from_config(
             &SpMetadataConfig {
                 signing_certs: vec![CERT.into()],

@@ -329,7 +329,7 @@ mod crypto {
         construct_message_signature, construct_saml_signature, encrypt_assertion,
         verify_message_signature, verify_signature,
     };
-    use saml_rs::OpenSamlError;
+    use saml_rs::SamlError;
 
     const SP_PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
     const SIGN_CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -358,10 +358,10 @@ mod crypto {
             .x509_certificates(CertUse::Signing)
     }
     fn assert_content_not_covered(
-        result: Result<(bool, Option<String>), OpenSamlError>,
+        result: Result<(bool, Option<String>), SamlError>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match result {
-            Err(OpenSamlError::Crypto(message))
+            Err(SamlError::Crypto(message))
                 if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
             {
                 Ok(())

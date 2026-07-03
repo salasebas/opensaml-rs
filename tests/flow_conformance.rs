@@ -18,7 +18,7 @@ use saml_rs::logout::{
 };
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::template::{replace_tags_by_value, LoginResponseAttribute, LoginResponseTemplate};
-use saml_rs::{IdentityProvider, OpenSamlError, ServiceProvider};
+use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -95,12 +95,12 @@ fn unsigned_sp() -> ServiceProvider {
 }
 
 /// Rebuild the SP-side HTTP request for a response over `binding`.
-fn response_request(binding: Binding, ctx: &BindingContext) -> Result<HttpRequest, OpenSamlError> {
+fn response_request(binding: Binding, ctx: &BindingContext) -> Result<HttpRequest, SamlError> {
     Ok(match binding {
         Binding::Post => HttpRequest::post(vec![("SAMLResponse".into(), ctx.context.clone())]),
         Binding::Redirect => redirect_request(&ctx.context)?,
         Binding::SimpleSign => simplesign_request("SAMLResponse", ctx)?,
-        Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
+        Binding::Artifact => return Err(SamlError::UndefinedBinding),
     })
 }
 
@@ -110,13 +110,13 @@ fn parse_response_with_request_id(
     binding: Binding,
     ctx: &BindingContext,
     request_id: &str,
-) -> Result<FlowResult, OpenSamlError> {
+) -> Result<FlowResult, SamlError> {
     let request = response_request(binding, ctx)?;
     sp.parse_login_response_with_request_id(idp, binding, &request, request_id)
 }
 
-fn redirect_request(url: &str) -> Result<HttpRequest, OpenSamlError> {
-    let parsed = url::Url::parse(url).map_err(|e| OpenSamlError::Invalid(e.to_string()))?;
+fn redirect_request(url: &str) -> Result<HttpRequest, SamlError> {
+    let parsed = url::Url::parse(url).map_err(|e| SamlError::Invalid(e.to_string()))?;
     let raw = parsed.query().unwrap_or("");
     let octet = raw.split("&Signature=").next().unwrap_or("").to_string();
     let query = parsed
@@ -130,9 +130,9 @@ fn redirect_request(url: &str) -> Result<HttpRequest, OpenSamlError> {
     })
 }
 
-fn simplesign_request(param: &str, ctx: &BindingContext) -> Result<HttpRequest, OpenSamlError> {
+fn simplesign_request(param: &str, ctx: &BindingContext) -> Result<HttpRequest, SamlError> {
     let raw_xml = String::from_utf8(base64_decode(&ctx.context)?)
-        .map_err(|e| OpenSamlError::Xml(e.to_string()))?;
+        .map_err(|e| SamlError::Xml(e.to_string()))?;
     let sig_alg = ctx.sig_alg.clone().unwrap_or_default();
     let relay_state = ctx.relay_state.as_deref().unwrap_or_default();
     let octet = format!("{param}={raw_xml}&RelayState={relay_state}&SigAlg={sig_alg}");
@@ -152,31 +152,28 @@ fn simplesign_request(param: &str, ctx: &BindingContext) -> Result<HttpRequest, 
     })
 }
 
-fn form_hidden_fields(form: &str) -> Result<Vec<(String, String)>, OpenSamlError> {
+fn form_hidden_fields(form: &str) -> Result<Vec<(String, String)>, SamlError> {
     let mut fields = Vec::new();
     let mut rest = form;
     while let Some((_, after_marker)) = rest.split_once("<input type=\"hidden\" name=\"") {
         let (name, after_name) = after_marker
             .split_once("\" value=\"")
-            .ok_or_else(|| OpenSamlError::Invalid("unterminated hidden input name".into()))?;
+            .ok_or_else(|| SamlError::Invalid("unterminated hidden input name".into()))?;
         let (value, after_value) = after_name
             .split_once("\"/>")
-            .ok_or_else(|| OpenSamlError::Invalid("unterminated hidden input value".into()))?;
+            .ok_or_else(|| SamlError::Invalid("unterminated hidden input value".into()))?;
         fields.push((name.to_string(), value.to_string()));
         rest = after_value;
     }
     Ok(fields)
 }
 
-fn simplesign_form_request(
-    param: &str,
-    ctx: &BindingContext,
-) -> Result<HttpRequest, OpenSamlError> {
+fn simplesign_form_request(param: &str, ctx: &BindingContext) -> Result<HttpRequest, SamlError> {
     let form = ctx.post_form();
     let mut request = HttpRequest::post(form_hidden_fields(&form)?);
     let encoded = body_param(&request, param)?.to_string();
-    let raw_xml = String::from_utf8(base64_decode(&encoded)?)
-        .map_err(|e| OpenSamlError::Xml(e.to_string()))?;
+    let raw_xml =
+        String::from_utf8(base64_decode(&encoded)?).map_err(|e| SamlError::Xml(e.to_string()))?;
     let relay_state = body_param(&request, "RelayState")?.to_string();
     let sig_alg = body_param(&request, "SigAlg")?.to_string();
     let _signature = body_param(&request, "Signature")?.to_string();
@@ -255,10 +252,10 @@ fn attacker_authn_request() -> &'static str {
 }
 
 fn assert_failed_message_signature(
-    result: Result<saml_rs::flow::FlowResult, OpenSamlError>,
+    result: Result<saml_rs::flow::FlowResult, SamlError>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match result {
-        Err(OpenSamlError::FailedMessageSignatureVerification) => Ok(()),
+        Err(SamlError::FailedMessageSignatureVerification) => Ok(()),
         other => {
             Err(format!("expected detached signature verification failure, got {other:?}").into())
         }
@@ -300,7 +297,7 @@ fn mismatch(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
     let sp = ServiceProvider::from_config(&sp_config(true, false, false), signing())?;
     let idp = idp(false);
     match sp.create_login_request(&idp, binding, None) {
-        Err(OpenSamlError::Invalid(m)) if m.contains("CONFLICT") => Ok(()),
+        Err(SamlError::Invalid(m)) if m.contains("CONFLICT") => Ok(()),
         other => Err(format!("expected conflict, got {other:?}").into()),
     }
 }
@@ -923,7 +920,7 @@ fn encrypted_assertion_rejects_default_software_rsa() -> Result<(), Box<dyn std:
     let request = response_request(Binding::Post, &ctx)?;
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_r"),
-        Err(OpenSamlError::Unsupported(message)) if message.contains("RUSTSEC-2023-0071")
+        Err(SamlError::Unsupported(message)) if message.contains("RUSTSEC-2023-0071")
     ));
     Ok(())
 }
@@ -976,46 +973,46 @@ fn logout_request_flow(binding: Binding, signed: bool) -> Result<(), Box<dyn std
 fn logout_request_to_http(
     binding: Binding,
     ctx: &BindingContext,
-) -> Result<HttpRequest, OpenSamlError> {
+) -> Result<HttpRequest, SamlError> {
     Ok(match binding {
         Binding::Redirect => redirect_request(&ctx.context)?,
         Binding::Post => HttpRequest::post(vec![("SAMLRequest".into(), ctx.context.clone())]),
         Binding::SimpleSign => simplesign_request("SAMLRequest", ctx)?,
-        Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
+        Binding::Artifact => return Err(SamlError::UndefinedBinding),
     })
 }
 
 fn logout_response_to_http(
     binding: Binding,
     ctx: &BindingContext,
-) -> Result<HttpRequest, OpenSamlError> {
+) -> Result<HttpRequest, SamlError> {
     Ok(match binding {
         Binding::Redirect => redirect_request(&ctx.context)?,
         Binding::Post => HttpRequest::post(vec![("SAMLResponse".into(), ctx.context.clone())]),
         Binding::SimpleSign => simplesign_request("SAMLResponse", ctx)?,
-        Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
+        Binding::Artifact => return Err(SamlError::UndefinedBinding),
     })
 }
 
-fn body_param<'a>(request: &'a HttpRequest, param: &str) -> Result<&'a str, OpenSamlError> {
+fn body_param<'a>(request: &'a HttpRequest, param: &str) -> Result<&'a str, SamlError> {
     request
         .body
         .iter()
         .find(|(key, _)| key == param)
         .map(|(_, value)| value.as_str())
-        .ok_or_else(|| OpenSamlError::Invalid(format!("missing {param}")))
+        .ok_or_else(|| SamlError::Invalid(format!("missing {param}")))
 }
 
 fn body_param_mut<'a>(
     request: &'a mut HttpRequest,
     param: &str,
-) -> Result<&'a mut String, OpenSamlError> {
+) -> Result<&'a mut String, SamlError> {
     request
         .body
         .iter_mut()
         .find(|(key, _)| key == param)
         .map(|(_, value)| value)
-        .ok_or_else(|| OpenSamlError::Invalid(format!("missing {param}")))
+        .ok_or_else(|| SamlError::Invalid(format!("missing {param}")))
 }
 
 fn tamper_body_message(
@@ -1023,13 +1020,13 @@ fn tamper_body_message(
     param: &str,
     from: &str,
     to: &str,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     let encoded = body_param_mut(request, param)?;
     let xml = String::from_utf8(base64_decode(encoded.as_str())?)
-        .map_err(|e| OpenSamlError::Xml(e.to_string()))?;
+        .map_err(|e| SamlError::Xml(e.to_string()))?;
     let tampered = xml.replace(from, to);
     if tampered == xml {
-        return Err(OpenSamlError::Invalid("tamper target not found".into()));
+        return Err(SamlError::Invalid("tamper target not found".into()));
     }
     *encoded = base64_encode(tampered.as_bytes());
     Ok(())
@@ -1145,7 +1142,7 @@ fn signed_simplesign_logout_request_with_relay_state_includes_body_and_octet(
     let octet = request
         .octet_string
         .as_deref()
-        .ok_or_else(|| OpenSamlError::Invalid("missing octet".into()))?;
+        .ok_or_else(|| SamlError::Invalid("missing octet".into()))?;
     assert_eq!(body_param(&request, "RelayState")?, "relay-123");
     assert!(
         octet.contains("&RelayState=relay-123&SigAlg="),
@@ -1292,7 +1289,7 @@ fn signed_simplesign_logout_response_with_relay_state_includes_body_and_octet(
     let octet = request
         .octet_string
         .as_deref()
-        .ok_or_else(|| OpenSamlError::Invalid("missing octet".into()))?;
+        .ok_or_else(|| SamlError::Invalid("missing octet".into()))?;
     assert_eq!(body_param(&request, "RelayState")?, "relay-456");
     assert!(
         octet.contains("&RelayState=relay-456&SigAlg="),
@@ -1325,7 +1322,7 @@ fn signed_logout_response_wrong_request_id_rejected() -> Result<(), Box<dyn std:
             &request,
             "_r"
         ),
-        Err(OpenSamlError::InvalidInResponseTo)
+        Err(SamlError::InvalidInResponseTo)
     ));
     Ok(())
 }
@@ -1440,7 +1437,7 @@ fn two_tier_status(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
         )]),
     };
     match sp.parse_login_response(&idp, binding, &request) {
-        Err(OpenSamlError::FailedStatus { .. }) => Ok(()),
+        Err(SamlError::FailedStatus { .. }) => Ok(()),
         other => Err(format!("expected FailedStatus, got {other:?}").into()),
     }
 }

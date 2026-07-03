@@ -271,10 +271,10 @@ impl BindingContext {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::error::OpenSamlError::Invalid`] when `entity_endpoint`
+    /// Returns [`crate::error::SamlError::Invalid`] when `entity_endpoint`
     /// is not an absolute HTTP(S) URL, or when detached SimpleSign state has
     /// only one of `sig_alg` or `signature`.
-    pub fn try_post_form(&self) -> Result<String, crate::error::OpenSamlError> {
+    pub fn try_post_form(&self) -> Result<String, crate::error::SamlError> {
         crate::binding::try_saml_post_binding_form_with_signature(
             &self.entity_endpoint,
             self.request_type,

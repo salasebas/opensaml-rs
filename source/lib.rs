@@ -1,4 +1,4 @@
-//! `opensaml` — SAML 2.0 **Service Provider** and **Identity Provider** library.
+//! `saml-rs` — SAML 2.0 **Service Provider** and **Identity Provider** library.
 //!
 //! Originally ported from npm `samlify` v2.10.2 conformance fixtures:
 //! constants, XML field extraction ([`xml`]), message [`template`]s,
@@ -10,7 +10,7 @@
 //! message signatures) is delegated to `bergshamra` behind the
 //! `crypto-bergshamra` feature (**on by default**; disable with
 //! `default-features = false` to build the crypto-free protocol layer, where
-//! crypto operations fail closed with [`OpenSamlError::Unsupported`]).
+//! crypto operations fail closed with [`SamlError::Unsupported`]).
 
 #![forbid(unsafe_code)]
 
@@ -31,6 +31,6 @@ pub mod validator;
 pub mod xml;
 
 pub use entity::EntitySetting;
-pub use error::OpenSamlError;
+pub use error::SamlError;
 pub use idp::IdentityProvider;
 pub use sp::ServiceProvider;

@@ -1,7 +1,7 @@
 //! Time and status validation (samlify `validator.ts` + `flow.ts` `checkStatus`).
 
 use crate::constants::{status_code, ParserType};
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::xml::{extract_with_limits, fields, XmlLimits};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
@@ -46,7 +46,7 @@ pub fn verify_time(
 ///
 /// Only `SAMLResponse` / `LogoutResponse` are checked; other parser types are
 /// skipped. Success resolves to `Ok(())`; anything else is an error.
-pub fn check_status(content: &str, parser_type: ParserType) -> Result<(), OpenSamlError> {
+pub fn check_status(content: &str, parser_type: ParserType) -> Result<(), SamlError> {
     check_status_with_limits(content, parser_type, XmlLimits::default())
 }
 
@@ -55,7 +55,7 @@ pub fn check_status_with_limits(
     content: &str,
     parser_type: ParserType,
     limits: XmlLimits,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     let fields = match parser_type {
         ParserType::SamlResponse => fields::login_response_status_fields(),
         ParserType::LogoutResponse => fields::logout_response_status_fields(),
@@ -64,11 +64,11 @@ pub fn check_status_with_limits(
     let result = extract_with_limits(content, &fields, limits)?;
     match result.get_str("top") {
         Some(code) if code == status_code::SUCCESS => Ok(()),
-        Some(code) if !code.is_empty() => Err(OpenSamlError::FailedStatus {
+        Some(code) if !code.is_empty() => Err(SamlError::FailedStatus {
             top: code.to_string(),
             second: result.get_str("second").unwrap_or_default().to_string(),
         }),
-        _ => Err(OpenSamlError::UndefinedStatus),
+        _ => Err(SamlError::UndefinedStatus),
     }
 }
 
@@ -118,7 +118,7 @@ mod tests {
         check_status(RESPONSE, ParserType::SamlRequest)?;
 
         match check_status(FAILED, ParserType::SamlResponse) {
-            Err(OpenSamlError::FailedStatus { top, second }) => {
+            Err(SamlError::FailedStatus { top, second }) => {
                 assert_eq!(top, status_code::REQUESTER);
                 assert_eq!(second, status_code::INVALID_NAME_ID_POLICY);
             }

@@ -3,7 +3,7 @@
 use super::deflate::deflate_raw_encode;
 use super::encoding::base64_encode;
 use crate::constants::ParserType;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use url::form_urlencoded::byte_serialize;
 
 fn url_encode(value: &str) -> String {
@@ -45,7 +45,7 @@ pub fn build_redirect_url(
     parser_type: ParserType,
     xml: &str,
     relay_state: Option<&str>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     let deflated = deflate_raw_encode(xml.as_bytes())?;
     let encoded = base64_encode(&deflated);
     let query = redirect_binding_query(parser_type.query_param(), &encoded, relay_state);
@@ -60,7 +60,7 @@ pub fn build_redirect_octet(
     xml: &str,
     relay_state: Option<&str>,
     sig_alg: &str,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     let deflated = deflate_raw_encode(xml.as_bytes())?;
     let encoded = base64_encode(&deflated);
     let mut octet = format!("{}={}", parser_type.query_param(), url_encode(&encoded));

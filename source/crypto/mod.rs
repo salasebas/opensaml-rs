@@ -1,6 +1,6 @@
 //! XML security backend abstraction.
 //!
-//! XML-DSig / XML-Enc / C14N live in `bergshamra`; `opensaml` only orchestrates
+//! XML-DSig / XML-Enc / C14N live in `bergshamra`; `saml-rs` only orchestrates
 //! through the [`XmlSecurityBackend`] trait.
 
 mod backend;

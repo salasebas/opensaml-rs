@@ -5,7 +5,7 @@ use crate::constants::{namespace, Binding, CertUse, ParserType};
 use crate::entity::{
     generate_id, now_iso8601, BindingContext, CustomTagReplacement, EntitySetting,
 };
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::flow::{flow_with_expected_recipient, FlowOptions, FlowResult, HttpRequest};
 use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
@@ -116,7 +116,7 @@ fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
 fn reject_unsolicited_request_bound_bearer_confirmations(
     extracted: &Value,
     limits: XmlLimits,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     let fields = [
         ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
         ExtractorField::new(
@@ -133,7 +133,7 @@ fn reject_unsolicited_request_bound_bearer_confirmations(
             .get_str("subjectConfirmationData")
             .is_some_and(|actual| !actual.is_empty());
         if is_bearer && is_request_bound {
-            return Err(OpenSamlError::InvalidInResponseTo);
+            return Err(SamlError::InvalidInResponseTo);
         }
     }
     Ok(())
@@ -141,7 +141,7 @@ fn reject_unsolicited_request_bound_bearer_confirmations(
 
 impl ServiceProvider {
     /// Build from SP metadata XML, merging the metadata-declared flags into `setting`.
-    pub fn from_metadata(xml: &str, mut setting: EntitySetting) -> Result<Self, OpenSamlError> {
+    pub fn from_metadata(xml: &str, mut setting: EntitySetting) -> Result<Self, SamlError> {
         let metadata = SpMetadata::from_xml(xml)?;
         setting.authn_requests_signed = metadata.is_authn_request_signed();
         setting.want_assertions_signed = metadata.is_want_assertions_signed();
@@ -159,7 +159,7 @@ impl ServiceProvider {
     pub fn from_config(
         config: &SpMetadataConfig,
         setting: EntitySetting,
-    ) -> Result<Self, OpenSamlError> {
+    ) -> Result<Self, SamlError> {
         Self::from_metadata(&generate_sp_metadata(config), setting)
     }
 
@@ -187,7 +187,7 @@ impl ServiceProvider {
         idp: &IdentityProvider,
         binding: Binding,
         custom: Option<CustomTagReplacement<'_>>,
-    ) -> Result<BindingContext, OpenSamlError> {
+    ) -> Result<BindingContext, SamlError> {
         let options = LoginRequestOptions {
             custom,
             ..Default::default()
@@ -201,9 +201,9 @@ impl ServiceProvider {
         idp: &IdentityProvider,
         binding: Binding,
         options: &LoginRequestOptions<'_>,
-    ) -> Result<BindingContext, OpenSamlError> {
+    ) -> Result<BindingContext, SamlError> {
         if self.metadata.is_authn_request_signed() != idp.metadata.is_want_authn_requests_signed() {
-            return Err(OpenSamlError::Invalid(format!(
+            return Err(SamlError::Invalid(format!(
                 "ERR_METADATA_CONFLICT_REQUEST_SIGNED_FLAG: SP AuthnRequestsSigned={} but IdP WantAuthnRequestsSigned={}",
                 self.metadata.is_authn_request_signed(),
                 idp.metadata.is_want_authn_requests_signed()
@@ -212,7 +212,7 @@ impl ServiceProvider {
         let destination = idp
             .metadata
             .get_single_sign_on_service(binding)
-            .ok_or_else(|| OpenSamlError::MissingMetadata("SingleSignOnService".into()))?;
+            .ok_or_else(|| SamlError::MissingMetadata("SingleSignOnService".into()))?;
         let custom_template = self.setting.login_request_template.as_deref();
         let template = custom_template.unwrap_or(LOGIN_REQUEST_TEMPLATE);
         let (id, xml) = match (options.custom, custom_template) {
@@ -294,7 +294,7 @@ impl ServiceProvider {
                 relay_state.as_deref(),
             )?,
             Binding::Post | Binding::SimpleSign => base64_encode(xml.as_bytes()),
-            Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
+            Binding::Artifact => return Err(SamlError::UndefinedBinding),
         };
         Ok(BindingContext {
             id,
@@ -316,7 +316,7 @@ impl ServiceProvider {
         destination: String,
         relay_state: Option<String>,
         id: String,
-    ) -> Result<BindingContext, OpenSamlError> {
+    ) -> Result<BindingContext, SamlError> {
         use crate::binding::{append_signature, build_redirect_octet};
         use crate::crypto::{
             construct_message_signature, construct_saml_signature, keys::load_private_key,
@@ -326,12 +326,12 @@ impl ServiceProvider {
             .setting
             .private_key
             .as_deref()
-            .ok_or_else(|| OpenSamlError::MissingKey("private_key".into()))?;
+            .ok_or_else(|| SamlError::MissingKey("private_key".into()))?;
         let cert = self
             .setting
             .signing_cert
             .as_deref()
-            .ok_or_else(|| OpenSamlError::MissingKey("signing_cert".into()))?;
+            .ok_or_else(|| SamlError::MissingKey("signing_cert".into()))?;
         let sig_alg = &self.setting.request_signature_algorithm;
         let key = load_private_key(key_pem, self.setting.private_key_pass.as_deref())?;
 
@@ -368,7 +368,7 @@ impl ServiceProvider {
                     Some(sig_alg.clone()),
                 )
             }
-            Binding::Artifact => return Err(OpenSamlError::UndefinedBinding),
+            Binding::Artifact => return Err(SamlError::UndefinedBinding),
         };
         Ok(BindingContext {
             id,
@@ -390,8 +390,8 @@ impl ServiceProvider {
         _destination: String,
         _relay_state: Option<String>,
         _id: String,
-    ) -> Result<BindingContext, OpenSamlError> {
-        Err(OpenSamlError::Unsupported(
+    ) -> Result<BindingContext, SamlError> {
+        Err(SamlError::Unsupported(
             "signing AuthnRequest requires feature crypto-bergshamra".into(),
         ))
     }
@@ -410,7 +410,7 @@ impl ServiceProvider {
         idp: &IdentityProvider,
         binding: Binding,
         request: &HttpRequest,
-    ) -> Result<FlowResult, OpenSamlError> {
+    ) -> Result<FlowResult, SamlError> {
         self.parse_unsolicited_login_response(idp, binding, request)
     }
 
@@ -421,7 +421,7 @@ impl ServiceProvider {
         idp: &IdentityProvider,
         binding: Binding,
         request: &HttpRequest,
-    ) -> Result<FlowResult, OpenSamlError> {
+    ) -> Result<FlowResult, SamlError> {
         self.parse_login_response_inner(
             idp,
             binding,
@@ -438,9 +438,9 @@ impl ServiceProvider {
         binding: Binding,
         request: &HttpRequest,
         request_id: &str,
-    ) -> Result<FlowResult, OpenSamlError> {
+    ) -> Result<FlowResult, SamlError> {
         if request_id.is_empty() {
-            return Err(OpenSamlError::InvalidInResponseTo);
+            return Err(SamlError::InvalidInResponseTo);
         }
         self.parse_login_response_inner(
             idp,
@@ -456,7 +456,7 @@ impl ServiceProvider {
         binding: Binding,
         request: &HttpRequest,
         correlation: LoginResponseCorrelation<'_>,
-    ) -> Result<FlowResult, OpenSamlError> {
+    ) -> Result<FlowResult, SamlError> {
         let signing_certs = idp.metadata.x509_certificates(CertUse::Signing);
         let decrypt_key = if self.setting.is_assertion_encrypted {
             self.setting.enc_private_key.as_deref()
@@ -471,7 +471,7 @@ impl ServiceProvider {
         let recipient = self
             .metadata
             .get_assertion_consumer_service(binding)
-            .ok_or_else(|| OpenSamlError::MissingMetadata("AssertionConsumerService".into()))?;
+            .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?;
         let result = flow_with_expected_recipient(
             &FlowOptions {
                 binding: Some(binding),
@@ -499,7 +499,7 @@ impl ServiceProvider {
                 .get_str("response.inResponseTo")
                 .is_some_and(|actual| !actual.is_empty())
         {
-            return Err(OpenSamlError::InvalidInResponseTo);
+            return Err(SamlError::InvalidInResponseTo);
         }
         if matches!(correlation, LoginResponseCorrelation::Unsolicited) {
             reject_unsolicited_request_bound_bearer_confirmations(
@@ -518,7 +518,7 @@ mod tests {
     use crate::metadata::{Endpoint, IdpMetadataConfig};
     use url::Url;
 
-    fn unsigned_idp() -> Result<IdentityProvider, OpenSamlError> {
+    fn unsigned_idp() -> Result<IdentityProvider, SamlError> {
         IdentityProvider::from_config(
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),
@@ -532,7 +532,7 @@ mod tests {
         )
     }
 
-    fn unsigned_sp() -> Result<ServiceProvider, OpenSamlError> {
+    fn unsigned_sp() -> Result<ServiceProvider, SamlError> {
         ServiceProvider::from_config(
             &SpMetadataConfig {
                 entity_id: "https://sp.example.com/metadata".into(),
@@ -603,7 +603,7 @@ mod crypto_tests {
     const SP_PRIVKEY: &str = include_str!("../tests/fixtures/key/sp_privkey.pem");
     const SP_SIGNING_CERT: &str = include_str!("../tests/fixtures/key/sp_signing_cert.cer");
 
-    fn signing_idp() -> Result<IdentityProvider, OpenSamlError> {
+    fn signing_idp() -> Result<IdentityProvider, SamlError> {
         IdentityProvider::from_config(
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),

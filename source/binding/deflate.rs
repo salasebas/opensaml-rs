@@ -6,7 +6,7 @@ use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
 
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 
 /// Default maximum inflated size accepted by [`deflate_raw_decode`].
 ///
@@ -20,14 +20,14 @@ const DEFLATE_OUTPUT_LIMIT_EXCEEDED: &str = "ERR_DEFLATE_OUTPUT_LIMIT_EXCEEDED";
 
 /// Raw-DEFLATE compress `input` (no zlib/gzip header), as required by the
 /// HTTP-Redirect binding.
-pub fn deflate_raw_encode(input: &[u8]) -> Result<Vec<u8>, OpenSamlError> {
+pub fn deflate_raw_encode(input: &[u8]) -> Result<Vec<u8>, SamlError> {
     let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(input)?;
     Ok(encoder.finish()?)
 }
 
 /// Inflate raw-DEFLATE `input` produced by [`deflate_raw_encode`].
-pub fn deflate_raw_decode(input: &[u8]) -> Result<Vec<u8>, OpenSamlError> {
+pub fn deflate_raw_decode(input: &[u8]) -> Result<Vec<u8>, SamlError> {
     deflate_raw_decode_with_limit(input, MAX_DEFLATE_RAW_DECODE_BYTES)
 }
 
@@ -36,7 +36,7 @@ pub fn deflate_raw_decode(input: &[u8]) -> Result<Vec<u8>, OpenSamlError> {
 pub fn deflate_raw_decode_with_limit(
     input: &[u8],
     max_output_len: usize,
-) -> Result<Vec<u8>, OpenSamlError> {
+) -> Result<Vec<u8>, SamlError> {
     let decoder = DeflateDecoder::new(input);
     let mut out = Vec::with_capacity(input.len().min(max_output_len));
     let read_limit = max_output_len.saturating_add(1);
@@ -44,7 +44,7 @@ pub fn deflate_raw_decode_with_limit(
     limited.read_to_end(&mut out)?;
 
     if out.len() > max_output_len {
-        return Err(OpenSamlError::Invalid(DEFLATE_OUTPUT_LIMIT_EXCEEDED.into()));
+        return Err(SamlError::Invalid(DEFLATE_OUTPUT_LIMIT_EXCEEDED.into()));
     }
 
     Ok(out)

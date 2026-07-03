@@ -93,7 +93,7 @@ cargo check -p opensaml --no-default-features
 - Keep XML handling structured. Avoid ad hoc string parsing when the local DOM,
   extractor, metadata, or binding helpers can express the behavior.
 - Keep security-sensitive validation fail-closed. Missing, malformed, unsigned,
-  or untrusted inputs should produce explicit `OpenSamlError` variants where
+  or untrusted inputs should produce explicit `SamlError` variants where
   practical.
 - Avoid growing large modules. Prefer new focused modules over extending files
   that are already large, especially `idp.rs`, `logout.rs`, `flow.rs`, and

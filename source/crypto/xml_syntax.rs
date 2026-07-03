@@ -1,21 +1,19 @@
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 
-pub(crate) fn validate_crypto_xml_prefix(name: &str, prefix: &str) -> Result<(), OpenSamlError> {
+pub(crate) fn validate_crypto_xml_prefix(name: &str, prefix: &str) -> Result<(), SamlError> {
     if prefix.is_empty() {
-        return Err(OpenSamlError::Invalid(format!(
+        return Err(SamlError::Invalid(format!(
             "{name} XML prefix cannot be empty"
         )));
     }
     if matches!(prefix.to_ascii_lowercase().as_str(), "xml" | "xmlns") {
-        return Err(OpenSamlError::Invalid(format!(
-            "{name} XML prefix is reserved"
-        )));
+        return Err(SamlError::Invalid(format!("{name} XML prefix is reserved")));
     }
 
     let mut chars = prefix.chars();
     let first = chars
         .next()
-        .ok_or_else(|| OpenSamlError::Invalid(format!("{name} XML prefix cannot be empty")))?;
+        .ok_or_else(|| SamlError::Invalid(format!("{name} XML prefix cannot be empty")))?;
     if !first.is_ascii_alphabetic() && first != '_' {
         return Err(invalid_prefix(name));
     }
@@ -25,6 +23,6 @@ pub(crate) fn validate_crypto_xml_prefix(name: &str, prefix: &str) -> Result<(),
     Ok(())
 }
 
-fn invalid_prefix(name: &str) -> OpenSamlError {
-    OpenSamlError::Invalid(format!("{name} XML prefix contains an invalid character"))
+fn invalid_prefix(name: &str) -> SamlError {
+    SamlError::Invalid(format!("{name} XML prefix contains an invalid character"))
 }

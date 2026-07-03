@@ -2,7 +2,7 @@
 
 use super::{as_object_list, Metadata};
 use crate::constants::Binding;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::xml::{ExtractorField, XmlLimits};
 use std::ops::Deref;
 
@@ -14,12 +14,12 @@ pub struct SpMetadata {
 
 impl SpMetadata {
     /// Parse SP metadata XML.
-    pub fn from_xml(xml: &str) -> Result<Self, OpenSamlError> {
+    pub fn from_xml(xml: &str) -> Result<Self, SamlError> {
         Self::from_xml_with_limits(xml, XmlLimits::default())
     }
 
     /// Parse SP metadata XML with explicit XML parser resource limits.
-    pub fn from_xml_with_limits(xml: &str, limits: XmlLimits) -> Result<Self, OpenSamlError> {
+    pub fn from_xml_with_limits(xml: &str, limits: XmlLimits) -> Result<Self, SamlError> {
         let extra = vec![
             ExtractorField::new("spSSODescriptor", &["EntityDescriptor", "SPSSODescriptor"])
                 .attrs(&["WantAssertionsSigned", "AuthnRequestsSigned"]),

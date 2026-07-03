@@ -9,7 +9,7 @@ use saml_rs::flow::HttpRequest;
 use saml_rs::idp::LoginResponseOptions;
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::template::replace_tags_by_value;
-use saml_rs::{IdentityProvider, OpenSamlError, ServiceProvider};
+use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -75,7 +75,7 @@ struct SubjectConfirmationCase<'a> {
 fn response_for_subject_confirmation(
     sp: &ServiceProvider,
     case: &SubjectConfirmationCase<'_>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     let idp = idp();
     let cb = |template: &str| {
         let id = "_response_subject_confirmation".to_string();
@@ -145,7 +145,7 @@ fn response_for_subject_confirmation(
 fn response_for_destination(
     sp: &ServiceProvider,
     destination: Option<&str>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     let idp = idp();
     let cb = |template: &str| {
         let id = "_response_destination".to_string();
@@ -219,7 +219,7 @@ fn audience_mismatch_rejected() {
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp1))]);
     assert!(matches!(
         sp2.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(OpenSamlError::UnmatchAudience)
+        Err(SamlError::UnmatchAudience)
     ));
 }
 
@@ -249,7 +249,7 @@ fn in_response_to_mismatch_rejected() {
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp))]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_wrong"),
-        Err(OpenSamlError::InvalidInResponseTo)
+        Err(SamlError::InvalidInResponseTo)
     ));
 }
 
@@ -259,7 +259,7 @@ fn default_login_response_rejects_non_empty_in_response_to() {
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp))]);
     assert!(matches!(
         sp.parse_login_response(&idp(), Binding::Post, &req),
-        Err(OpenSamlError::InvalidInResponseTo)
+        Err(SamlError::InvalidInResponseTo)
     ));
 }
 
@@ -301,7 +301,7 @@ fn unsolicited_response_rejects_subject_confirmation_in_response_to(
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_unsolicited_login_response(&idp(), Binding::Post, &req),
-        Err(OpenSamlError::InvalidInResponseTo)
+        Err(SamlError::InvalidInResponseTo)
     ));
     Ok(())
 }
@@ -322,7 +322,7 @@ fn subject_confirmation_method_must_be_bearer() -> Result<(), Box<dyn std::error
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(OpenSamlError::SubjectUnconfirmed)
+        Err(SamlError::SubjectUnconfirmed)
     ));
     Ok(())
 }
@@ -343,7 +343,7 @@ fn subject_confirmation_data_expiry_is_enforced() -> Result<(), Box<dyn std::err
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(OpenSamlError::SubjectUnconfirmed)
+        Err(SamlError::SubjectUnconfirmed)
     ));
     Ok(())
 }
@@ -364,7 +364,7 @@ fn subject_confirmation_recipient_must_match_acs() -> Result<(), Box<dyn std::er
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(OpenSamlError::SubjectUnconfirmed)
+        Err(SamlError::SubjectUnconfirmed)
     ));
     Ok(())
 }
@@ -376,7 +376,7 @@ fn response_destination_must_match_acs_when_present() -> Result<(), Box<dyn std:
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(OpenSamlError::UnmatchDestination)
+        Err(SamlError::UnmatchDestination)
     ));
     Ok(())
 }
@@ -407,7 +407,7 @@ fn subject_confirmation_request_id_must_match() -> Result<(), Box<dyn std::error
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(OpenSamlError::SubjectUnconfirmed)
+        Err(SamlError::SubjectUnconfirmed)
     ));
     Ok(())
 }
@@ -521,7 +521,7 @@ fn metadata_signature_requires_root_coverage() -> Result<(), Box<dyn std::error:
         Some("https://evil.example.com/metadata")
     );
     match verify_metadata_signature(&wrapped_metadata, &[CERT.to_string()]) {
-        Err(OpenSamlError::Crypto(message))
+        Err(SamlError::Crypto(message))
             if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
         {
             Ok(())

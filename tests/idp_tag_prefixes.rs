@@ -11,7 +11,7 @@ use saml_rs::idp::LoginResponseOptions;
 use saml_rs::logout::{create_logout_request, create_logout_response};
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::template::{replace_tags_by_value, LoginResponseTemplate};
-use saml_rs::{IdentityProvider, OpenSamlError, ServiceProvider};
+use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -25,7 +25,7 @@ fn signing() -> EntitySetting {
     setting
 }
 
-fn idp_with_setting(setting: EntitySetting) -> Result<IdentityProvider, OpenSamlError> {
+fn idp_with_setting(setting: EntitySetting) -> Result<IdentityProvider, SamlError> {
     IdentityProvider::from_config(
         &IdpMetadataConfig {
             entity_id: "https://idp.example.com/metadata".into(),
@@ -42,7 +42,7 @@ fn idp_with_setting(setting: EntitySetting) -> Result<IdentityProvider, OpenSaml
     )
 }
 
-fn sp(want_assertions_signed: bool) -> Result<ServiceProvider, OpenSamlError> {
+fn sp(want_assertions_signed: bool) -> Result<ServiceProvider, SamlError> {
     ServiceProvider::from_config(
         &SpMetadataConfig {
             entity_id: "https://sp.example.com/metadata".into(),
@@ -316,7 +316,7 @@ fn invalid_prefixes_are_rejected_before_rendering() -> Result<(), Box<dyn std::e
                 ..Default::default()
             },
         ),
-        Err(OpenSamlError::Invalid(message)) if message.contains("protocol")
+        Err(SamlError::Invalid(message)) if message.contains("protocol")
     ));
 
     let idp = idp_with_setting(prefixed_setting("samlp", "bad prefix"))?;
@@ -330,7 +330,7 @@ fn invalid_prefixes_are_rejected_before_rendering() -> Result<(), Box<dyn std::e
             None,
             false,
         ),
-        Err(OpenSamlError::Invalid(message)) if message.contains("assertion")
+        Err(SamlError::Invalid(message)) if message.contains("assertion")
     ));
     Ok(())
 }

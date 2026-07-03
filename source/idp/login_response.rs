@@ -1,5 +1,5 @@
 use crate::constants::namespace;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::template::{write_login_response_attribute_statement, LoginResponseAttribute};
 use crate::xml::write::XmlWriter;
 
@@ -31,7 +31,7 @@ pub(super) struct LoginResponseXml<'a> {
 
 pub(super) fn render_default_login_response(
     input: &LoginResponseXml<'_>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     let response_name = qname(input.protocol_prefix, "Response");
     let protocol_xmlns = format!("xmlns:{}", input.protocol_prefix);
     let assertion_xmlns = format!("xmlns:{}", input.assertion_prefix);

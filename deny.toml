@@ -2,8 +2,8 @@
 ignore = [
     # Transitive through bergshamra 0.6.3 / kryptering 0.4.1's rsa dependency.
     # RustSec currently lists no safe upgrade; keep this explicit while
-    # opensaml's software RSA XML-Enc key transport path remains gated off by default.
-    { id = "RUSTSEC-2023-0071", reason = "Transitive through bergshamra/kryptering; no safe upgrade is currently available, and opensaml gates software RSA XML-Enc key transport by default." },
+    # saml-rs's software RSA XML-Enc key transport path remains gated off by default.
+    { id = "RUSTSEC-2023-0071", reason = "Transitive through bergshamra/kryptering; no safe upgrade is currently available, and saml-rs gates software RSA XML-Enc key transport by default." },
 ]
 
 [licenses]

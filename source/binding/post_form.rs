@@ -1,7 +1,7 @@
 //! HTTP-POST binding auto-submit form.
 
 use super::escape::html_escape;
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use url::Url;
 
 const UNSAFE_POST_BINDING_ACTION_URL: &str = "ERR_UNSAFE_POST_BINDING_ACTION_URL";
@@ -62,12 +62,12 @@ fn binding_fields<'a>(
 fn validate_signature_fields(
     sig_alg: Option<&str>,
     signature: Option<&str>,
-) -> Result<(), OpenSamlError> {
+) -> Result<(), SamlError> {
     match (sig_alg, signature) {
         (Some(_), Some(_)) | (None, None) => Ok(()),
-        (Some(_), None) | (None, Some(_)) => Err(OpenSamlError::Invalid(
-            PARTIAL_POST_BINDING_SIGNATURE.into(),
-        )),
+        (Some(_), None) | (None, Some(_)) => {
+            Err(SamlError::Invalid(PARTIAL_POST_BINDING_SIGNATURE.into()))
+        }
     }
 }
 
@@ -109,14 +109,14 @@ pub(crate) fn saml_post_binding_form_with_signature(
 ///
 /// # Errors
 ///
-/// Returns [`OpenSamlError::Invalid`] when `action` is not an absolute HTTP(S)
+/// Returns [`SamlError::Invalid`] when `action` is not an absolute HTTP(S)
 /// URL.
 pub fn try_saml_post_binding_form(
     action: &str,
     param_name: &str,
     b64_value: &str,
     relay_state: Option<&str>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     try_saml_post_binding_form_with_signature(
         action,
         param_name,
@@ -134,7 +134,7 @@ pub(crate) fn try_saml_post_binding_form_with_signature(
     relay_state: Option<&str>,
     sig_alg: Option<&str>,
     signature: Option<&str>,
-) -> Result<String, OpenSamlError> {
+) -> Result<String, SamlError> {
     validate_post_form_action(action)?;
     validate_signature_fields(sig_alg, signature)?;
     Ok(saml_post_binding_form_with_signature(
@@ -147,14 +147,12 @@ pub(crate) fn try_saml_post_binding_form_with_signature(
     ))
 }
 
-fn validate_post_form_action(action: &str) -> Result<(), OpenSamlError> {
+fn validate_post_form_action(action: &str) -> Result<(), SamlError> {
     let url = Url::parse(action)
-        .map_err(|_| OpenSamlError::Invalid(UNSAFE_POST_BINDING_ACTION_URL.into()))?;
+        .map_err(|_| SamlError::Invalid(UNSAFE_POST_BINDING_ACTION_URL.into()))?;
     if matches!(url.scheme(), "http" | "https") && url.has_host() {
         Ok(())
     } else {
-        Err(OpenSamlError::Invalid(
-            UNSAFE_POST_BINDING_ACTION_URL.into(),
-        ))
+        Err(SamlError::Invalid(UNSAFE_POST_BINDING_ACTION_URL.into()))
     }
 }

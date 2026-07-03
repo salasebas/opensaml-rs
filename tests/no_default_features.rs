@@ -8,7 +8,7 @@ use saml_rs::idp::LoginResponseOptions;
 use saml_rs::logout::{create_logout_request, create_logout_response};
 use saml_rs::metadata::{Endpoint, IdpMetadata, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::xml::{extract, ExtractorField};
-use saml_rs::{IdentityProvider, OpenSamlError, ServiceProvider};
+use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
 fn idp_config(want_authn_requests_signed: bool) -> IdpMetadataConfig {
     IdpMetadataConfig {
@@ -36,19 +36,19 @@ fn sp_config(authn_requests_signed: bool) -> SpMetadataConfig {
     }
 }
 
-fn idp(want_authn_requests_signed: bool) -> Result<IdentityProvider, OpenSamlError> {
+fn idp(want_authn_requests_signed: bool) -> Result<IdentityProvider, SamlError> {
     IdentityProvider::from_config(
         &idp_config(want_authn_requests_signed),
         EntitySetting::default(),
     )
 }
 
-fn sp(authn_requests_signed: bool) -> Result<ServiceProvider, OpenSamlError> {
+fn sp(authn_requests_signed: bool) -> Result<ServiceProvider, SamlError> {
     ServiceProvider::from_config(&sp_config(authn_requests_signed), EntitySetting::default())
 }
 
-fn assert_unsupported(result: Result<impl Sized, OpenSamlError>) {
-    assert!(matches!(result, Err(OpenSamlError::Unsupported(_))));
+fn assert_unsupported(result: Result<impl Sized, SamlError>) {
+    assert!(matches!(result, Err(SamlError::Unsupported(_))));
 }
 
 #[test]

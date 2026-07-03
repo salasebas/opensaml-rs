@@ -6,7 +6,7 @@
 //! runs that baseline hardening, and a registered schema validator is opt-in
 //! defense-in-depth.
 
-use crate::error::OpenSamlError;
+use crate::error::SamlError;
 use crate::xml::XmlLimits;
 use std::sync::RwLock;
 
@@ -23,17 +23,17 @@ pub fn set_schema_validator(validator: SchemaValidator) {
 }
 
 /// Validate XML: baseline hardening (always) plus the registered validator (if any).
-pub fn is_valid_xml(xml: &str) -> Result<(), OpenSamlError> {
+pub fn is_valid_xml(xml: &str) -> Result<(), SamlError> {
     is_valid_xml_with_limits(xml, XmlLimits::default())
 }
 
 /// Validate XML with explicit parser resource limits.
-pub fn is_valid_xml_with_limits(xml: &str, limits: XmlLimits) -> Result<(), OpenSamlError> {
+pub fn is_valid_xml_with_limits(xml: &str, limits: XmlLimits) -> Result<(), SamlError> {
     // Baseline: hardened parse rejects DOCTYPE / malformed structure.
     crate::xml::dom::parse_with_limits(xml, limits)?;
     if let Ok(guard) = SCHEMA_VALIDATOR.read() {
         if let Some(validate) = *guard {
-            validate(xml).map_err(OpenSamlError::Invalid)?;
+            validate(xml).map_err(SamlError::Invalid)?;
         }
     }
     Ok(())
