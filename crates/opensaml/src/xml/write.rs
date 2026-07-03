@@ -30,10 +30,6 @@ impl XmlWriter {
         self.write(Event::End(BytesEnd::new(name)));
     }
 
-    #[expect(
-        dead_code,
-        reason = "shared XML writer supports empty element generation for future generated XML"
-    )]
     pub(crate) fn empty<'a>(&mut self, name: &'a str, attrs: &[(&'a str, &'a str)]) {
         let elem = element(name, attrs);
         self.write(Event::Empty(elem));
