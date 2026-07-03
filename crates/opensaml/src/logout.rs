@@ -776,10 +776,18 @@ mod tests {
         )?;
         let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
 
+        let result =
+            parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, "_req1");
+
+        #[cfg(feature = "crypto-bergshamra")]
         assert!(matches!(
-            parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, "_req1"),
+            result,
             Err(OpenSamlError::FailedToVerifySignature)
         ));
+
+        #[cfg(not(feature = "crypto-bergshamra"))]
+        assert!(matches!(result, Err(OpenSamlError::Unsupported(_))));
+
         Ok(())
     }
 }
