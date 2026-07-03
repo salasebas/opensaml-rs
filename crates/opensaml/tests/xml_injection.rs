@@ -4,6 +4,7 @@ use opensaml::binding::base64_decode;
 use opensaml::constants::signature_algorithm::RSA_SHA256;
 use opensaml::constants::Binding;
 use opensaml::entity::{EntitySetting, User};
+use opensaml::flow::HttpRequest;
 use opensaml::idp::LoginResponseOptions;
 use opensaml::logout::create_logout_request;
 use opensaml::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
@@ -138,6 +139,76 @@ fn login_response_attribute_values_escape_xml_markup_before_signing() -> TestRes
     assert!(xml.contains("&lt;/saml:AttributeValue&gt;"));
     assert!(xml.contains("&lt;saml:Attribute Name=&quot;admin&quot;"));
     assert!(!xml.contains("<saml:Attribute Name=\"admin\""));
+    Ok(())
+}
+
+#[test]
+fn login_response_attribute_metadata_escapes_xml_markup_before_signing() -> TestResult {
+    const ATTRIBUTE_NAME: &str = "mail\" FriendlyName=\"pwned\" injected=\"yes";
+    const ATTRIBUTE_VALUE: &str = "user@example.com";
+
+    let mut setting = signing();
+    setting.login_response_template = Some(LoginResponseTemplate {
+        context: Some(LOGIN_RESPONSE_TEMPLATE.into()),
+        attributes: vec![LoginResponseAttribute {
+            name: ATTRIBUTE_NAME.into(),
+            name_format: "urn:format\" injected_format=\"yes".into(),
+            value_xsi_type: "xs:string'\" injected_type=\"yes".into(),
+            value_tag: "user.email".into(),
+            value_xmlns_xs: Some("http://www.w3.org/2001/XMLSchema\" injected_xs=\"yes".into()),
+            value_xmlns_xsi: Some(
+                "http://www.w3.org/2001/XMLSchema-instance\" injected_xsi=\"yes".into(),
+            ),
+        }],
+    });
+    let idp = idp(setting)?;
+    let sp = sp()?;
+    let user = User {
+        name_id: "attacker@example.com".into(),
+        attributes: vec![("user.email".into(), ATTRIBUTE_VALUE.into())],
+        session_index: None,
+    };
+
+    let ctx = idp.create_login_response(
+        &sp,
+        Binding::Post,
+        &user,
+        &LoginResponseOptions {
+            in_response_to: Some("_req1"),
+            ..Default::default()
+        },
+    )?;
+    let xml = decode_binding_context(&ctx.context)?;
+
+    assert!(xml.contains("<ds:Signature"));
+    assert_eq!(xml.matches("<saml:Attribute ").count(), 1);
+    assert_eq!(xml.matches("<saml:AttributeValue ").count(), 1);
+    assert!(!xml.contains(" FriendlyName=\"pwned\""));
+    assert!(!xml.contains(" injected=\"yes\""));
+    assert!(!xml.contains(" injected_format=\"yes\""));
+    assert!(!xml.contains(" injected_xs=\"yes\""));
+    assert!(!xml.contains(" injected_xsi=\"yes\""));
+    assert!(!xml.contains(" injected_type=\"yes\""));
+    assert!(xml.contains("Name=\"mail&quot; FriendlyName=&quot;pwned&quot; injected=&quot;yes\""));
+    assert!(xml.contains("NameFormat=\"urn:format&quot; injected_format=&quot;yes\""));
+    assert!(
+        xml.contains("xmlns:xs=\"http://www.w3.org/2001/XMLSchema&quot; injected_xs=&quot;yes\"")
+    );
+    assert!(xml.contains(
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance&quot; injected_xsi=&quot;yes\""
+    ));
+    assert!(xml.contains("xsi:type=\"xs:string&apos;&quot; injected_type=&quot;yes\""));
+
+    let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+    let parsed = sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_req1")?;
+    assert_eq!(
+        parsed
+            .extract
+            .get("attributes")
+            .and_then(|attributes| attributes.get_key(ATTRIBUTE_NAME))
+            .and_then(|value| value.as_str()),
+        Some(ATTRIBUTE_VALUE)
+    );
     Ok(())
 }
 

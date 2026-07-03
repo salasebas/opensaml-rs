@@ -292,20 +292,17 @@ pub fn attribute_statement_builder(
         .iter()
         .map(|a| {
             let value_placeholder = format!("{{{}}}", tagging("attr", &a.value_tag));
+            let name = xml_escape(&a.name);
+            let name_format = xml_escape(&a.name_format);
+            let value_xmlns_xs = xml_escape(a.value_xmlns_xs.as_deref().unwrap_or(DEFAULT_XS));
+            let value_xmlns_xsi = xml_escape(a.value_xmlns_xsi.as_deref().unwrap_or(DEFAULT_XSI));
+            let value_xsi_type = xml_escape(&a.value_xsi_type);
             attribute_template
-                .replacen("{Name}", &a.name, 1)
-                .replacen("{NameFormat}", &a.name_format, 1)
-                .replacen(
-                    "{ValueXmlnsXs}",
-                    a.value_xmlns_xs.as_deref().unwrap_or(DEFAULT_XS),
-                    1,
-                )
-                .replacen(
-                    "{ValueXmlnsXsi}",
-                    a.value_xmlns_xsi.as_deref().unwrap_or(DEFAULT_XSI),
-                    1,
-                )
-                .replacen("{ValueXsiType}", &a.value_xsi_type, 1)
+                .replacen("{Name}", &name, 1)
+                .replacen("{NameFormat}", &name_format, 1)
+                .replacen("{ValueXmlnsXs}", &value_xmlns_xs, 1)
+                .replacen("{ValueXmlnsXsi}", &value_xmlns_xsi, 1)
+                .replacen("{ValueXsiType}", &value_xsi_type, 1)
                 .replacen("{Value}", &value_placeholder, 1)
         })
         .collect();
