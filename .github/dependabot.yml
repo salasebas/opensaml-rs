@@ -14,9 +14,35 @@ updates:
       semver-patch-days: 3
     open-pull-requests-limit: 5
     groups:
-      cargo-dependencies:
+      cargo-xml-parser:
+        applies-to: version-updates
+        patterns:
+          - "quick-xml"
+      cargo-xml-crypto:
+        applies-to: version-updates
+        patterns:
+          - "bergshamra*"
+          - "kryptering"
+          - "rsa"
+          - "crypto-bigint"
+          - "x509-cert"
+          - "der"
+          - "signature"
+          - "digest"
+      cargo-maintenance:
+        applies-to: version-updates
         patterns:
           - "*"
+        exclude-patterns:
+          - "quick-xml"
+          - "bergshamra*"
+          - "kryptering"
+          - "rsa"
+          - "crypto-bigint"
+          - "x509-cert"
+          - "der"
+          - "signature"
+          - "digest"
 
   - package-ecosystem: github-actions
     directory: /
