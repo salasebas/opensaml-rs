@@ -1,23 +1,35 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/opensaml",
-    "crates/open-saml",
-    "crates/rust-saml",
-    "crates/rustsaml",
-    "crates/saml-rs",
-    "crates/samlify",
-    "crates/samlrs",
-]
-
-[workspace.package]
+[package]
+name = "saml-rs"
 version = "0.1.4"
 edition = "2021"
+rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/salasebas/opensaml-rs"
-homepage = "https://github.com/salasebas/opensaml-rs"
+repository = "https://github.com/salasebas/saml-rs"
+homepage = "https://github.com/salasebas/saml-rs"
+readme = "README.md"
+description = "Pure-Rust SAML 2.0 Service Provider and Identity Provider support."
+keywords = ["saml", "sso", "xml", "authentication"]
+categories = ["authentication", "web-programming"]
+include = [
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/src/**",
+    "/tests/**",
+    "/examples/**",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
 
-[workspace.dependencies]
+[lib]
+name = "saml_rs"
+path = "src/lib.rs"
+
+[features]
+default = ["crypto-bergshamra"]
+crypto-bergshamra = ["dep:bergshamra"]
+
+[dependencies]
 base64 = "0.22"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 quick-xml = "0.41"
@@ -25,14 +37,12 @@ thiserror = "2"
 time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 url = "2"
 uuid = { version = "1", default-features = false, features = ["v4"] }
-bergshamra = "0.6.3"
-opensaml = { path = "crates/opensaml", version = "0.1.4" }
-samlify = { path = "crates/samlify", version = "0.1.4" }
+bergshamra = { version = "0.6.3", optional = true }
 
-[workspace.lints.rust]
+[lints.rust]
 unsafe_code = "forbid"
 
-[workspace.lints.clippy]
+[lints.clippy]
 panic = "warn"
 unwrap_used = "warn"
 expect_used = "warn"

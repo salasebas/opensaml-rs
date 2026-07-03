@@ -3,50 +3,40 @@
 area:core:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/opensaml/src/*.rs"
+          - "src/*.rs"
 
 area:bindings:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/opensaml/src/binding/**"
+          - "src/binding/**"
 
 area:xml:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/opensaml/src/xml/**"
+          - "src/xml/**"
 
 area:crypto:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/opensaml/src/crypto/**"
+          - "src/crypto/**"
 
 area:metadata:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/opensaml/src/metadata/**"
+          - "src/metadata/**"
 
 area:flow:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/opensaml/src/entity.rs"
-          - "crates/opensaml/src/flow.rs"
-          - "crates/opensaml/src/idp.rs"
-          - "crates/opensaml/src/sp.rs"
+          - "src/entity.rs"
+          - "src/flow.rs"
+          - "src/idp.rs"
+          - "src/sp.rs"
 
 area:logout:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/opensaml/src/logout.rs"
-
-area:aliases:
-  - changed-files:
-      - any-glob-to-any-file:
-          - "crates/open-saml/**"
-          - "crates/rust-saml/**"
-          - "crates/rustsaml/**"
-          - "crates/saml-rs/**"
-          - "crates/samlify/**"
-          - "crates/samlrs/**"
+          - "src/logout.rs"
 
 rust:
   - changed-files:
@@ -57,27 +47,27 @@ rust:
 tests:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/**/tests/**"
+          - "tests/**"
 
 fixtures:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/opensaml/tests/fixtures/**"
+          - "tests/fixtures/**"
 
 security:
   - changed-files:
       - any-glob-to-any-file:
           - "SECURITY.md"
           - "deny.toml"
-          - "crates/opensaml/src/crypto/**"
-          - "crates/opensaml/tests/hardening.rs"
-          - "crates/opensaml/tests/xsw.rs"
+          - "src/crypto/**"
+          - "tests/hardening.rs"
+          - "tests/xsw.rs"
 
 documentation:
   - changed-files:
       - any-glob-to-any-file:
           - "*.md"
-          - "crates/**/README.md"
+          - "src/**/*.rs"
 
 release:
   - changed-files:

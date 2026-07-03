@@ -1,20 +1,19 @@
-# opensaml-rs Agent Guide
+# saml-rs Agent Guide
 
-This is a Rust workspace for SAML 2.0 Service Provider and Identity Provider
+This is a Rust package for SAML 2.0 Service Provider and Identity Provider
 support. Keep this file short and operational: it should tell agents how to
 work in the repo, not restate the README.
 
 ## Repo Shape
 
-- `crates/opensaml` is the implementation crate. Put protocol, XML, metadata,
-  binding, validation, logout, and crypto-adapter changes there.
-- `crates/samlify`, `crates/open-saml`, `crates/rust-saml`, `crates/rustsaml`,
-  `crates/saml-rs`, and `crates/samlrs` are alias crates. They should remain
-  thin re-exports unless the task is explicitly about packaging or crate docs.
+- `src/` contains the implementation. Put protocol, XML, metadata, binding,
+  validation, logout, and crypto-adapter changes there.
+- `tests/` contains integration tests and committed fixtures.
+- `examples/` contains runnable examples.
 - XML cryptography is delegated to `bergshamra` behind the default
   `crypto-bergshamra` feature. Do not add in-tree XML-DSig/XML-Enc
   implementations.
-- The workspace forbids unsafe code.
+- The package forbids unsafe code.
 
 ## Working Rules
 
@@ -23,29 +22,20 @@ work in the repo, not restate the README.
 - Keep diffs focused. Do not mix documentation cleanup, behavior changes, and
   dependency upgrades unless the task asks for it.
 - Use `rg` / `rg --files` for searches.
-- Do not commit upstream reference clones or other generated/vendor trees.
+- Do not commit generated/vendor trees.
 - Do not add dependencies without proposing them first. Keep optional
   integrations behind feature flags.
 - If a user has local changes, preserve them and work around them.
 - Keep non-mechanical diffs reviewable. If a change grows large, split it into
   the smallest coherent stages.
+- New SAML behavior should be justified by the SAML specifications,
+  interoperability evidence, or focused local tests.
 
-## Porting Reference
+## Fixture Provenance
 
-- The npm `samlify` source is a behavioral reference only. The active pin lives
-  in `reference/upstream-samlify/VERSION.md`.
-- Fetch the pinned source with:
-
-  ```bash
-  ./scripts/fetch-upstream-samlify.sh
-  ```
-
-- Reference sources live under
-  `reference/upstream-samlify/<version>/repository/` and are gitignored.
-- When porting upstream behavior, cite or inspect the matching upstream file,
-  add a focused Rust test, then implement the Rust equivalent.
-- Do not claim support for newer upstream behavior until the changed behavior
-  has tests or an explicit tracking note.
+- Historical fixture provenance is documented in
+  `tests/fixtures/PROVENANCE.md`.
+- Do not commit fetched upstream clones or other local reference trees.
 
 ## Checks
 
@@ -54,29 +44,23 @@ effects:
 
 ```bash
 cargo fmt --all --check
-cargo clippy -p <crate> --all-targets -- -D warnings
-cargo nextest run -p <crate>
+cargo clippy -p saml-rs --all-targets -- -D warnings
+cargo nextest run -p saml-rs
 ```
 
-Use workspace-wide checks when touching shared configuration, workspace
-features, release metadata, or multiple crates:
+When touching shared configuration, release metadata, or feature boundaries,
+also check:
 
 ```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-For crypto feature boundaries, also check:
-
-```bash
-cargo check -p opensaml --no-default-features
+cargo test -p saml-rs --doc
+cargo check -p saml-rs --no-default-features
 ```
 
 ## Rust Style
 
 - Prefer private modules and explicitly exported public crate API.
 - Prefer explicit `Result` errors over panics.
-- `unwrap_used`, `expect_used`, and `panic` are workspace `warn` lints; under
+- `unwrap_used`, `expect_used`, and `panic` are package `warn` lints; under
   `-D warnings` they fail builds, including tests.
 - Avoid boolean or ambiguous `Option` parameters in public or SAML flow APIs.
   Prefer enums, named builders, or typed options when they make call sites
@@ -93,7 +77,7 @@ cargo check -p opensaml --no-default-features
 - Keep XML handling structured. Avoid ad hoc string parsing when the local DOM,
   extractor, metadata, or binding helpers can express the behavior.
 - Keep security-sensitive validation fail-closed. Missing, malformed, unsigned,
-  or untrusted inputs should produce explicit `OpenSamlError` variants where
+  or untrusted inputs should produce explicit `SamlError` variants where
   practical.
 - Avoid growing large modules. Prefer new focused modules over extending files
   that are already large, especially `idp.rs`, `logout.rs`, `flow.rs`, and
@@ -114,7 +98,7 @@ Add regression tests for security fixes.
 
 ## Docs And Releases
 
-- Keep README claims aligned with `CHANGELOG.md` and the active upstream pin.
-- Do not hardcode future release versions in docs. This workspace uses
+- Keep README claims aligned with `CHANGELOG.md`.
+- Do not hardcode future release versions in docs. This repository uses
   release-plz and Conventional Commits to decide the next version.
-- The Rust `samlify` crate is an alias crate, unrelated to the npm package.
+- The published crate is `saml-rs`, and Rust imports use `saml_rs`.

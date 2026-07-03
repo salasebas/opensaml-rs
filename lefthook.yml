@@ -6,6 +6,6 @@ pre-commit:
   parallel: false
   commands:
     fmt:
-      glob: "{crates/**/*.rs,examples/**/*.rs,tests/**/*.rs}"
+      glob: "{src/**/*.rs,examples/**/*.rs,tests/**/*.rs}"
       run: cargo fmt --all
       stage_fixed: true
