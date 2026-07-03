@@ -1,7 +1,7 @@
 //! SAML Service Provider entity (samlify `entity-sp.ts`).
 
 use crate::binding::{base64_encode, build_redirect_url};
-use crate::constants::{Binding, CertUse, ParserType};
+use crate::constants::{namespace, Binding, CertUse, ParserType};
 use crate::entity::{
     generate_id, now_iso8601, BindingContext, CustomTagReplacement, EntitySetting,
 };
@@ -11,6 +11,7 @@ use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
 use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
 use crate::util::Value;
+use crate::xml::write::XmlWriter;
 use crate::xml::{extract_with_limits, ExtractorField, XmlLimits};
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
@@ -38,10 +39,70 @@ pub struct LoginRequestOptions<'a> {
     pub assertion_consumer_service_index: Option<u16>,
 }
 
+struct AuthnRequestXml<'a> {
+    id: &'a str,
+    issue_instant: &'a str,
+    destination: &'a str,
+    force_authn: Option<bool>,
+    protocol_binding: Option<&'a str>,
+    assertion_consumer_service_url: Option<&'a str>,
+    assertion_consumer_service_index: Option<u16>,
+    issuer: &'a str,
+    name_id_format: &'a str,
+    allow_create: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum LoginResponseCorrelation<'a> {
     Unsolicited,
     RequestId(&'a str),
+}
+
+fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
+    let force_authn = input.force_authn.map(|value| value.to_string());
+    let assertion_consumer_service_index = input
+        .assertion_consumer_service_index
+        .map(|value| value.to_string());
+    let allow_create = input.allow_create.to_string();
+
+    let mut attrs = Vec::with_capacity(8);
+    attrs.push(("xmlns:samlp", namespace::PROTOCOL));
+    attrs.push(("xmlns:saml", namespace::ASSERTION));
+    attrs.push(("ID", input.id));
+    attrs.push(("Version", "2.0"));
+    attrs.push(("IssueInstant", input.issue_instant));
+    attrs.push(("Destination", input.destination));
+    if let Some(force_authn) = force_authn.as_deref() {
+        attrs.push(("ForceAuthn", force_authn));
+    }
+    if let Some(protocol_binding) = input.protocol_binding {
+        attrs.push(("ProtocolBinding", protocol_binding));
+    }
+    if let Some(assertion_consumer_service_url) = input.assertion_consumer_service_url {
+        attrs.push((
+            "AssertionConsumerServiceURL",
+            assertion_consumer_service_url,
+        ));
+    }
+    if let Some(assertion_consumer_service_index) = assertion_consumer_service_index.as_deref() {
+        attrs.push((
+            "AssertionConsumerServiceIndex",
+            assertion_consumer_service_index,
+        ));
+    }
+
+    let mut writer = XmlWriter::new();
+    writer.start("samlp:AuthnRequest", &attrs);
+    writer.text_element("saml:Issuer", &[], input.issuer);
+    writer.empty(
+        "samlp:NameIDPolicy",
+        &[
+            ("Format", input.name_id_format),
+            ("AllowCreate", allow_create.as_str()),
+        ],
+    );
+    writer.end("samlp:AuthnRequest");
+    writer.finish()
 }
 
 fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
@@ -152,14 +213,11 @@ impl ServiceProvider {
             .metadata
             .get_single_sign_on_service(binding)
             .ok_or_else(|| OpenSamlError::MissingMetadata("SingleSignOnService".into()))?;
-        let template = self
-            .setting
-            .login_request_template
-            .as_deref()
-            .unwrap_or(LOGIN_REQUEST_TEMPLATE);
-        let (id, xml) = match options.custom {
-            Some(f) => f(template),
-            None => {
+        let custom_template = self.setting.login_request_template.as_deref();
+        let template = custom_template.unwrap_or(LOGIN_REQUEST_TEMPLATE);
+        let (id, xml) = match (options.custom, custom_template) {
+            (Some(f), _) => f(template),
+            (None, _) => {
                 let uses_acs_index = options.assertion_consumer_service_index.is_some();
                 let acs_url = (!uses_acs_index).then(|| {
                     self.metadata
@@ -177,26 +235,43 @@ impl ServiceProvider {
                     .cloned()
                     .unwrap_or_default();
                 let id = generate_id();
-                let xml = replace_tags_by_optional_value(
-                    template,
-                    &[
-                        ("ID", Some(id.clone())),
-                        ("IssueInstant", Some(now_iso8601())),
-                        ("Destination", Some(destination.clone())),
-                        (
-                            "ForceAuthn",
-                            options
-                                .force_authn
-                                .map(|force_authn| force_authn.to_string()),
-                        ),
-                        ("ProtocolBinding", protocol_binding),
-                        ("AssertionConsumerServiceURL", acs_url),
-                        ("AssertionConsumerServiceIndex", acs_index),
-                        ("Issuer", Some(self.entity_id())),
-                        ("NameIDFormat", Some(name_id_format)),
-                        ("AllowCreate", Some(self.setting.allow_create.to_string())),
-                    ],
-                );
+                let xml = if custom_template.is_none() {
+                    let issue_instant = now_iso8601();
+                    let issuer = self.entity_id();
+                    render_default_authn_request_xml(&AuthnRequestXml {
+                        id: &id,
+                        issue_instant: &issue_instant,
+                        destination: &destination,
+                        force_authn: options.force_authn,
+                        protocol_binding: protocol_binding.as_deref(),
+                        assertion_consumer_service_url: acs_url.as_deref(),
+                        assertion_consumer_service_index: options.assertion_consumer_service_index,
+                        issuer: &issuer,
+                        name_id_format: &name_id_format,
+                        allow_create: self.setting.allow_create,
+                    })
+                } else {
+                    replace_tags_by_optional_value(
+                        template,
+                        &[
+                            ("ID", Some(id.clone())),
+                            ("IssueInstant", Some(now_iso8601())),
+                            ("Destination", Some(destination.clone())),
+                            (
+                                "ForceAuthn",
+                                options
+                                    .force_authn
+                                    .map(|force_authn| force_authn.to_string()),
+                            ),
+                            ("ProtocolBinding", protocol_binding),
+                            ("AssertionConsumerServiceURL", acs_url),
+                            ("AssertionConsumerServiceIndex", acs_index),
+                            ("Issuer", Some(self.entity_id())),
+                            ("NameIDFormat", Some(name_id_format)),
+                            ("AllowCreate", Some(self.setting.allow_create.to_string())),
+                        ],
+                    )
+                };
                 (id, xml)
             }
         };

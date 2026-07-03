@@ -68,6 +68,116 @@ fn redirect_relay_state(url: &str) -> Result<Option<String>, Box<dyn std::error:
         .find_map(|(key, value)| (key == "RelayState").then_some(value.into_owned())))
 }
 
+const HOSTILE_SP_ENTITY_ID: &str = concat!(
+    "https://sp.example.com/metadata",
+    "</saml:Issuer>",
+    "<evil:Injected>issuer</evil:Injected>",
+    "<saml:Issuer>"
+);
+const HOSTILE_IDP_SSO_DESTINATION: &str = concat!(
+    "https://idp.example.com/sso?",
+    "continue=%3Cevil:Injected%3Edestination%3C%2Fevil:Injected%3E",
+    "&quote=%22"
+);
+const HOSTILE_ACS_URL: &str = concat!(
+    "https://sp.example.com/acs\"/>",
+    "<evil:Injected>acs</evil:Injected>",
+    "<samlp:AuthnRequest foo=\""
+);
+const HOSTILE_NAME_ID_FORMAT: &str = concat!(
+    "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress\"/>",
+    "<evil:Injected>nameid</evil:Injected>",
+    "<samlp:NameIDPolicy Format=\""
+);
+
+fn hostile_unsigned_idp() -> Result<IdentityProvider, OpenSamlError> {
+    IdentityProvider::from_config(
+        &IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            single_sign_on_service: vec![
+                Endpoint::new(Binding::Redirect, HOSTILE_IDP_SSO_DESTINATION),
+                Endpoint::new(Binding::Post, HOSTILE_IDP_SSO_DESTINATION),
+                Endpoint::new(Binding::SimpleSign, HOSTILE_IDP_SSO_DESTINATION),
+            ],
+            ..Default::default()
+        },
+        EntitySetting::default(),
+    )
+}
+
+fn hostile_unsigned_sp() -> Result<ServiceProvider, OpenSamlError> {
+    ServiceProvider::from_config(
+        &SpMetadataConfig {
+            entity_id: HOSTILE_SP_ENTITY_ID.into(),
+            assertion_consumer_service: vec![Endpoint::new(Binding::Post, HOSTILE_ACS_URL)],
+            name_id_format: vec![HOSTILE_NAME_ID_FORMAT.into()],
+            ..Default::default()
+        },
+        EntitySetting::default(),
+    )
+}
+
+fn login_request_http_request(
+    ctx: &BindingContext,
+) -> Result<HttpRequest, Box<dyn std::error::Error>> {
+    match ctx.binding {
+        Binding::Redirect => {
+            let query = Url::parse(&ctx.context)?
+                .query_pairs()
+                .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                .collect();
+            Ok(HttpRequest {
+                query,
+                ..Default::default()
+            })
+        }
+        Binding::Post | Binding::SimpleSign => Ok(HttpRequest::post(vec![(
+            "SAMLRequest".into(),
+            ctx.context.clone(),
+        )])),
+        Binding::Artifact => Err("artifact binding is unsupported".into()),
+    }
+}
+
+fn assert_hostile_values_are_escaped(xml: &str, acs_index: Option<u16>) {
+    assert_eq!(xml.matches("<samlp:AuthnRequest").count(), 1);
+    assert_eq!(xml.matches("<saml:Issuer").count(), 1);
+    assert!(!xml.contains("<evil:Injected"));
+    assert!(!xml.contains("</evil:Injected"));
+    assert!(xml.contains(
+        "<saml:Issuer>https://sp.example.com/metadata&lt;/saml:Issuer&gt;\
+         &lt;evil:Injected&gt;issuer&lt;/evil:Injected&gt;&lt;saml:Issuer&gt;</saml:Issuer>"
+    ));
+    assert!(xml.contains(
+        "Destination=\"https://idp.example.com/sso?continue=%3Cevil:Injected%3Edestination%3C%2Fevil:Injected%3E&amp;quote=%22\""
+    ));
+    assert!(xml.contains("Format=\"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress&quot;/"));
+    assert!(xml.contains("nameid&lt;/evil:Injected"));
+
+    if let Some(index) = acs_index {
+        assert!(xml.contains(&format!("AssertionConsumerServiceIndex=\"{index}\"")));
+        assert!(!xml.contains("AssertionConsumerServiceURL="));
+        assert!(!xml.contains("ProtocolBinding="));
+    } else {
+        assert!(xml.contains("AssertionConsumerServiceURL=\"https://sp.example.com/acs&quot;/"));
+        assert!(xml.contains("acs&lt;/evil:Injected"));
+        assert!(xml.contains("ProtocolBinding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\""));
+        assert!(!xml.contains("AssertionConsumerServiceIndex="));
+    }
+}
+
+fn assert_hostile_request_parses(
+    idp: &IdentityProvider,
+    sp: &ServiceProvider,
+    ctx: &BindingContext,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let request = login_request_http_request(ctx)?;
+    let parsed = idp.parse_login_request(sp, ctx.binding, &request)?;
+    assert_eq!(parsed.extract.get_str("request.id"), Some(ctx.id.as_str()));
+    assert_eq!(parsed.extract.get_str("issuer"), Some(HOSTILE_SP_ENTITY_ID));
+    Ok(())
+}
+
 #[test]
 fn legacy_create_login_request_callback_still_works() -> Result<(), Box<dyn std::error::Error>> {
     let replace = |_template: &str| {
@@ -84,6 +194,55 @@ fn legacy_create_login_request_callback_still_works() -> Result<(), Box<dyn std:
 
     assert_eq!(ctx.id, "_custom");
     assert!(request_xml(&ctx)?.contains("ID=\"_custom\""));
+    Ok(())
+}
+
+#[test]
+fn hostile_authn_request_values_escape_for_all_login_request_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = hostile_unsigned_sp()?;
+    let idp = hostile_unsigned_idp()?;
+
+    for binding in [Binding::Redirect, Binding::Post, Binding::SimpleSign] {
+        let ctx = sp.create_login_request_with_options(
+            &idp,
+            binding,
+            &LoginRequestOptions {
+                force_authn: Some(true),
+                ..Default::default()
+            },
+        )?;
+        let xml = request_xml(&ctx)?;
+
+        assert_hostile_values_are_escaped(&xml, None);
+        assert!(xml.contains("ForceAuthn=\"true\""));
+        assert_hostile_request_parses(&idp, &sp, &ctx)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn hostile_authn_request_values_escape_with_acs_index_for_all_login_request_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = hostile_unsigned_sp()?;
+    let idp = hostile_unsigned_idp()?;
+
+    for binding in [Binding::Redirect, Binding::Post, Binding::SimpleSign] {
+        let ctx = sp.create_login_request_with_options(
+            &idp,
+            binding,
+            &LoginRequestOptions {
+                force_authn: Some(false),
+                assertion_consumer_service_index: Some(7),
+                ..Default::default()
+            },
+        )?;
+        let xml = request_xml(&ctx)?;
+
+        assert_hostile_values_are_escaped(&xml, Some(7));
+        assert!(xml.contains("ForceAuthn=\"false\""));
+        assert_hostile_request_parses(&idp, &sp, &ctx)?;
+    }
     Ok(())
 }
 
