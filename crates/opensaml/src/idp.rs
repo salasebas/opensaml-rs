@@ -10,10 +10,13 @@ use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::{try_generate_idp_metadata, IdpMetadata, IdpMetadataConfig};
 use crate::sp::ServiceProvider;
 use crate::template::{
-    apply_tag_prefixes, attr_tag, attribute_statement_builder,
-    render_login_response_attribute_statement, replace_tags_by_value, validate_tag_prefix,
-    ATTRIBUTE_STATEMENT_TEMPLATE, ATTRIBUTE_TEMPLATE, LOGIN_RESPONSE_TEMPLATE,
+    apply_tag_prefixes, attr_tag, attribute_statement_builder, replace_tags_by_value,
+    validate_tag_prefix, ATTRIBUTE_STATEMENT_TEMPLATE, ATTRIBUTE_TEMPLATE, LOGIN_RESPONSE_TEMPLATE,
 };
+
+mod login_response;
+
+use login_response::{render_default_login_response, LoginResponseXml};
 
 /// Optional inputs for [`IdentityProvider::create_login_response`]
 /// (samlify's `createLoginResponse` trailing parameters).
@@ -90,28 +93,56 @@ impl IdentityProvider {
         validate_tag_prefix("protocol", &self.setting.tag_prefix_protocol)?;
         validate_tag_prefix("assertion", &self.setting.tag_prefix_assertion)?;
         let tmpl = self.setting.login_response_template.as_ref();
+        let attributes = tmpl.map(|t| t.attributes.as_slice()).unwrap_or(&[]);
+        let has_custom_context = tmpl.and_then(|t| t.context.as_ref()).is_some();
+        if custom.is_none() && !has_custom_context {
+            let now = now_iso8601();
+            let later = iso8601_offset(300);
+            let name_id_format = self
+                .setting
+                .name_id_format
+                .first()
+                .cloned()
+                .unwrap_or_default();
+            let id = generate_id();
+            let assertion_id = generate_id();
+            let audience = sp.metadata.get_entity_id().unwrap_or_default().to_string();
+            let issuer = self.entity_id();
+            let in_response_to = in_response_to.unwrap_or_default();
+            let xml = render_default_login_response(&LoginResponseXml {
+                protocol_prefix: &self.setting.tag_prefix_protocol,
+                assertion_prefix: &self.setting.tag_prefix_assertion,
+                response_id: &id,
+                assertion_id: &assertion_id,
+                issue_instant: &now,
+                destination: acs,
+                subject_recipient: acs,
+                issuer: &issuer,
+                status_code: status_code::SUCCESS,
+                subject_confirmation_not_on_or_after: &later,
+                conditions_not_before: &now,
+                conditions_not_on_or_after: &later,
+                audience: &audience,
+                name_id_format: &name_id_format,
+                name_id: &user.name_id,
+                in_response_to,
+                attributes,
+                user_attributes: &user.attributes,
+            })?;
+            return Ok((id, xml));
+        }
+
         let base = tmpl
             .and_then(|t| t.context.as_deref())
             .unwrap_or(LOGIN_RESPONSE_TEMPLATE);
-        let attributes = tmpl.map(|t| t.attributes.as_slice()).unwrap_or(&[]);
-        let has_custom_context = tmpl.and_then(|t| t.context.as_ref()).is_some();
-        let legacy_attribute_placeholders = custom.is_some() || has_custom_context;
-        let attribute_statement = if legacy_attribute_placeholders {
-            if attributes.is_empty() {
-                String::new()
-            } else {
-                attribute_statement_builder(
-                    attributes,
-                    ATTRIBUTE_TEMPLATE,
-                    ATTRIBUTE_STATEMENT_TEMPLATE,
-                )
-            }
+        let attribute_statement = if attributes.is_empty() {
+            String::new()
         } else {
-            render_login_response_attribute_statement(
+            attribute_statement_builder(
                 attributes,
-                &user.attributes,
-                &self.setting.tag_prefix_assertion,
-            )?
+                ATTRIBUTE_TEMPLATE,
+                ATTRIBUTE_STATEMENT_TEMPLATE,
+            )
         };
         let prepared = base.replacen("{AttributeStatement}", &attribute_statement, 1);
         let prepared = apply_tag_prefixes(
@@ -119,11 +150,6 @@ impl IdentityProvider {
             &self.setting.tag_prefix_protocol,
             &self.setting.tag_prefix_assertion,
         );
-        if !legacy_attribute_placeholders && prepared.contains("{attr") {
-            return Err(OpenSamlError::Invalid(
-                "unresolved login response attribute placeholder".into(),
-            ));
-        }
         if let Some(f) = custom {
             return Ok(f(&prepared));
         }
@@ -160,16 +186,13 @@ impl IdentityProvider {
             ),
             ("AuthnStatement", String::new()),
         ];
-        let attr_pairs: Vec<(String, String)> = if legacy_attribute_placeholders {
-            // Attribute value placeholders ({attr<Tag>}) are filled from the user's
-            // attributes after the AttributeStatement is expanded into the template.
-            user.attributes
-                .iter()
-                .map(|(tag, value)| (attr_tag(tag), value.clone()))
-                .collect()
-        } else {
-            Vec::new()
-        };
+        // Attribute value placeholders ({attr<Tag>}) are filled from the user's
+        // attributes after the AttributeStatement is expanded into the legacy template.
+        let attr_pairs: Vec<(String, String)> = user
+            .attributes
+            .iter()
+            .map(|(tag, value)| (attr_tag(tag), value.clone()))
+            .collect();
         for (key, value) in &attr_pairs {
             tags.push((key.as_str(), value.clone()));
         }

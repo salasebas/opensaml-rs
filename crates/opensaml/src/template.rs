@@ -311,19 +311,19 @@ pub fn attribute_statement_builder(
     attribute_statement_template.replacen("{Attributes}", &attrs, 1)
 }
 
-pub(crate) fn render_login_response_attribute_statement(
+pub(crate) fn write_login_response_attribute_statement(
+    writer: &mut XmlWriter,
     attributes: &[LoginResponseAttribute],
     user_attributes: &[(String, String)],
     assertion_prefix: &str,
-) -> Result<String, OpenSamlError> {
+) -> Result<(), OpenSamlError> {
     if attributes.is_empty() {
-        return Ok(String::new());
+        return Ok(());
     }
 
     let statement_name = format!("{assertion_prefix}:AttributeStatement");
     let attribute_name = format!("{assertion_prefix}:Attribute");
     let value_name = format!("{assertion_prefix}:AttributeValue");
-    let mut writer = XmlWriter::new();
     writer.start(&statement_name, &[]);
     for attribute in attributes {
         let value = user_attributes
@@ -361,7 +361,7 @@ pub(crate) fn render_login_response_attribute_statement(
         writer.end(&attribute_name);
     }
     writer.end(&statement_name);
-    Ok(writer.finish())
+    Ok(())
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ use opensaml::idp::LoginResponseOptions;
 use opensaml::logout::{create_logout_request, create_logout_response};
 use opensaml::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use opensaml::template::{LoginResponseAttribute, LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
+use opensaml::xml::dom::{parse_roots, Node};
 use opensaml::{IdentityProvider, OpenSamlError, ServiceProvider};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
@@ -54,6 +55,27 @@ fn decode_binding_context(context: &str) -> TestResult<String> {
     Ok(String::from_utf8(base64_decode(context)?)?)
 }
 
+fn login_response_shape(xml: &str) -> TestResult {
+    let roots = parse_roots(xml)?;
+    assert_eq!(roots.len(), 1);
+    let response = roots.first().ok_or("missing response root")?;
+    assert_eq!(response.local_name, "Response");
+    assert_eq!(direct_children(response, "Assertion").count(), 1);
+    assert_eq!(direct_children(response, "Issuer").count(), 1);
+
+    let assertion = direct_children(response, "Assertion")
+        .next()
+        .ok_or("missing assertion")?;
+    assert_eq!(direct_children(assertion, "Issuer").count(), 1);
+    Ok(())
+}
+
+fn direct_children<'a>(node: &'a Node, local_name: &'a str) -> impl Iterator<Item = &'a Node> {
+    node.children
+        .iter()
+        .filter(move |child| child.local_name == local_name)
+}
+
 #[test]
 fn login_response_name_id_escapes_xml_markup_before_signing() -> TestResult {
     let idp = idp(signing())?;
@@ -83,6 +105,81 @@ fn login_response_name_id_escapes_xml_markup_before_signing() -> TestResult {
     assert!(xml.contains("&lt;/saml:NameID&gt;"));
     assert!(xml.contains("&lt;saml:NameID Format=&quot;"));
     assert!(!xml.contains("<saml:NameID>admin@example.com</saml:NameID>"));
+    Ok(())
+}
+
+#[test]
+fn login_response_wrapper_fields_escape_xml_markup_before_signing() -> TestResult {
+    const HOSTILE_IDP_ENTITY_ID: &str =
+        "https://idp.example.com/metadata</saml:Issuer><InjectedIssuer>evil</InjectedIssuer>";
+    const HOSTILE_SP_ENTITY_ID: &str =
+        "https://sp.example.com/metadata</saml:Audience><InjectedAudience>evil</InjectedAudience>";
+    const HOSTILE_ACS: &str =
+        "https://sp.example.com/acs\" injected=\"yes\"><InjectedDestination/>";
+    const HOSTILE_REQUEST_ID: &str =
+        "_req\" injected=\"yes\"></samlp:Response><samlp:Response ID=\"evil\">";
+    const HOSTILE_NAME_ID_FORMAT: &str =
+        "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress\" injected=\"yes";
+
+    let mut idp_setting = signing();
+    idp_setting.name_id_format = vec![HOSTILE_NAME_ID_FORMAT.into()];
+    let idp = IdentityProvider::from_config(
+        &IdpMetadataConfig {
+            entity_id: HOSTILE_IDP_ENTITY_ID.into(),
+            signing_certs: vec![CERT.into()],
+            single_sign_on_service: vec![Endpoint::new(Binding::Post, "https://idp/sso")],
+            single_logout_service: vec![Endpoint::new(Binding::Post, "https://idp/slo")],
+            ..Default::default()
+        },
+        idp_setting,
+    )?;
+    let sp = ServiceProvider::from_config(
+        &SpMetadataConfig {
+            entity_id: HOSTILE_SP_ENTITY_ID.into(),
+            signing_certs: vec![CERT.into()],
+            assertion_consumer_service: vec![Endpoint::new(Binding::Post, HOSTILE_ACS)],
+            single_logout_service: vec![Endpoint::new(Binding::Post, "https://sp/slo")],
+            ..Default::default()
+        },
+        signing(),
+    )?;
+
+    let ctx = idp.create_login_response(
+        &sp,
+        Binding::Post,
+        &User::new("wrapper@example.com"),
+        &LoginResponseOptions {
+            in_response_to: Some(HOSTILE_REQUEST_ID),
+            ..Default::default()
+        },
+    )?;
+    let xml = decode_binding_context(&ctx.context)?;
+
+    assert!(xml.contains("<ds:Signature"));
+    login_response_shape(&xml)?;
+    assert!(!xml.contains("<InjectedIssuer>"));
+    assert!(!xml.contains("<InjectedAudience>"));
+    assert!(!xml.contains("<InjectedDestination"));
+    assert!(!xml.contains("<samlp:Response ID=\"evil\""));
+    assert!(!xml.contains(" injected=\"yes"));
+    assert!(xml.contains("&lt;InjectedIssuer&gt;evil&lt;/InjectedIssuer&gt;"));
+    assert!(xml.contains("&lt;InjectedAudience&gt;evil&lt;/InjectedAudience&gt;"));
+    assert!(
+        xml.contains("Destination=\"https://sp.example.com/acs&quot; injected=&quot;yes&quot;&gt;")
+    );
+    assert!(
+        xml.contains("Recipient=\"https://sp.example.com/acs&quot; injected=&quot;yes&quot;&gt;")
+    );
+    assert!(xml.contains("InResponseTo=\"_req&quot; injected=&quot;yes&quot;&gt;"));
+    assert!(xml.contains("Format=\"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress&quot; injected=&quot;yes\""));
+
+    let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
+    let parsed =
+        sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, HOSTILE_REQUEST_ID)?;
+    assert_eq!(
+        parsed.extract.get_str("nameID"),
+        Some("wrapper@example.com")
+    );
     Ok(())
 }
 
