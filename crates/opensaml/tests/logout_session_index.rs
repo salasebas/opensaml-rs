@@ -1,7 +1,7 @@
 use opensaml::binding::{base64_decode, deflate_raw_decode};
 use opensaml::constants::Binding;
 use opensaml::entity::{EntitySetting, User};
-use opensaml::logout::create_logout_request;
+use opensaml::logout::{create_logout_request, create_logout_response};
 use opensaml::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use opensaml::{IdentityProvider, OpenSamlError, ServiceProvider};
 
@@ -58,9 +58,42 @@ fn logout_request_xml(
     decode_logout_request(binding, &context.context)
 }
 
+fn logout_response_xml(
+    binding: Binding,
+    in_response_to: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let idp = idp()?;
+    let sp = sp()?;
+    let context = create_logout_response(
+        &idp.setting,
+        &idp.metadata,
+        &sp.metadata,
+        binding,
+        in_response_to,
+        None,
+        false,
+    )?;
+    decode_logout_response(binding, &context.context)
+}
+
 fn decode_logout_request(
     binding: Binding,
     context: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    decode_binding_context(binding, context, "SAMLRequest")
+}
+
+fn decode_logout_response(
+    binding: Binding,
+    context: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    decode_binding_context(binding, context, "SAMLResponse")
+}
+
+fn decode_binding_context(
+    binding: Binding,
+    context: &str,
+    query_param: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     match binding {
         Binding::Post | Binding::SimpleSign => Ok(String::from_utf8(base64_decode(context)?)?),
@@ -68,13 +101,13 @@ fn decode_logout_request(
             let url = url::Url::parse(context)?;
             let value = url
                 .query_pairs()
-                .find_map(|(key, value)| (key == "SAMLRequest").then_some(value.into_owned()))
-                .ok_or("missing SAMLRequest")?;
+                .find_map(|(key, value)| (key == query_param).then_some(value.into_owned()))
+                .ok_or("missing SAML message")?;
             Ok(String::from_utf8(deflate_raw_decode(&base64_decode(
                 &value,
             )?)?)?)
         }
-        Binding::Artifact => Err("artifact binding does not render logout requests here".into()),
+        Binding::Artifact => Err("artifact binding does not render logout messages here".into()),
     }
 }
 
@@ -106,5 +139,13 @@ fn logout_request_simplesign_includes_session_index_when_present(
 fn logout_request_omits_session_index_when_absent() -> Result<(), Box<dyn std::error::Error>> {
     let xml = logout_request_xml(Binding::Post, None)?;
     assert!(!xml.contains("<samlp:SessionIndex>"));
+    Ok(())
+}
+
+#[test]
+fn logout_response_post_omits_in_response_to_when_absent() -> Result<(), Box<dyn std::error::Error>>
+{
+    let xml = logout_response_xml(Binding::Post, None)?;
+    assert!(!xml.contains("InResponseTo="));
     Ok(())
 }
