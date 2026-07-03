@@ -609,9 +609,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97bb4a855e3b10f84c4e7e895a7de01db7f9a7b7eb7f73ed9773fd52ac686451"
+checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -1298,7 +1298,7 @@ dependencies = [
  "aes-gcm",
  "aes-kw",
  "cbc 0.2.1",
- "crypto-bigint 0.7.4",
+ "crypto-bigint 0.7.5",
  "cryptoki",
  "des 0.9.0",
  "digest 0.10.7",
