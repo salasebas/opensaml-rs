@@ -252,12 +252,18 @@ pub struct BindingContext {
 
 impl BindingContext {
     /// Build the POST/SimpleSign auto-submit form (the `context` must be base64).
+    ///
+    /// If exactly one of `sig_alg` or `signature` is present, this infallible
+    /// helper omits the detached SimpleSign fields. Use [`Self::try_post_form`]
+    /// to reject partial detached signature state.
     pub fn post_form(&self) -> String {
-        crate::binding::saml_post_binding_form(
+        crate::binding::saml_post_binding_form_with_signature(
             &self.entity_endpoint,
             self.request_type,
             &self.context,
             self.relay_state.as_deref(),
+            self.sig_alg.as_deref(),
+            self.signature.as_deref(),
         )
     }
 
@@ -266,13 +272,16 @@ impl BindingContext {
     /// # Errors
     ///
     /// Returns [`crate::error::OpenSamlError::Invalid`] when `entity_endpoint`
-    /// is not an absolute HTTP(S) URL.
+    /// is not an absolute HTTP(S) URL, or when detached SimpleSign state has
+    /// only one of `sig_alg` or `signature`.
     pub fn try_post_form(&self) -> Result<String, crate::error::OpenSamlError> {
-        crate::binding::try_saml_post_binding_form(
+        crate::binding::try_saml_post_binding_form_with_signature(
             &self.entity_endpoint,
             self.request_type,
             &self.context,
             self.relay_state.as_deref(),
+            self.sig_alg.as_deref(),
+            self.signature.as_deref(),
         )
     }
 }

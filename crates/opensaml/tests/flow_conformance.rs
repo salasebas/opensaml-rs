@@ -152,6 +152,40 @@ fn simplesign_request(param: &str, ctx: &BindingContext) -> Result<HttpRequest, 
     })
 }
 
+fn form_hidden_fields(form: &str) -> Result<Vec<(String, String)>, OpenSamlError> {
+    let mut fields = Vec::new();
+    let mut rest = form;
+    while let Some((_, after_marker)) = rest.split_once("<input type=\"hidden\" name=\"") {
+        let (name, after_name) = after_marker
+            .split_once("\" value=\"")
+            .ok_or_else(|| OpenSamlError::Invalid("unterminated hidden input name".into()))?;
+        let (value, after_value) = after_name
+            .split_once("\"/>")
+            .ok_or_else(|| OpenSamlError::Invalid("unterminated hidden input value".into()))?;
+        fields.push((name.to_string(), value.to_string()));
+        rest = after_value;
+    }
+    Ok(fields)
+}
+
+fn simplesign_form_request(
+    param: &str,
+    ctx: &BindingContext,
+) -> Result<HttpRequest, OpenSamlError> {
+    let form = ctx.post_form();
+    let mut request = HttpRequest::post(form_hidden_fields(&form)?);
+    let encoded = body_param(&request, param)?.to_string();
+    let raw_xml = String::from_utf8(base64_decode(&encoded)?)
+        .map_err(|e| OpenSamlError::Xml(e.to_string()))?;
+    let relay_state = body_param(&request, "RelayState")?.to_string();
+    let sig_alg = body_param(&request, "SigAlg")?.to_string();
+    let _signature = body_param(&request, "Signature")?.to_string();
+    request.octet_string = Some(format!(
+        "{param}={raw_xml}&RelayState={relay_state}&SigAlg={sig_alg}"
+    ));
+    Ok(request)
+}
+
 /// A `customTagReplacement` that renders our default template + attributes.
 fn fill_response(template: &str, idp_id: &str, email: &str) -> (String, String) {
     let id = "_8e8dc5f69a98cc4c1ff3427e5ce34606fd672f91e6".to_string();
@@ -434,6 +468,39 @@ fn create_simplesign_login_response() -> Result<(), Box<dyn std::error::Error>> 
 #[test]
 fn create_post_login_response() -> Result<(), Box<dyn std::error::Error>> {
     create_login_response(Binding::Post)
+}
+
+#[test]
+fn simplesign_login_response_post_form_round_trips_to_parser(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let sp = sp(false, false);
+    let ctx = idp.create_login_response(
+        &sp,
+        Binding::SimpleSign,
+        &User::new("form@example.com"),
+        &LoginResponseOptions {
+            in_response_to: Some("_r"),
+            relay_state: Some("relay-123"),
+            ..Default::default()
+        },
+    )?;
+
+    let request = simplesign_form_request("SAMLResponse", &ctx)?;
+
+    assert_eq!(body_param(&request, "RelayState")?, "relay-123");
+    assert_eq!(
+        body_param(&request, "SigAlg")?,
+        ctx.sig_alg.as_deref().ok_or("missing SigAlg")?
+    );
+    assert_eq!(
+        body_param(&request, "Signature")?,
+        ctx.signature.as_deref().ok_or("missing Signature")?
+    );
+    let parsed =
+        sp.parse_login_response_with_request_id(&idp, Binding::SimpleSign, &request, "_r")?;
+    assert_eq!(parsed.extract.get_str("nameID"), Some("form@example.com"));
+    Ok(())
 }
 
 // ----- create logout request (16-18) -----
