@@ -3,7 +3,15 @@
 use opensaml::binding::base64_decode;
 use opensaml::constants::signature_algorithm::RSA_SHA256;
 use opensaml::constants::Binding;
-use opensaml::entity::{EntitySetting, User};
+use opensaml::constants::{
+    data_encryption_algorithm::AES_256, key_encryption_algorithm::RSA_OAEP_MGF1P,
+};
+use opensaml::crypto::keys::load_private_key;
+use opensaml::crypto::{
+    construct_saml_signature, decrypt_assertion, encrypt_assertion, verify_signature,
+    AssertionDecryptionOptions,
+};
+use opensaml::entity::{EntitySetting, SignatureAction, SignatureConfig, User};
 use opensaml::flow::HttpRequest;
 use opensaml::idp::LoginResponseOptions;
 use opensaml::logout::{create_logout_request, create_logout_response};
@@ -14,6 +22,9 @@ use opensaml::{IdentityProvider, OpenSamlError, ServiceProvider};
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
+const RESPONSE: &str = include_str!("fixtures/response.xml");
+
+const AUTHN_REQUEST: &str = "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"_req1\" Version=\"2.0\" IssueInstant=\"2024-01-01T00:00:00Z\"><saml:Issuer>https://sp.example.com/metadata</saml:Issuer></samlp:AuthnRequest>";
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -74,6 +85,154 @@ fn direct_children<'a>(node: &'a Node, local_name: &'a str) -> impl Iterator<Ite
     node.children
         .iter()
         .filter(move |child| child.local_name == local_name)
+}
+
+fn assert_invalid(result: Result<String, OpenSamlError>) {
+    assert!(
+        matches!(result, Err(OpenSamlError::Invalid(_))),
+        "expected invalid input to fail before crypto rendering, got {result:?}"
+    );
+}
+
+#[test]
+fn crypto_signature_custom_prefix_still_verifies() -> TestResult {
+    let key = load_private_key(PRIVKEY, None)?;
+    let config = SignatureConfig {
+        prefix: "ds2".into(),
+        reference: Some("/*[local-name(.)='AuthnRequest']/*[local-name(.)='Issuer']".into()),
+        action: SignatureAction::Before,
+    };
+
+    let signed = construct_saml_signature(
+        AUTHN_REQUEST,
+        true,
+        &key,
+        CERT,
+        RSA_SHA256,
+        &[],
+        Some(&config),
+    )?;
+
+    assert!(signed.contains("<ds2:Signature"));
+    let (verified, _) = verify_signature(&signed, &[CERT.to_string()])?;
+    assert!(verified, "custom-prefix signature should verify");
+    Ok(())
+}
+
+#[test]
+fn crypto_signature_prefix_rejects_invalid_ncname() -> TestResult {
+    let key = load_private_key(PRIVKEY, None)?;
+    for prefix in ["", "ds sig", "ds:sig", "1ds", "xml", "xmlns"] {
+        let config = SignatureConfig {
+            prefix: prefix.into(),
+            reference: None,
+            action: SignatureAction::After,
+        };
+
+        assert_invalid(construct_saml_signature(
+            AUTHN_REQUEST,
+            true,
+            &key,
+            CERT,
+            RSA_SHA256,
+            &[],
+            Some(&config),
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn crypto_signature_escapes_transform_algorithm() -> TestResult {
+    let key = load_private_key(PRIVKEY, None)?;
+    let malicious_transform = "urn:example\" injected=\"yes\"><ds:Transform Algorithm=\"evil";
+    let transforms = [malicious_transform.to_string()];
+
+    let result = construct_saml_signature(
+        AUTHN_REQUEST,
+        true,
+        &key,
+        CERT,
+        RSA_SHA256,
+        &transforms,
+        None,
+    );
+
+    assert!(
+        matches!(result, Err(OpenSamlError::Crypto(ref message)) if message.contains("unsupported algorithm") && !message.contains("XML parsing error")),
+        "expected escaped transform to fail closed without XML parser structure errors, got {result:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn crypto_signature_escapes_reference_uri_id() -> TestResult {
+    let key = load_private_key(PRIVKEY, None)?;
+    let xml = concat!(
+        "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" ",
+        "xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ",
+        "ID=\"_req1&quot; injected=&quot;yes&quot;&gt;&lt;ds:Reference URI=&quot;#evil\" ",
+        "Version=\"2.0\" IssueInstant=\"2024-01-01T00:00:00Z\">",
+        "<saml:Issuer>https://sp.example.com/metadata</saml:Issuer>",
+        "</samlp:AuthnRequest>"
+    );
+
+    let signed = construct_saml_signature(xml, true, &key, CERT, RSA_SHA256, &[], None)?;
+
+    assert!(!signed.contains(" injected=\"yes\""));
+    assert!(!signed.contains("<ds:Reference URI=\"#evil"));
+    assert!(signed.contains("URI=\"#_req1&quot; injected=&quot;yes&quot;&gt;&lt;ds:Reference"));
+    Ok(())
+}
+
+#[test]
+fn crypto_encrypt_assertion_prefix_still_round_trips() -> TestResult {
+    let encrypted = encrypt_assertion(RESPONSE, CERT, AES_256, RSA_OAEP_MGF1P, "saml2")?;
+    assert!(encrypted.contains("<saml2:EncryptedAssertion"));
+
+    let key = load_private_key(PRIVKEY, None)?;
+    let mut options = AssertionDecryptionOptions::default();
+    options.allow_insecure_software_rsa_key_transport_decryption = true;
+    let (response, assertion) = decrypt_assertion(&encrypted, &key, options)?;
+
+    assert!(assertion.contains("Assertion"));
+    assert!(response.contains("Assertion"));
+    assert!(!response.contains("EncryptedAssertion"));
+    Ok(())
+}
+
+#[test]
+fn crypto_encrypt_assertion_prefix_rejects_invalid_ncname() -> TestResult {
+    for prefix in ["", "saml enc", "saml:enc", "1saml", "xml", "xmlns"] {
+        assert_invalid(encrypt_assertion(
+            RESPONSE,
+            CERT,
+            AES_256,
+            RSA_OAEP_MGF1P,
+            prefix,
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn crypto_encrypt_assertion_escapes_algorithm_attributes() -> TestResult {
+    let malicious_data_alg = "urn:example:data\" injected=\"yes\"><xenc:CipherData>";
+    let malicious_key_alg = "urn:example:key\" key_injected=\"yes\"><xenc:CipherValue>";
+
+    let result = encrypt_assertion(
+        RESPONSE,
+        CERT,
+        malicious_data_alg,
+        malicious_key_alg,
+        "saml",
+    );
+
+    assert!(
+        matches!(result, Err(OpenSamlError::Crypto(ref message)) if !message.contains("XML parsing error") && !message.contains("Mismatched end tag")),
+        "expected escaped algorithms to fail closed without XML parser structure errors, got {result:?}"
+    );
+    Ok(())
 }
 
 #[test]
