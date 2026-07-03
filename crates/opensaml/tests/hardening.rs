@@ -285,6 +285,28 @@ fn unsolicited_response_accepts_empty_in_response_to() -> Result<(), Box<dyn std
 }
 
 #[test]
+fn unsolicited_response_rejects_subject_confirmation_in_response_to(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_subject_confirmation(
+        &sp,
+        &SubjectConfirmationCase {
+            method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+            recipient: "https://sp/acs",
+            not_on_or_after: iso8601_offset(300),
+            response_in_response_to: "",
+            subject_in_response_to: "_req1",
+        },
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+    assert!(matches!(
+        sp.parse_unsolicited_login_response(&idp(), Binding::Post, &req),
+        Err(OpenSamlError::InvalidInResponseTo)
+    ));
+    Ok(())
+}
+
+#[test]
 fn subject_confirmation_method_must_be_bearer() -> Result<(), Box<dyn std::error::Error>> {
     let sp = sp_with("https://sp.example.com/metadata", signing());
     let response = response_for_subject_confirmation(

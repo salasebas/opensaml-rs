@@ -10,6 +10,10 @@ use crate::flow::{flow_with_expected_recipient, FlowOptions, FlowResult, HttpReq
 use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
 use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
+use crate::util::Value;
+use crate::xml::{extract_with_limits, ExtractorField, XmlLimits};
+
+const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
 /// A SAML 2.0 Service Provider: runtime [`EntitySetting`] plus parsed [`SpMetadata`].
 #[derive(Debug, Clone)]
@@ -38,6 +42,40 @@ pub struct LoginRequestOptions<'a> {
 enum LoginResponseCorrelation<'a> {
     Unsolicited,
     RequestId(&'a str),
+}
+
+fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
+    match extracted.get("subjectConfirmation") {
+        Some(Value::Str(xml)) => vec![xml.as_str()],
+        Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn reject_unsolicited_request_bound_bearer_confirmations(
+    extracted: &Value,
+    limits: XmlLimits,
+) -> Result<(), OpenSamlError> {
+    let fields = [
+        ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
+        ExtractorField::new(
+            "subjectConfirmationData",
+            &["SubjectConfirmation", "SubjectConfirmationData"],
+        )
+        .attrs(&["InResponseTo"]),
+    ];
+    for xml in subject_confirmation_xmls(extracted) {
+        let confirmation = extract_with_limits(xml, &fields, limits)?;
+        let is_bearer =
+            confirmation.get_str("subjectConfirmation") == Some(BEARER_SUBJECT_CONFIRMATION_METHOD);
+        let is_request_bound = confirmation
+            .get_str("subjectConfirmationData")
+            .is_some_and(|actual| !actual.is_empty());
+        if is_bearer && is_request_bound {
+            return Err(OpenSamlError::InvalidInResponseTo);
+        }
+    }
+    Ok(())
 }
 
 impl ServiceProvider {
@@ -387,6 +425,12 @@ impl ServiceProvider {
                 .is_some_and(|actual| !actual.is_empty())
         {
             return Err(OpenSamlError::InvalidInResponseTo);
+        }
+        if matches!(correlation, LoginResponseCorrelation::Unsolicited) {
+            reject_unsolicited_request_bound_bearer_confirmations(
+                &result.extract,
+                self.setting.xml_limits,
+            )?;
         }
         Ok(result)
     }
