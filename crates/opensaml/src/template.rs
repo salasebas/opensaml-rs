@@ -8,6 +8,7 @@
 use crate::binding::xml_escape;
 use crate::error::OpenSamlError;
 use crate::util::camel_case;
+use crate::xml::write::XmlWriter;
 
 /// Default `<AuthnRequest>` template.
 pub const LOGIN_REQUEST_TEMPLATE: &str = "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\" ForceAuthn=\"{ForceAuthn}\" ProtocolBinding=\"{ProtocolBinding}\" AssertionConsumerServiceURL=\"{AssertionConsumerServiceURL}\" AssertionConsumerServiceIndex=\"{AssertionConsumerServiceIndex}\"><saml:Issuer>{Issuer}</saml:Issuer><samlp:NameIDPolicy Format=\"{NameIDFormat}\" AllowCreate=\"{AllowCreate}\"/></samlp:AuthnRequest>";
@@ -21,6 +22,9 @@ pub const ATTRIBUTE_STATEMENT_TEMPLATE: &str =
 
 /// Default `<Attribute>` template.
 pub const ATTRIBUTE_TEMPLATE: &str = "<saml:Attribute Name=\"{Name}\" NameFormat=\"{NameFormat}\"><saml:AttributeValue xmlns:xs=\"{ValueXmlnsXs}\" xmlns:xsi=\"{ValueXmlnsXsi}\" xsi:type=\"{ValueXsiType}\">{Value}</saml:AttributeValue></saml:Attribute>";
+
+const DEFAULT_XS: &str = "http://www.w3.org/2001/XMLSchema";
+const DEFAULT_XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
 /// Default login `<Response>` template.
 pub const LOGIN_RESPONSE_TEMPLATE: &str = "<samlp:Response xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{ID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\" Destination=\"{Destination}\" InResponseTo=\"{InResponseTo}\"><saml:Issuer>{Issuer}</saml:Issuer><samlp:Status><samlp:StatusCode Value=\"{StatusCode}\"/></samlp:Status><saml:Assertion xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"{AssertionID}\" Version=\"2.0\" IssueInstant=\"{IssueInstant}\"><saml:Issuer>{Issuer}</saml:Issuer><saml:Subject><saml:NameID Format=\"{NameIDFormat}\">{NameID}</saml:NameID><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData NotOnOrAfter=\"{SubjectConfirmationDataNotOnOrAfter}\" Recipient=\"{SubjectRecipient}\" InResponseTo=\"{InResponseTo}\"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"{ConditionsNotBefore}\" NotOnOrAfter=\"{ConditionsNotOnOrAfter}\"><saml:AudienceRestriction><saml:Audience>{Audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions>{AuthnStatement}{AttributeStatement}</saml:Assertion></samlp:Response>";
@@ -286,8 +290,6 @@ pub fn attribute_statement_builder(
     attribute_template: &str,
     attribute_statement_template: &str,
 ) -> String {
-    const DEFAULT_XS: &str = "http://www.w3.org/2001/XMLSchema";
-    const DEFAULT_XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
     let attrs: String = attributes
         .iter()
         .map(|a| {
@@ -307,6 +309,59 @@ pub fn attribute_statement_builder(
         })
         .collect();
     attribute_statement_template.replacen("{Attributes}", &attrs, 1)
+}
+
+pub(crate) fn render_login_response_attribute_statement(
+    attributes: &[LoginResponseAttribute],
+    user_attributes: &[(String, String)],
+    assertion_prefix: &str,
+) -> Result<String, OpenSamlError> {
+    if attributes.is_empty() {
+        return Ok(String::new());
+    }
+
+    let statement_name = format!("{assertion_prefix}:AttributeStatement");
+    let attribute_name = format!("{assertion_prefix}:Attribute");
+    let value_name = format!("{assertion_prefix}:AttributeValue");
+    let mut writer = XmlWriter::new();
+    writer.start(&statement_name, &[]);
+    for attribute in attributes {
+        let value = user_attributes
+            .iter()
+            .find(|(tag, _)| tag == &attribute.value_tag)
+            .map(|(_, value)| value.as_str())
+            .ok_or_else(|| {
+                OpenSamlError::Invalid(format!(
+                    "missing login response attribute value for `{}`",
+                    attribute.value_tag
+                ))
+            })?;
+        writer.start(
+            &attribute_name,
+            &[
+                ("Name", attribute.name.as_str()),
+                ("NameFormat", attribute.name_format.as_str()),
+            ],
+        );
+        writer.text_element(
+            &value_name,
+            &[
+                (
+                    "xmlns:xs",
+                    attribute.value_xmlns_xs.as_deref().unwrap_or(DEFAULT_XS),
+                ),
+                (
+                    "xmlns:xsi",
+                    attribute.value_xmlns_xsi.as_deref().unwrap_or(DEFAULT_XSI),
+                ),
+                ("xsi:type", attribute.value_xsi_type.as_str()),
+            ],
+            value,
+        );
+        writer.end(&attribute_name);
+    }
+    writer.end(&statement_name);
+    Ok(writer.finish())
 }
 
 #[cfg(test)]
