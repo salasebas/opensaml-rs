@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use opensaml::binding::base64_decode;
+use opensaml::binding::{base64_decode, deflate_raw_decode};
 use opensaml::constants::signature_algorithm::RSA_SHA256;
 use opensaml::constants::Binding;
 use opensaml::entity::{iso8601_offset, BindingContext, EntitySetting, User};
@@ -33,6 +33,7 @@ fn idp_with_setting(setting: EntitySetting) -> Result<IdentityProvider, OpenSaml
             single_sign_on_service: vec![Endpoint::new(Binding::Post, "https://idp/sso")],
             single_logout_service: vec![
                 Endpoint::new(Binding::Post, "https://idp/slo"),
+                Endpoint::new(Binding::Redirect, "https://idp/slo"),
                 Endpoint::new(Binding::SimpleSign, "https://idp/slo"),
             ],
             ..Default::default()
@@ -50,6 +51,7 @@ fn sp(want_assertions_signed: bool) -> Result<ServiceProvider, OpenSamlError> {
             assertion_consumer_service: vec![Endpoint::new(Binding::Post, "https://sp/acs")],
             single_logout_service: vec![
                 Endpoint::new(Binding::Post, "https://sp/slo"),
+                Endpoint::new(Binding::Redirect, "https://sp/slo"),
                 Endpoint::new(Binding::SimpleSign, "https://sp/slo"),
             ],
             ..Default::default()
@@ -62,6 +64,23 @@ fn decode_post_or_simplesign(ctx: &BindingContext) -> Result<String, Box<dyn std
     match ctx.binding {
         Binding::Post | Binding::SimpleSign => Ok(String::from_utf8(base64_decode(&ctx.context)?)?),
         Binding::Redirect | Binding::Artifact => Err("expected POST or SimpleSign context".into()),
+    }
+}
+
+fn decode_logout_context(ctx: &BindingContext) -> Result<String, Box<dyn std::error::Error>> {
+    match ctx.binding {
+        Binding::Post | Binding::SimpleSign => Ok(String::from_utf8(base64_decode(&ctx.context)?)?),
+        Binding::Redirect => {
+            let url = url::Url::parse(&ctx.context)?;
+            let value = url
+                .query_pairs()
+                .find_map(|(key, value)| (key == ctx.request_type).then_some(value.into_owned()))
+                .ok_or("missing SAML logout message")?;
+            Ok(String::from_utf8(deflate_raw_decode(&base64_decode(
+                &value,
+            )?)?)?)
+        }
+        Binding::Artifact => Err("artifact binding does not render logout messages here".into()),
     }
 }
 
@@ -232,13 +251,13 @@ fn caller_login_response_template_is_rewritten_before_custom_callback(
 }
 
 #[test]
-fn logout_request_defaults_render_overridden_prefixes_for_post_and_simplesign(
+fn logout_request_defaults_render_overridden_prefixes_for_post_redirect_and_simplesign(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp_with_setting(prefixed_setting("samlp2", "saml2"))?;
     let sp = sp(false)?;
     let user = logout_user();
 
-    for binding in [Binding::Post, Binding::SimpleSign] {
+    for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
         let ctx = create_logout_request(
             &idp.setting,
             &idp.metadata,
@@ -248,7 +267,7 @@ fn logout_request_defaults_render_overridden_prefixes_for_post_and_simplesign(
             None,
             false,
         )?;
-        let xml = decode_post_or_simplesign(&ctx)?;
+        let xml = decode_logout_context(&ctx)?;
         assert!(xml.contains("<samlp2:LogoutRequest"));
         assert!(xml.contains("xmlns:samlp2=\"urn:oasis:names:tc:SAML:2.0:protocol\""));
         assert!(xml.contains("<saml2:Issuer>"));
@@ -259,12 +278,12 @@ fn logout_request_defaults_render_overridden_prefixes_for_post_and_simplesign(
 }
 
 #[test]
-fn logout_response_defaults_render_overridden_prefixes_for_post_and_simplesign(
+fn logout_response_defaults_render_overridden_prefixes_for_post_redirect_and_simplesign(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp_with_setting(prefixed_setting("samlp2", "saml2"))?;
     let sp = sp(false)?;
 
-    for binding in [Binding::Post, Binding::SimpleSign] {
+    for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
         let ctx = create_logout_response(
             &idp.setting,
             &idp.metadata,
@@ -274,7 +293,7 @@ fn logout_response_defaults_render_overridden_prefixes_for_post_and_simplesign(
             None,
             false,
         )?;
-        let xml = decode_post_or_simplesign(&ctx)?;
+        let xml = decode_logout_context(&ctx)?;
         assert!(xml.contains("<samlp2:LogoutResponse"));
         assert!(xml.contains("xmlns:samlp2=\"urn:oasis:names:tc:SAML:2.0:protocol\""));
         assert!(xml.contains("<saml2:Issuer>"));

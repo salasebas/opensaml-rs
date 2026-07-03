@@ -6,7 +6,7 @@ use opensaml::constants::Binding;
 use opensaml::entity::{EntitySetting, User};
 use opensaml::flow::HttpRequest;
 use opensaml::idp::LoginResponseOptions;
-use opensaml::logout::create_logout_request;
+use opensaml::logout::{create_logout_request, create_logout_response};
 use opensaml::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use opensaml::template::{LoginResponseAttribute, LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
 use opensaml::{IdentityProvider, OpenSamlError, ServiceProvider};
@@ -383,5 +383,67 @@ fn logout_request_name_id_escapes_xml_markup_before_signing() -> TestResult {
     assert!(xml.contains("&lt;/saml:NameID&gt;"));
     assert!(xml.contains("&lt;saml:NameID Format=&quot;"));
     assert!(!xml.contains("<saml:NameID>admin@example.com</saml:NameID>"));
+    Ok(())
+}
+
+#[test]
+fn logout_request_session_index_escapes_xml_markup_before_signing() -> TestResult {
+    let idp = idp(signing())?;
+    let sp = sp()?;
+    let injected_session_index = concat!(
+        "_session\"quoted",
+        "</samlp:SessionIndex>",
+        "<samlp:SessionIndex>admin-session</samlp:SessionIndex>",
+        "<samlp:SessionIndex>"
+    );
+    let mut user = User::new("attacker@example.com");
+    user.session_index = Some(injected_session_index.into());
+
+    let ctx = create_logout_request(
+        &idp.setting,
+        &idp.metadata,
+        &sp.metadata,
+        Binding::Post,
+        &user,
+        None,
+        true,
+    )?;
+    let xml = decode_binding_context(&ctx.context)?;
+
+    assert!(xml.contains("<ds:Signature"));
+    assert_eq!(xml.matches("<samlp:SessionIndex>").count(), 1);
+    assert!(xml.contains("&lt;/samlp:SessionIndex&gt;"));
+    assert!(xml.contains("&lt;samlp:SessionIndex&gt;admin-session"));
+    assert!(!xml.contains("<samlp:SessionIndex>admin-session</samlp:SessionIndex>"));
+    Ok(())
+}
+
+#[test]
+fn logout_response_in_response_to_escapes_xml_markup_before_signing() -> TestResult {
+    let idp = idp(signing())?;
+    let sp = sp()?;
+    let injected_request_id = concat!(
+        "_req\" injected=\"yes",
+        "\"></samlp:LogoutResponse>",
+        "<samlp:LogoutResponse ID=\"evil\">"
+    );
+
+    let ctx = create_logout_response(
+        &idp.setting,
+        &idp.metadata,
+        &sp.metadata,
+        Binding::Post,
+        Some(injected_request_id),
+        None,
+        true,
+    )?;
+    let xml = decode_binding_context(&ctx.context)?;
+
+    assert!(xml.contains("<ds:Signature"));
+    assert_eq!(xml.matches("<samlp:LogoutResponse").count(), 1);
+    assert!(xml.contains("InResponseTo=\"_req&quot; injected=&quot;yes"));
+    assert!(xml.contains("&lt;/samlp:LogoutResponse&gt;"));
+    assert!(!xml.contains(" injected=\"yes"));
+    assert!(!xml.contains("<samlp:LogoutResponse ID=\"evil\">"));
     Ok(())
 }

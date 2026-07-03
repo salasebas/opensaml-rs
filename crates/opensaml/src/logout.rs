@@ -2,15 +2,15 @@
 //! (samlify `Entity.createLogoutRequest/createLogoutResponse/parseLogout*`).
 
 use crate::binding::{base64_encode, build_redirect_url};
-use crate::constants::{status_code, Binding, CertUse, ParserType};
+use crate::constants::{namespace, status_code, Binding, CertUse, ParserType};
 use crate::entity::{generate_id, now_iso8601, BindingContext, EntitySetting, User};
 use crate::error::OpenSamlError;
 use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::Metadata;
 use crate::template::{
     apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
-    LOGOUT_REQUEST_TEMPLATE, LOGOUT_RESPONSE_TEMPLATE,
 };
+use crate::xml::write::XmlWriter;
 
 fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
     setting
@@ -18,6 +18,91 @@ fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
         .clone()
         .or_else(|| meta.get_entity_id().map(str::to_string))
         .unwrap_or_default()
+}
+
+fn render_default_logout_response(
+    setting: &EntitySetting,
+    meta: &Metadata,
+    id: &str,
+    issue_instant: &str,
+    destination: &str,
+    in_response_to: Option<&str>,
+) -> Result<String, OpenSamlError> {
+    validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
+    validate_tag_prefix("assertion", &setting.tag_prefix_assertion)?;
+
+    let protocol_prefix = &setting.tag_prefix_protocol;
+    let assertion_prefix = &setting.tag_prefix_assertion;
+    let root_name = format!("{protocol_prefix}:LogoutResponse");
+    let issuer_name = format!("{assertion_prefix}:Issuer");
+    let status_name = format!("{protocol_prefix}:Status");
+    let status_code_name = format!("{protocol_prefix}:StatusCode");
+    let xmlns_protocol = format!("xmlns:{protocol_prefix}");
+    let xmlns_assertion = format!("xmlns:{assertion_prefix}");
+    let issuer = issuer_of(setting, meta);
+
+    let mut attrs = vec![
+        (xmlns_protocol.as_str(), namespace::PROTOCOL),
+        (xmlns_assertion.as_str(), namespace::ASSERTION),
+        ("ID", id),
+        ("Version", "2.0"),
+        ("IssueInstant", issue_instant),
+        ("Destination", destination),
+    ];
+    if let Some(value) = in_response_to {
+        attrs.push(("InResponseTo", value));
+    }
+
+    let mut writer = XmlWriter::new();
+    writer.start(&root_name, &attrs);
+    writer.text_element(&issuer_name, &[], &issuer);
+    writer.start(&status_name, &[]);
+    writer.empty(&status_code_name, &[("Value", status_code::SUCCESS)]);
+    writer.end(&status_name);
+    writer.end(&root_name);
+    Ok(writer.finish())
+}
+
+fn render_default_logout_request(
+    setting: &EntitySetting,
+    meta: &Metadata,
+    id: &str,
+    issue_instant: &str,
+    destination: &str,
+    user: &User,
+    name_id_format: &str,
+) -> Result<String, OpenSamlError> {
+    validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
+    validate_tag_prefix("assertion", &setting.tag_prefix_assertion)?;
+
+    let protocol_prefix = &setting.tag_prefix_protocol;
+    let assertion_prefix = &setting.tag_prefix_assertion;
+    let root_name = format!("{protocol_prefix}:LogoutRequest");
+    let issuer_name = format!("{assertion_prefix}:Issuer");
+    let name_id_name = format!("{assertion_prefix}:NameID");
+    let session_index_name = format!("{protocol_prefix}:SessionIndex");
+    let xmlns_protocol = format!("xmlns:{protocol_prefix}");
+    let xmlns_assertion = format!("xmlns:{assertion_prefix}");
+    let issuer = issuer_of(setting, meta);
+
+    let attrs = [
+        (xmlns_protocol.as_str(), namespace::PROTOCOL),
+        (xmlns_assertion.as_str(), namespace::ASSERTION),
+        ("ID", id),
+        ("Version", "2.0"),
+        ("IssueInstant", issue_instant),
+        ("Destination", destination),
+    ];
+
+    let mut writer = XmlWriter::new();
+    writer.start(&root_name, &attrs);
+    writer.text_element(&issuer_name, &[], &issuer);
+    writer.text_element(&name_id_name, &[("Format", name_id_format)], &user.name_id);
+    if let Some(session_index) = user.session_index.as_deref() {
+        writer.text_element(&session_index_name, &[], session_index);
+    }
+    writer.end(&root_name);
+    Ok(writer.finish())
 }
 
 #[cfg(feature = "crypto-bergshamra")]
@@ -159,29 +244,38 @@ pub fn create_logout_request_with_id(
         .first()
         .cloned()
         .unwrap_or_default();
-    let template = init_setting
-        .logout_request_template
-        .as_deref()
-        .unwrap_or(LOGOUT_REQUEST_TEMPLATE);
-    validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
-    validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
-    let template = apply_tag_prefixes(
-        template,
-        &init_setting.tag_prefix_protocol,
-        &init_setting.tag_prefix_assertion,
-    );
-    let xml = replace_tags_by_optional_value(
-        &template,
-        &[
-            ("ID", Some(id.clone())),
-            ("IssueInstant", Some(now_iso8601())),
-            ("Destination", Some(destination.clone())),
-            ("Issuer", Some(issuer_of(init_setting, init_meta))),
-            ("NameIDFormat", Some(name_id_format)),
-            ("NameID", Some(user.name_id.clone())),
-            ("SessionIndex", user.session_index.clone()),
-        ],
-    );
+    let issue_instant = now_iso8601();
+    let xml = if let Some(template) = init_setting.logout_request_template.as_deref() {
+        validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
+        validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
+        let template = apply_tag_prefixes(
+            template,
+            &init_setting.tag_prefix_protocol,
+            &init_setting.tag_prefix_assertion,
+        );
+        replace_tags_by_optional_value(
+            &template,
+            &[
+                ("ID", Some(id.clone())),
+                ("IssueInstant", Some(issue_instant)),
+                ("Destination", Some(destination.clone())),
+                ("Issuer", Some(issuer_of(init_setting, init_meta))),
+                ("NameIDFormat", Some(name_id_format)),
+                ("NameID", Some(user.name_id.clone())),
+                ("SessionIndex", user.session_index.clone()),
+            ],
+        )
+    } else {
+        render_default_logout_request(
+            init_setting,
+            init_meta,
+            &id,
+            &issue_instant,
+            &destination,
+            user,
+            &name_id_format,
+        )?
+    };
     let (context, signature, sig_alg) = if want_signed {
         sign_logout(
             init_setting,
@@ -257,31 +351,39 @@ pub fn create_logout_response_with_id(
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(generate_id);
-    let template = init_setting
-        .logout_response_template
-        .as_deref()
-        .unwrap_or(LOGOUT_RESPONSE_TEMPLATE);
-    validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
-    validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
-    let template = apply_tag_prefixes(
-        template,
-        &init_setting.tag_prefix_protocol,
-        &init_setting.tag_prefix_assertion,
-    );
-    let xml = replace_tags_by_value(
-        &template,
-        &[
-            ("ID", id.clone()),
-            ("IssueInstant", now_iso8601()),
-            ("Destination", destination.clone()),
-            (
-                "InResponseTo",
-                in_response_to.unwrap_or_default().to_string(),
-            ),
-            ("Issuer", issuer_of(init_setting, init_meta)),
-            ("StatusCode", status_code::SUCCESS.to_string()),
-        ],
-    );
+    let issue_instant = now_iso8601();
+    let xml = if let Some(template) = init_setting.logout_response_template.as_deref() {
+        validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
+        validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
+        let template = apply_tag_prefixes(
+            template,
+            &init_setting.tag_prefix_protocol,
+            &init_setting.tag_prefix_assertion,
+        );
+        replace_tags_by_value(
+            &template,
+            &[
+                ("ID", id.clone()),
+                ("IssueInstant", issue_instant),
+                ("Destination", destination.clone()),
+                (
+                    "InResponseTo",
+                    in_response_to.unwrap_or_default().to_string(),
+                ),
+                ("Issuer", issuer_of(init_setting, init_meta)),
+                ("StatusCode", status_code::SUCCESS.to_string()),
+            ],
+        )
+    } else {
+        render_default_logout_response(
+            init_setting,
+            init_meta,
+            &id,
+            &issue_instant,
+            &destination,
+            in_response_to,
+        )?
+    };
     let (context, signature, sig_alg) = if want_signed {
         sign_logout(
             init_setting,
