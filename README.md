@@ -64,6 +64,19 @@ Rust-only and delegates XML crypto to a Rust crate.
 | Crypto | XML-DSig sign/verify, XML-Enc encrypt/decrypt, detached message signatures, metadata key pinning |
 | Extraction | `quick-xml` DOM plus samlify-compatible local-name field extraction |
 
+### Current scope
+
+`opensaml` currently focuses on browser-facing SAML 2.0 SSO/SLO flows. It does
+not yet implement every SAML profile or binding defined by OASIS. In
+particular, HTTP-Artifact resolution, SOAP bindings, Enhanced Client or Proxy
+(ECP/PAOS), assertion query/request protocols, authorization decision queries,
+NameID management, and advanced federation profiles are out of scope for the
+current release line.
+
+If your deployment needs one of these profiles, please open an issue with the
+target IdP/SP, binding, profile, and interoperability requirements so we can
+evaluate the implementation scope.
+
 ---
 
 ## Quick start
