@@ -215,8 +215,9 @@ With `default-features = false`, the protocol layer still builds messages,
 parses metadata, and runs extraction. Operations that need signing,
 verification, or encryption return `OpenSamlError::Unsupported`.
 
-The default `crypto-bergshamra` feature currently requires Rust 1.83 because
-`bergshamra` 0.6.3 depends on `kryptering` 0.4.1.
+The default `crypto-bergshamra` feature currently requires Rust 1.85 because
+the `bergshamra` 0.6.3 dependency graph reaches `kryptering` 0.4.1 and
+`crypto-bigint` 0.7.5, which declares Rust 1.85.
 
 With `crypto-bergshamra` enabled:
 
