@@ -14,6 +14,8 @@ pub mod keys;
 pub mod sign;
 #[cfg(feature = "crypto-bergshamra")]
 pub mod verify;
+#[cfg(feature = "crypto-bergshamra")]
+mod xml_syntax;
 
 pub use backend::XmlSecurityBackend;
 #[cfg(feature = "crypto-bergshamra")]
