@@ -389,6 +389,35 @@ mod tests {
     }
 
     #[test]
+    fn rejects_xml_over_default_attribute_count_limit() {
+        let mut xml = String::from("<samlp:Response");
+        for index in 0..=DEFAULT_XML_MAX_ATTRIBUTES_PER_ELEMENT {
+            xml.push_str(&format!(" attr{index}=\"value{index}\""));
+        }
+        xml.push_str("/>");
+
+        assert!(limit_hit(parse(&xml)));
+    }
+
+    #[test]
+    fn rejects_xml_over_default_namespace_declaration_count_limit() {
+        let mut xml = String::from("<samlp:Response");
+        for index in 0..=DEFAULT_XML_MAX_ATTRIBUTES_PER_ELEMENT {
+            xml.push_str(&format!(" xmlns:p{index}=\"urn:test:{index}\""));
+        }
+        xml.push_str("/>");
+
+        assert!(limit_hit(parse(&xml)));
+    }
+
+    #[test]
+    fn duplicate_attribute_returns_xml_error() {
+        let result = parse("<samlp:Response ID=\"first\" ID=\"second\"/>");
+
+        assert!(matches!(result, Err(OpenSamlError::Xml(_))));
+    }
+
+    #[test]
     fn rejects_xml_over_attribute_value_limit() {
         let limits = XmlLimits {
             max_attribute_value_bytes: 3,

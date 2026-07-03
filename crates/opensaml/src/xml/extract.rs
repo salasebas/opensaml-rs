@@ -354,6 +354,32 @@ mod tests {
     }
 
     #[test]
+    fn context_span_preserves_source_around_non_element_events(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let xml = concat!(
+            "<?xml version=\"1.0\"?>",
+            "<!--before response-->",
+            "<samlp:Response xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" ",
+            "xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\">",
+            "<?target instruction?>",
+            "<saml:Assertion ID=\"a1\"><![CDATA[text]]><!--inside-->",
+            "<saml:Subject>subject</saml:Subject></saml:Assertion>",
+            "</samlp:Response>",
+        );
+        let expected = concat!(
+            "<saml:Assertion ID=\"a1\"><![CDATA[text]]><!--inside-->",
+            "<saml:Subject>subject</saml:Subject></saml:Assertion>",
+        );
+        let result = extract(
+            xml,
+            &[ExtractorField::new("assertion", &["Response", "Assertion"]).with_context()],
+        )?;
+
+        assert_eq!(result.get_str("assertion"), Some(expected));
+        Ok(())
+    }
+
+    #[test]
     fn multi_path_union_is_unique() -> Result<(), Box<dyn std::error::Error>> {
         let result = extract(
             RESPONSE,
