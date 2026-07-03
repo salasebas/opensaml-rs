@@ -13,6 +13,9 @@ package.
 cargo install --locked cargo-nextest
 ```
 
+The default `crypto-bergshamra` feature requires Rust 1.83 because
+`bergshamra` 0.6.3 depends on `kryptering` 0.4.1.
+
 ## Tests
 
 Verify only the crates you touched plus plausible side effects:

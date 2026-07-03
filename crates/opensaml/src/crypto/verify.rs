@@ -298,12 +298,14 @@ pub fn verify_signature_with_limits(
         have_key = true;
         let mut manager = KeysManager::new();
         manager.add_key(key);
-        // Trust model (audited against bergshamra 0.5.1):
-        // - `DsigContext::new()` enables `trusted_keys_only = true`,
-        //   `strict_verification = true`, and `hmac_min_out_len = 160` by
-        //   default. Verification uses only the metadata-pinned key; inline
+        // Trust model (audited against bergshamra 0.6.3):
+        // - Metadata certificates are pinned key material, not a public CA
+        //   chain. Verification uses only the metadata-pinned key; inline
         //   KeyInfo (X509Certificate/KeyValue) is never imported as key
         //   material.
+        // - Set `trusted_keys_only`, `strict_verification`, and
+        //   `hmac_min_out_len` explicitly instead of relying on upstream
+        //   defaults.
         // - `strict_verification`: each signed reference must target the
         //   document element, an ancestor, or a sibling of the Signature (XSW
         //   guard).
@@ -313,7 +315,11 @@ pub fn verify_signature_with_limits(
         //   enforcement.
         // - Inbound SAML verification must never use
         //   `DsigContext::new_permissive()`.
-        let ctx = DsigContext::new(manager).with_insecure(true);
+        let ctx = DsigContext::new(manager)
+            .with_trusted_keys_only(true)
+            .with_strict_verification(true)
+            .with_hmac_min_out_len(160)
+            .with_insecure(true);
         match verify(&ctx, xml) {
             Ok(VerifyResult::Valid {
                 signature_node: _,
