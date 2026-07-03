@@ -1,4 +1,4 @@
-//! SAML Identity Provider entity (samlify `entity-idp.ts`).
+//! SAML Identity Provider entity.
 
 use crate::constants::{status_code, Binding, ParserType};
 use crate::entity::{
@@ -18,8 +18,7 @@ mod login_response;
 
 use login_response::{render_default_login_response, LoginResponseXml};
 
-/// Optional inputs for [`IdentityProvider::create_login_response`]
-/// (samlify's `createLoginResponse` trailing parameters).
+/// Optional inputs for [`IdentityProvider::create_login_response`].
 #[derive(Default)]
 pub struct LoginResponseOptions<'a> {
     /// `InResponseTo` — the SP request id being answered.
@@ -28,7 +27,7 @@ pub struct LoginResponseOptions<'a> {
     pub relay_state: Option<&'a str>,
     /// Encrypt-then-sign instead of the default sign-then-encrypt.
     pub encrypt_then_sign: bool,
-    /// Custom template rendering hook (samlify `customTagReplacement`).
+    /// Custom template rendering hook.
     pub custom: Option<CustomTagReplacement<'a>>,
 }
 
@@ -80,8 +79,8 @@ impl IdentityProvider {
 
     /// Render the login `<Response>` XML for `sp`, returning `(id, xml)`.
     ///
-    /// `custom` (samlify `customTagReplacement`) overrides tag filling: it
-    /// receives the template with the `<AttributeStatement>` already injected.
+    /// `custom` overrides tag filling: it receives the template with the
+    /// `<AttributeStatement>` already injected.
     fn render_login_response(
         &self,
         sp: &ServiceProvider,
@@ -199,7 +198,7 @@ impl IdentityProvider {
         Ok((id, replace_tags_by_value(&prepared, &tags)))
     }
 
-    /// Generate a login `<Response>` for `sp` over `binding` (samlify `createLoginResponse`).
+    /// Generate a login `<Response>` for `sp` over `binding`.
     ///
     /// Requires the `crypto-bergshamra` feature: the response is always signed
     /// (assertion- or message-level) and optionally encrypted. Attributes are
@@ -387,7 +386,7 @@ impl IdentityProvider {
         ))
     }
 
-    /// Parse and validate an SP login `<AuthnRequest>` (samlify `parseLoginRequest`).
+    /// Parse and validate an SP login `<AuthnRequest>`.
     pub fn parse_login_request(
         &self,
         sp: &ServiceProvider,

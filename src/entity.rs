@@ -1,5 +1,5 @@
 //! Entity base settings shared by [`crate::sp::ServiceProvider`] and
-//! [`crate::idp::IdentityProvider`] (samlify `entity.ts` `defaultEntitySetting`).
+//! [`crate::idp::IdentityProvider`].
 
 use crate::binding::MAX_DEFLATE_RAW_DECODE_BYTES;
 use crate::constants::{
@@ -97,15 +97,14 @@ pub struct EntitySetting {
     pub transformation_algorithms: Vec<String>,
 }
 
-/// Custom message rendering hook (samlify `customTagReplacement`): given the
-/// resolved template, returns `(id, rendered_xml)`.
+/// Custom message rendering hook: given the resolved template, returns
+/// `(id, rendered_xml)`.
 pub type CustomTagReplacement<'a> = &'a dyn Fn(&str) -> (String, String);
 
-/// Where to place the `<Signature>` relative to the reference element
-/// (samlify `signatureConfig.location.action`).
+/// Where to place the `<Signature>` relative to the reference element.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SignatureAction {
-    /// Insert as the reference's next sibling (samlify default).
+    /// Insert as the reference's next sibling.
     #[default]
     After,
     /// Insert as the reference's previous sibling.
@@ -116,7 +115,7 @@ pub enum SignatureAction {
     Append,
 }
 
-/// Customizes the embedded XML-DSig signature (samlify `signatureConfig`).
+/// Customizes the embedded XML-DSig signature.
 #[derive(Debug, Clone)]
 pub struct SignatureConfig {
     /// Element prefix for the signature (default `ds`).
@@ -183,20 +182,20 @@ impl Default for EntitySetting {
     }
 }
 
-/// Generate a SAML message ID (`_` + UUIDv4), matching samlify's default.
+/// Generate a SAML message ID (`_` + UUIDv4).
 pub fn generate_id() -> String {
     format!("_{}", uuid::Uuid::new_v4())
 }
 
-/// The authenticated subject an IdP issues a response for (samlify `user`).
+/// The authenticated subject an IdP issues a response for.
 #[derive(Debug, Clone, Default)]
 pub struct User {
-    /// `<NameID>` value (samlify `user.email`).
+    /// `<NameID>` value.
     pub name_id: String,
     /// Attribute values keyed by their `LoginResponseAttribute.value_tag`;
     /// each fills the `{attr<Tag>}` placeholder produced for that attribute.
     pub attributes: Vec<(String, String)>,
-    /// `SessionIndex` for Single Logout requests (samlify `user.sessionIndex`).
+    /// `SessionIndex` for Single Logout requests.
     pub session_index: Option<String>,
 }
 
@@ -229,7 +228,7 @@ pub fn iso8601_offset(seconds: i64) -> String {
     )
 }
 
-/// The product of building an outbound message for a binding (samlify `BindingContext`).
+/// The product of building an outbound message for a binding.
 #[derive(Debug, Clone)]
 pub struct BindingContext {
     /// Generated message ID.

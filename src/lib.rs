@@ -1,12 +1,10 @@
-//! `saml-rs` — SAML 2.0 **Service Provider** and **Identity Provider** library.
+//! `saml-rs` - SAML 2.0 **Service Provider** and **Identity Provider** library.
 //!
-//! Originally ported from npm `samlify` v2.10.2 conformance fixtures:
-//! constants, XML field extraction ([`xml`]), message [`template`]s,
-//! [`metadata`] parse/generate, the three HTTP [`binding`]s (POST, Redirect,
-//! POST-SimpleSign), the [`sp`]/[`idp`] [`entity`] orchestration, inbound
-//! [`flow`] (decode → validate → verify/decrypt → extract), and Single
-//! [`logout`]. XML
-//! cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
+//! The crate supports SP/IdP metadata, HTTP-POST, HTTP-Redirect,
+//! HTTP-POST-SimpleSign, browser SSO flows, Single Logout, bounded XML parsing,
+//! and local-name field extraction over `quick-xml`.
+//!
+//! XML cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
 //! message signatures) is delegated to `bergshamra` behind the
 //! `crypto-bergshamra` feature (**on by default**; disable with
 //! `default-features = false` to build the crypto-free protocol layer, where

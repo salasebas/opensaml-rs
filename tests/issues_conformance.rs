@@ -1,4 +1,4 @@
-//! Port of samlify `test/issues.ts` (11 cases) to the Rust API.
+//! Historical regression cases derived from npm `samlify` issue tests.
 
 use saml_rs::binding::{base64_decode, deflate_raw_decode};
 use saml_rs::constants::{Binding, ParserType};

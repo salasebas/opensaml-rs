@@ -1,5 +1,4 @@
-//! Single Logout (SLO) — create/parse LogoutRequest & LogoutResponse
-//! (samlify `Entity.createLogoutRequest/createLogoutResponse/parseLogout*`).
+//! Single Logout (SLO): create and parse LogoutRequest and LogoutResponse.
 
 use crate::binding::{base64_encode, build_redirect_url};
 use crate::constants::{namespace, status_code, Binding, CertUse, ParserType};
@@ -196,7 +195,7 @@ fn unsigned_context(
     }
 }
 
-/// Build a `<LogoutRequest>` from `init` to `target` (samlify `createLogoutRequest`).
+/// Build a `<LogoutRequest>` from `init` to `target`.
 ///
 /// `user` supplies the `<NameID>` and optional `<samlp:SessionIndex>`.
 pub fn create_logout_request(
@@ -221,7 +220,7 @@ pub fn create_logout_request(
 }
 
 /// Like [`create_logout_request`] but uses `message_id` when provided.
-#[allow(clippy::too_many_arguments)] // extends the 7-arg samlify-shaped API with optional `message_id`
+#[allow(clippy::too_many_arguments)] // public API adds optional `message_id`
 pub fn create_logout_request_with_id(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -310,7 +309,7 @@ pub fn create_logout_request_with_id(
     })
 }
 
-/// Build a `<LogoutResponse>` from `init` to `target` (samlify `createLogoutResponse`).
+/// Build a `<LogoutResponse>` from `init` to `target`.
 pub fn create_logout_response(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -333,7 +332,7 @@ pub fn create_logout_response(
 }
 
 /// Like [`create_logout_response`] but uses `message_id` when provided.
-#[allow(clippy::too_many_arguments)] // extends the 7-arg samlify-shaped API with optional `message_id`
+#[allow(clippy::too_many_arguments)] // public API adds optional `message_id`
 pub fn create_logout_response_with_id(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -418,7 +417,7 @@ pub fn create_logout_response_with_id(
     })
 }
 
-/// Parse a `<LogoutRequest>` from `from` (samlify `parseLogoutRequest`).
+/// Parse a `<LogoutRequest>` from `from`.
 pub fn parse_logout_request(
     self_setting: &EntitySetting,
     from_meta: &Metadata,

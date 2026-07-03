@@ -1,4 +1,4 @@
-//! Service Provider metadata (samlify `metadata-sp.ts`).
+//! Service Provider metadata.
 
 use super::{as_object_list, Metadata};
 use crate::constants::Binding;

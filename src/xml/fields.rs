@@ -1,4 +1,4 @@
-//! SAML message field-sets (ported from samlify `extractor.ts`).
+//! SAML message field-sets for XML extraction.
 
 use super::extract::ExtractorField;
 

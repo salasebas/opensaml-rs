@@ -1,9 +1,10 @@
-//! XML field extraction engine (ported from samlify `extractor.ts`).
+//! XML field extraction over the local DOM.
 //!
 //! Operates directly on the [`super::dom`] tree, implementing the `local-name()`
-//! XPath subset samlify relies on: absolute element paths, `~` wildcard
-//! (substring match on local-name), attribute selection (0/1/N), whole-node
-//! context capture, `index`+`attributePath` aggregation, and multi-path union.
+//! path subset used by the SAML field definitions: absolute element paths, `~`
+//! wildcard (substring match on local-name), attribute selection (0/1/N),
+//! whole-node context capture, `index`+`attributePath` aggregation, and
+//! multi-path union.
 
 use super::dom::{self, Node, XmlLimits};
 use crate::error::SamlError;
@@ -33,7 +34,7 @@ pub struct ExtractorField {
     pub attribute_path: Option<Vec<String>>,
     /// Capture the whole matched node's source instead of its value.
     pub context: bool,
-    /// Parse this XML instead of the root document (samlify `shortcut`).
+    /// Parse this XML instead of the root document.
     pub shortcut: Option<String>,
 }
 

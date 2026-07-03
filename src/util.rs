@@ -1,13 +1,13 @@
-//! Small helpers ported from samlify `utility.ts`.
+//! Small helper types and normalization functions.
 //!
 //! Base64 and DEFLATE live in [`crate::binding`]; this module covers the
-//! certificate/key string normalisation and the lodash-style helpers used by
-//! the extractor and metadata layers.
+//! certificate/key string normalisation and collection helpers used by the
+//! extractor and metadata layers.
 
 /// A dynamically-typed value tree produced by the XML extractor.
 ///
-/// Mirrors the plain objects samlify builds from `extract`, so the dotted-path
-/// [`Value::get`] lookups (`extract.request.id`, ...) port directly.
+/// Dotted-path [`Value::get`] lookups support extracted SAML field trees such
+/// as `request.id`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Value {
     /// Absent value.
@@ -22,7 +22,7 @@ pub enum Value {
 }
 
 impl Value {
-    /// Walk a dotted `path` through nested objects (samlify `get`).
+    /// Walk a dotted `path` through nested objects.
     ///
     /// Returns `None` when any segment is missing or a non-object is traversed.
     pub fn get(&self, path: &str) -> Option<&Value> {
@@ -91,17 +91,17 @@ fn strip_pem(input: &str, label: &str) -> String {
         .replace(['\n', '\r', ' ', '\t'], "")
 }
 
-/// Strip a certificate PEM down to its bare base64 body (samlify `normalizeCerString`).
+/// Strip a certificate PEM down to its bare base64 body.
 pub fn normalize_cert_string(cert: &str) -> String {
     strip_pem(cert, "CERTIFICATE")
 }
 
-/// Strip an RSA private-key PEM down to its bare base64 body (samlify `normalizePemString`).
+/// Strip an RSA private-key PEM down to its bare base64 body.
 pub fn normalize_pem_string(pem: &str) -> String {
     strip_pem(pem, "RSA PRIVATE KEY")
 }
 
-/// A single value or a list of values, as accepted by samlify config fields.
+/// A single value or a list of values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OneOrMany<T> {
     /// Exactly one value.
@@ -120,24 +120,24 @@ impl<T> OneOrMany<T> {
     }
 }
 
-/// Normalise an optional single-or-many value into a `Vec` (samlify `castArrayOpt`).
+/// Normalise an optional single-or-many value into a `Vec`.
 pub fn cast_array_opt<T>(value: Option<OneOrMany<T>>) -> Vec<T> {
     value.map(OneOrMany::into_vec).unwrap_or_default()
 }
 
-/// True when the slice is non-empty (samlify `isNonEmptyArray`).
+/// True when the slice is non-empty.
 pub fn is_non_empty_array<T>(items: &[T]) -> bool {
     !items.is_empty()
 }
 
-/// Verify that every value in `field` equals `meta_field` (samlify `verifyFields`).
+/// Verify that every value in `field` equals `meta_field`.
 ///
-/// Empty input is treated as a mismatch, matching samlify's `false` fall-through.
+/// Empty input is treated as a mismatch.
 pub fn verify_fields(field: &[String], meta_field: &str) -> bool {
     !field.is_empty() && field.iter().all(|f| f == meta_field)
 }
 
-/// De-duplicate strings, preserving first-seen order (samlify `uniq`).
+/// De-duplicate strings, preserving first-seen order.
 pub fn uniq<I, S>(items: I) -> Vec<String>
 where
     I: IntoIterator<Item = S>,
@@ -153,7 +153,7 @@ where
     seen
 }
 
-/// Last element of a slice (samlify `last`).
+/// Last element of a slice.
 pub fn last<T>(items: &[T]) -> Option<&T> {
     items.last()
 }
@@ -205,7 +205,7 @@ pub fn camel_case(input: &str) -> String {
     out
 }
 
-/// Build an object from parallel key/value lists (samlify `zipObject`).
+/// Build an object from parallel key/value lists.
 ///
 /// When `skip_duplicated` is true the last value for a key wins; otherwise
 /// duplicate keys are aggregated into a [`Value::Array`].

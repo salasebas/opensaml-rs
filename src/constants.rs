@@ -1,12 +1,11 @@
 //! SAML 2.0 URN constants and keywords.
 //!
-//! Ported from samlify `urn.ts`. String values are kept byte-identical to the
-//! upstream so messages and metadata interoperate.
+//! String values follow the SAML and XML-DSig/XML-Enc specifications so
+//! messages and metadata interoperate.
 
 /// Protocol binding.
 ///
-/// Combines samlify's `BindingNamespace` enum, `namespace.binding` (URN lookup)
-/// and `wording.binding` (short names) in one type.
+/// Combines full binding URNs and short binding keywords in one type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Binding {
     /// HTTP-Redirect binding.
@@ -368,7 +367,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn binding_urns_match_samlify() {
+    fn binding_urns_match_saml_spec_values() {
         assert_eq!(
             Binding::Redirect.urn(),
             "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
@@ -411,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn digest_mapping_matches_samlify() {
+    fn digest_mapping_matches_xmlsig_values() {
         assert_eq!(
             digest_for_signature(signature_algorithm::RSA_SHA256),
             Some(digest_algorithm::SHA256)

@@ -1,4 +1,4 @@
-//! SAML metadata generation (samlify `metadata-sp.ts` / `metadata-idp.ts`).
+//! SAML SP and IdP metadata generation.
 
 use crate::constants::{elements_order, name_id_format, namespace, Binding};
 use crate::error::SamlError;

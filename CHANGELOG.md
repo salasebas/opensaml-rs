@@ -1,11 +1,22 @@
 # Changelog
 
-All notable changes to the opensaml-rs workspace are documented in this file.
+All notable changes to `saml-rs` are documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic
 Versioning while the API is still pre-1.0.
 
+Entries before the rebrand use the package names that were current at the time.
+
 ## Unreleased
+
+### Changed
+
+- Renamed the primary package from `opensaml` to `saml-rs`; Rust imports now use
+  `saml_rs`.
+- Moved implementation code from `crates/opensaml/src` to `src`.
+- Renamed `OpenSamlError` to `SamlError`.
+- Retired alias crates from active publication; do not yank existing healthy
+  alias versions.
 
 ## [0.1.4] - 2026-06-21
 

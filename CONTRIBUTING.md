@@ -1,15 +1,11 @@
 # Contributing
 
-opensaml-rs is an independent, unofficial Rust SAML 2.0 Service Provider and
-Identity Provider toolkit. It is not affiliated with, maintained by, endorsed
-by, or sponsored by the npm `samlify` package or its authors; the `samlify`
-crate here is only a Rust crate-name alias and shares no code with the npm
-package.
+`saml-rs` is an independent, unofficial Rust SAML 2.0 Service Provider and
+Identity Provider toolkit.
 
 ## Setup
 
 ```bash
-./scripts/fetch-upstream-samlify.sh   # local porting reference only
 cargo install --locked cargo-nextest
 ```
 
@@ -19,34 +15,35 @@ The default `crypto-bergshamra` feature requires Rust 1.85 because the
 
 ## Tests
 
-Verify only the crates you touched plus plausible side effects:
+Verify the package plus plausible side effects:
 
 ```bash
 cargo fmt --all --check
-cargo clippy -p <crate> --all-targets -- -D warnings
-cargo nextest run -p <crate>
+cargo clippy -p saml-rs --all-targets -- -D warnings
+cargo nextest run -p saml-rs
+cargo test -p saml-rs --doc
+cargo check -p saml-rs --no-default-features
 ```
 
-`unwrap_used`, `expect_used`, and `panic` are workspace `warn` lints, so under
-`-D warnings` they fail the build — including tests. Prefer returning
+`unwrap_used`, `expect_used`, and `panic` are package `warn` lints, so under
+`-D warnings` they fail the build, including tests. Prefer returning
 `Result<_, Box<dyn std::error::Error>>` and `?` in tests over `.unwrap()`.
 
-## Porting Work
+## SAML Behavior Work
 
-`samlify` (npm, pinned in `reference/upstream-samlify/VERSION.md`) is the
-behavioral/porting reference. The original conformance port targets v2.10.2;
-new porting work compares against the active pin. When porting behavior:
+When adding or changing SAML behavior:
 
-1. Read the active pin in `reference/upstream-samlify/VERSION.md`.
-2. Inspect the matching sources under
-   `reference/upstream-samlify/<version>/repository/`.
-3. Write a focused Rust test.
-4. Implement an idiomatic Rust equivalent with explicit errors.
-5. Keep XML cryptography (XML-DSig, XML-Enc, C14N) delegated to `bergshamra`
+1. Ground the change in the SAML specifications or targeted interoperability
+   evidence.
+2. Write a focused Rust test.
+3. Implement an idiomatic Rust equivalent with explicit errors.
+4. Keep XML cryptography (XML-DSig, XML-Enc, C14N) delegated to `bergshamra`
    behind the optional `crypto-bergshamra` feature.
 
 Propose new dependencies before adding them, and keep optional integrations
-behind feature flags. Do not commit upstream clones.
+behind feature flags. Do not commit generated or vendor trees.
+
+Historical fixture provenance is documented in `tests/fixtures/PROVENANCE.md`.
 
 ## Pull Requests
 

@@ -3,40 +3,40 @@
 area:core:
   - changed-files:
       - any-glob-to-any-file:
-          - "source/*.rs"
+          - "src/*.rs"
 
 area:bindings:
   - changed-files:
       - any-glob-to-any-file:
-          - "source/binding/**"
+          - "src/binding/**"
 
 area:xml:
   - changed-files:
       - any-glob-to-any-file:
-          - "source/xml/**"
+          - "src/xml/**"
 
 area:crypto:
   - changed-files:
       - any-glob-to-any-file:
-          - "source/crypto/**"
+          - "src/crypto/**"
 
 area:metadata:
   - changed-files:
       - any-glob-to-any-file:
-          - "source/metadata/**"
+          - "src/metadata/**"
 
 area:flow:
   - changed-files:
       - any-glob-to-any-file:
-          - "source/entity.rs"
-          - "source/flow.rs"
-          - "source/idp.rs"
-          - "source/sp.rs"
+          - "src/entity.rs"
+          - "src/flow.rs"
+          - "src/idp.rs"
+          - "src/sp.rs"
 
 area:logout:
   - changed-files:
       - any-glob-to-any-file:
-          - "source/logout.rs"
+          - "src/logout.rs"
 
 rust:
   - changed-files:
@@ -59,7 +59,7 @@ security:
       - any-glob-to-any-file:
           - "SECURITY.md"
           - "deny.toml"
-          - "source/crypto/**"
+          - "src/crypto/**"
           - "tests/hardening.rs"
           - "tests/xsw.rs"
 
@@ -67,7 +67,7 @@ documentation:
   - changed-files:
       - any-glob-to-any-file:
           - "*.md"
-          - "source/**/*.rs"
+          - "src/**/*.rs"
 
 release:
   - changed-files:

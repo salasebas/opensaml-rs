@@ -1,5 +1,5 @@
-//! Assertion encryption/decryption (samlify `encryptAssertion` / `decryptAssertion`),
-//! delegating XML-Enc to `bergshamra` (feature `crypto-bergshamra`).
+//! Assertion encryption/decryption, delegating XML-Enc to `bergshamra`
+//! (feature `crypto-bergshamra`).
 
 use super::keys::load_certificate;
 use super::xml_syntax::validate_crypto_xml_prefix;
@@ -19,10 +19,10 @@ const SOFTWARE_RSA_DECRYPTION_DISABLED: &str = "XML-Enc RSA key-transport decryp
 pub struct AssertionDecryptionOptions {
     /// Allow the bundled software RSA backend for XML-Enc key transport.
     ///
-    /// This preserves compatibility with samlify-style PEM private-key
-    /// decryption, but it reaches `RUSTSEC-2023-0071`-affected code when an
-    /// attacker can observe timing. Keep this `false` unless the caller has a
-    /// deployment-specific reason to accept that risk.
+    /// This preserves compatibility with PEM private-key decryption, but it
+    /// reaches `RUSTSEC-2023-0071`-affected code when an attacker can observe
+    /// timing. Keep this `false` unless the caller has a deployment-specific
+    /// reason to accept that risk.
     pub allow_insecure_software_rsa_key_transport_decryption: bool,
 }
 
@@ -38,8 +38,8 @@ fn child<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
     node.children.iter().find(|c| c.local_name == name)
 }
 
-/// Encrypt the `<Assertion>` in `xml`, replacing it with `<{prefix}:EncryptedAssertion>`
-/// (samlify `encryptAssertion`).
+/// Encrypt the `<Assertion>` in `xml`, replacing it with
+/// `<{prefix}:EncryptedAssertion>`.
 ///
 /// `encrypt_cert` is the recipient's encryption certificate; `data_alg` /
 /// `key_alg` are the data and key encryption algorithm URIs.
@@ -82,8 +82,8 @@ pub fn encrypt_assertion(
     ))
 }
 
-/// Decrypt the `<EncryptedAssertion>` in `xml` using `enc_key`, replacing it with
-/// the plaintext `<Assertion>` (samlify `decryptAssertion`).
+/// Decrypt the `<EncryptedAssertion>` in `xml` using `enc_key`, replacing it
+/// with the plaintext `<Assertion>`.
 ///
 /// Returns `(response_with_decrypted_assertion, decrypted_assertion)`.
 pub fn decrypt_assertion(

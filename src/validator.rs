@@ -1,4 +1,4 @@
-//! Time and status validation (samlify `validator.ts` + `flow.ts` `checkStatus`).
+//! SAML time-window and status validation.
 
 use crate::constants::{status_code, ParserType};
 use crate::error::SamlError;
@@ -9,7 +9,7 @@ fn parse(ts: &str) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(ts, &Rfc3339).ok()
 }
 
-/// Validate a `NotBefore` / `NotOnOrAfter` window (samlify `verifyTime`).
+/// Validate a `NotBefore` / `NotOnOrAfter` window.
 ///
 /// `drift` is `(not_before_ms, not_on_or_after_ms)` added to the respective
 /// bounds. When neither bound is present the document is treated as valid.
@@ -42,7 +42,7 @@ pub fn verify_time(
     }
 }
 
-/// Check the two-tier `<StatusCode>` of a response (samlify `checkStatus`).
+/// Check the two-tier `<StatusCode>` of a response.
 ///
 /// Only `SAMLResponse` / `LogoutResponse` are checked; other parser types are
 /// skipped. Success resolves to `Ok(())`; anything else is an error.

@@ -1,10 +1,8 @@
-//! Global parsing context (samlify `api.ts`): an optional schema validator.
+//! Global parsing context and optional schema validation.
 //!
-//! Unlike samlify — whose underlying parser does not harden input, so it fails
-//! closed when no validator is set — our [`crate::xml::dom`] parser already
-//! rejects DOCTYPEs (XXE/entity-expansion). [`is_valid_xml`] therefore always
-//! runs that baseline hardening, and a registered schema validator is opt-in
-//! defense-in-depth.
+//! The [`crate::xml::dom`] parser rejects DOCTYPEs and malformed structures.
+//! [`is_valid_xml`] always runs that baseline hardening; a registered schema
+//! validator is optional defense in depth.
 
 use crate::error::SamlError;
 use crate::xml::XmlLimits;
@@ -15,7 +13,7 @@ pub type SchemaValidator = fn(&str) -> Result<(), String>;
 
 static SCHEMA_VALIDATOR: RwLock<Option<SchemaValidator>> = RwLock::new(None);
 
-/// Register a schema validator run by [`is_valid_xml`] (samlify `setSchemaValidator`).
+/// Register a schema validator run by [`is_valid_xml`].
 pub fn set_schema_validator(validator: SchemaValidator) {
     if let Ok(mut guard) = SCHEMA_VALIDATOR.write() {
         *guard = Some(validator);

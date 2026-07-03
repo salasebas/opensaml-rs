@@ -1,4 +1,4 @@
-//! Port of samlify `test/index.ts` (47 active cases) to the Rust API.
+//! Historical regression cases derived from npm `samlify` index tests.
 //!
 //! Byte-exact assertions over xml-crypto / xml output (embedded signatures, SP
 //! metadata serialization) are adapted to behaviour-equivalent checks

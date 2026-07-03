@@ -1,4 +1,4 @@
-//! SAML Service Provider entity (samlify `entity-sp.ts`).
+//! SAML Service Provider entity.
 
 use crate::binding::{base64_encode, build_redirect_url};
 use crate::constants::{namespace, Binding, CertUse, ParserType};
@@ -30,7 +30,7 @@ pub struct ServiceProvider {
 pub struct LoginRequestOptions<'a> {
     /// RelayState for this request. `Some("")` is preserved as an empty RelayState.
     pub relay_state: Option<&'a str>,
-    /// Custom request renderer, equivalent to samlify `customTagReplacement`.
+    /// Custom request renderer.
     pub custom: Option<CustomTagReplacement<'a>>,
     /// Optional `ForceAuthn` attribute.
     pub force_authn: Option<bool>,
@@ -180,8 +180,8 @@ impl ServiceProvider {
     ///
     /// When both sides require signing, the request is signed (requires the
     /// `crypto-bergshamra` feature and the SP's `private_key`/`signing_cert`).
-    /// `custom` (samlify `customTagReplacement`) overrides template rendering,
-    /// receiving the resolved template and returning `(id, xml)`.
+    /// `custom` overrides template rendering, receiving the resolved template
+    /// and returning `(id, xml)`.
     pub fn create_login_request(
         &self,
         idp: &IdentityProvider,

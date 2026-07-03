@@ -1,4 +1,4 @@
-//! XML parsing and field extraction (samlify `extractor.ts` port) over quick-xml.
+//! XML parsing and field extraction over quick-xml.
 
 pub mod dom;
 pub mod extract;

@@ -1,5 +1,5 @@
-//! Inbound message flow (samlify `flow.ts`): decode → validate XML/status →
-//! (signature verify + optional decrypt) → extract → issuer/time validation.
+//! Inbound message flow: decode, validate XML/status, verify signatures,
+//! optionally decrypt, extract fields, and validate issuer/time constraints.
 
 use crate::binding::{
     base64_decode_with_limit, deflate_raw_decode_with_limit, MAX_DEFLATE_RAW_DECODE_BYTES,
@@ -292,8 +292,8 @@ fn ensure_detached_octet_matches_consumed_fields(
     }
 }
 
-/// Verify (and optionally decrypt) the message, returning the authenticated
-/// `(saml_content, assertion)` (samlify `postFlow`). Requires `crypto-bergshamra`.
+/// Verify and optionally decrypt the message, returning the authenticated
+/// `(saml_content, assertion)`. Requires `crypto-bergshamra`.
 #[cfg(feature = "crypto-bergshamra")]
 fn verify_and_prepare(
     xml: &str,

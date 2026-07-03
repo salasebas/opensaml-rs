@@ -1,4 +1,4 @@
-//! Identity Provider metadata (samlify `metadata-idp.ts`).
+//! Identity Provider metadata.
 
 use super::Metadata;
 use crate::constants::Binding;

@@ -12,8 +12,6 @@ fn crypto_err(err: impl std::fmt::Display) -> SamlError {
 }
 
 /// Load a private key from PEM (PKCS#1/PKCS#8, optionally passphrase-protected).
-///
-/// Wraps samlify's `readPrivateKey`.
 pub fn load_private_key(pem: &str, password: Option<&str>) -> Result<Key, SamlError> {
     load_pem_auto(pem.as_bytes(), password).map_err(crypto_err)
 }
@@ -35,14 +33,13 @@ fn to_cert_pem(cert: &str) -> String {
     format!("-----BEGIN CERTIFICATE-----\n{body}-----END CERTIFICATE-----\n")
 }
 
-/// Load an X.509 certificate (PEM or bare base64) as a verification key
-/// (wraps samlify's `getPublicKeyPemFromCertificate`).
+/// Load an X.509 certificate (PEM or bare base64) as a verification key.
 pub fn load_certificate(cert: &str) -> Result<Key, SamlError> {
     load_x509_cert_pem(to_cert_pem(cert).as_bytes()).map_err(crypto_err)
 }
 
 /// Build a `<ds:KeyInfo><ds:X509Data><ds:X509Certificate>` block from a
-/// certificate (samlify `getKeyInfo` / `createKeySection`).
+/// certificate.
 pub fn build_key_info(cert: &str) -> String {
     let b64 = normalize_cert_string(cert);
     build_x509_key_info(&[b64.as_str()])

@@ -1,4 +1,4 @@
-//! Port of samlify `test/flow.ts` (64 cases) as behavioural round-trips.
+//! Historical regression cases derived from npm `samlify` flow tests.
 //!
 //! Upstream uses IdP/SP private keys whose PEM format `bergshamra` cannot
 //! auto-detect, so entities are built from config with the project's working

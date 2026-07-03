@@ -1,10 +1,9 @@
-//! XML-DSig verification + anti-wrapping (samlify `libsaml.verifySignature`),
-//! delegating the cryptography to `bergshamra` (feature `crypto-bergshamra`).
+//! XML-DSig verification and anti-wrapping checks, delegating cryptography to
+//! `bergshamra` (feature `crypto-bergshamra`).
 //!
 //! Security model:
 //! - `trusted_keys_only`: the signature is verified against the certificate(s)
-//!   declared in IdP metadata, never an attacker-supplied inline cert. This
-//!   subsumes samlify's "cert in node must match metadata" check.
+//!   declared in IdP metadata, never an attacker-supplied inline cert.
 //! - `strict_verification`: bergshamra enforces that each signed reference
 //!   targets the document element, an ancestor, or a sibling of the Signature.
 //! - Explicit XSW guard: reject any `Assertion`/`Signature` nested under
@@ -261,9 +260,9 @@ pub fn verify_signature_with_limits(
         return Ok((false, None));
     }
 
-    // samlify ERROR_UNMATCH_CERTIFICATE_DECLARATION_IN_METADATA: if the message
-    // embeds a certificate, it must be one declared in metadata (rolling-cert
-    // safety). Verification itself still uses only the metadata certs.
+    // If the message embeds a certificate, it must be one declared in metadata
+    // (rolling-cert safety). Verification itself still uses only the metadata
+    // certs.
     if let Some(inline) = inline_signature_cert(root, false) {
         let inline = normalize_cert_string(&inline);
         if !metadata_certs.is_empty()
@@ -585,8 +584,8 @@ mod tests {
 
     #[test]
     fn rejects_wrong_certificate() -> Result<(), Box<dyn std::error::Error>> {
-        // RESPONSE_SIGNED embeds the IdP cert; verifying against the SP cert trips
-        // the inline-vs-metadata mismatch guard (samlify UNMATCH_CERTIFICATE).
+        // RESPONSE_SIGNED embeds the IdP cert; verifying against the SP cert
+        // trips the inline-vs-metadata mismatch guard.
         match verify_signature(RESPONSE_SIGNED, &[SP_CERT.to_string()]) {
             Err(SamlError::UnmatchCertificate) => Ok(()),
             other => Err(format!("expected UnmatchCertificate, got {other:?}").into()),

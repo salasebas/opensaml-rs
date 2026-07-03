@@ -1,7 +1,5 @@
-//! XML-DSig signing + detached message signatures (samlify
-//! `constructSAMLSignature` / `constructMessageSignature` /
-//! `verifyMessageSignature`), delegating crypto to `bergshamra`
-//! (feature `crypto-bergshamra`).
+//! XML-DSig signing and detached message signatures, delegating crypto to
+//! `bergshamra` (feature `crypto-bergshamra`).
 
 use super::keys::load_certificate;
 use super::xml_syntax::validate_crypto_xml_prefix;
@@ -25,7 +23,7 @@ fn find_assertion(root: &Node) -> Option<&Node> {
     root.children.iter().find(|c| c.local_name == "Assertion")
 }
 
-/// Extract the `local-name()` chain from a samlify-style absolute XPath, e.g.
+/// Extract the `local-name()` chain from an absolute XPath, e.g.
 /// `/*[local-name(.)='Response']/*[local-name(.)='Issuer']` → `["Response","Issuer"]`.
 fn parse_local_names(xpath: &str) -> Vec<String> {
     let mut names = Vec::new();
@@ -73,13 +71,13 @@ fn insert_position(xml: &str, node: &Node, action: SignatureAction) -> usize {
     }
 }
 
-/// Construct and embed an enveloped XML-DSig signature (samlify `constructSAMLSignature`).
+/// Construct and embed an enveloped XML-DSig signature.
 ///
 /// When `sign_message` the whole root is referenced; otherwise the contained
-/// `<Assertion>` is referenced. `config` (samlify `signatureConfig`) customizes
-/// the element prefix and placement; by default the `<Signature>` is inserted
-/// right after the target's `<Issuer>`. bergshamra then fills the digest and
-/// signature value. Returns the signed XML.
+/// `<Assertion>` is referenced. `config` customizes the element prefix and
+/// placement; by default the `<Signature>` is inserted right after the target's
+/// `<Issuer>`. bergshamra then fills the digest and signature value. Returns
+/// the signed XML.
 pub fn construct_saml_signature(
     xml: &str,
     sign_message: bool,
@@ -155,8 +153,9 @@ pub fn construct_saml_signature(
     sign(&ctx, &templated).map_err(crypto_err)
 }
 
-/// Sign a detached octet string (redirect/SimpleSign binding) — samlify
-/// `constructMessageSignature`. Returns the base64-encoded signature.
+/// Sign a detached octet string (redirect/SimpleSign binding).
+///
+/// Returns the base64-encoded signature.
 pub fn construct_message_signature(
     octet_string: &str,
     key: &Key,
@@ -172,8 +171,7 @@ pub fn construct_message_signature(
     Ok(base64_encode(&signature))
 }
 
-/// Verify a detached octet-string signature against `cert` (samlify
-/// `verifyMessageSignature`).
+/// Verify a detached octet-string signature against `cert`.
 pub fn verify_message_signature(
     octet_string: &str,
     signature_b64: &str,

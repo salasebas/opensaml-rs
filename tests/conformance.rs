@@ -1,5 +1,5 @@
-//! Black-box conformance scenarios over the public API (ported from samlify
-//! `test/flow.ts` / `test/index.ts` / `test/extractor.ts`).
+//! Black-box conformance scenarios over the public API, including historical
+//! regression cases derived from npm `samlify` behavior.
 
 use saml_rs::binding::{base64_decode, deflate_raw_decode};
 use saml_rs::constants::Binding;

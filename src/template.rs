@@ -1,4 +1,4 @@
-//! Default SAML message templates and tag substitution (samlify `libsaml.ts`).
+//! Default SAML message templates and tag substitution.
 //!
 //! `{Tag}` placeholders are filled by [`replace_tags_by_value`] or
 //! [`replace_tags_by_optional_value`]. Replacement values are XML-escaped in
@@ -235,7 +235,7 @@ fn optional_element_range(
         .then_some((open_start, needle_end + close_tag.len()))
 }
 
-/// A single `<Attribute>` to render in a login response (samlify `LoginResponseAttribute`).
+/// A single `<Attribute>` to render in a login response.
 #[derive(Debug, Clone)]
 pub struct LoginResponseAttribute {
     /// `Name` attribute.
@@ -266,13 +266,13 @@ fn tagging(prefix: &str, content: &str) -> String {
     }
 }
 
-/// Placeholder key (without braces) for an attribute value tag: `attr<CamelCase>`
-/// (samlify `tagging('attr', valueTag)`). The runtime value fills `{<key>}`.
+/// Placeholder key (without braces) for an attribute value tag:
+/// `attr<CamelCase>`. The runtime value fills `{<key>}`.
 pub fn attr_tag(value_tag: &str) -> String {
     tagging("attr", value_tag)
 }
 
-/// IdP login `<Response>` template config (samlify `LoginResponseTemplate`).
+/// IdP login `<Response>` template config.
 #[derive(Debug, Clone, Default)]
 pub struct LoginResponseTemplate {
     /// Custom `<Response>` template; `None` uses [`LOGIN_RESPONSE_TEMPLATE`].
@@ -281,7 +281,7 @@ pub struct LoginResponseTemplate {
     pub attributes: Vec<LoginResponseAttribute>,
 }
 
-/// Build an `<AttributeStatement>` from `attributes` (samlify `attributeStatementBuilder`).
+/// Build an `<AttributeStatement>` from `attributes`.
 ///
 /// Each attribute's value becomes a new `{attr<Tag>}` placeholder to be filled
 /// later by [`replace_tags_by_value`].

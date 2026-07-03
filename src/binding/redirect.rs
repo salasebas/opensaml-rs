@@ -36,7 +36,7 @@ pub fn redirect_binding_query(
     query
 }
 
-/// Build a full unsigned HTTP-Redirect URL (samlify `buildRedirectURL`).
+/// Build a full unsigned HTTP-Redirect URL.
 ///
 /// DEFLATE → base64 → url-encode the message, choose `?`/`&` based on whether
 /// `base_url` already carries a query, and append an optional `RelayState`.
@@ -53,8 +53,7 @@ pub fn build_redirect_url(
     Ok(format!("{base_url}{separator}{query}"))
 }
 
-/// Build the octet string to sign for a signed HTTP-Redirect message
-/// (samlify: `SAMLRequest=<enc>&RelayState=<enc>&SigAlg=<enc>`).
+/// Build the octet string to sign for a signed HTTP-Redirect message.
 pub fn build_redirect_octet(
     parser_type: ParserType,
     xml: &str,

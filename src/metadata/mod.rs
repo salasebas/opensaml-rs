@@ -1,4 +1,4 @@
-//! SAML metadata parsing (samlify `metadata.ts` + `metadata-sp/idp`).
+//! SAML metadata parsing and shared SP/IdP metadata accessors.
 
 pub mod generate;
 pub mod idp;
@@ -172,13 +172,12 @@ impl Metadata {
         location_for_binding(self.meta.get("singleLogoutService"), binding)
     }
 
-    /// Write the metadata XML to `path` (samlify `exportMetadata`).
+    /// Write the metadata XML to `path`.
     pub fn export_metadata(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
         std::fs::write(path, &self.xml)
     }
 
-    /// Bindings for which a `SingleLogoutService` endpoint is declared
-    /// (samlify `getSupportBindings`).
+    /// Bindings for which a `SingleLogoutService` endpoint is declared.
     pub fn get_support_bindings(&self) -> Vec<Binding> {
         [Binding::Redirect, Binding::Post, Binding::SimpleSign]
             .into_iter()
@@ -260,7 +259,7 @@ mod tests {
         let sp = SpMetadata::from_xml(SPMETA)?;
         assert!(sp.get_support_bindings().contains(&Binding::Redirect));
         let mut path = std::env::temp_dir();
-        path.push(format!("opensaml_md_{}.xml", std::process::id()));
+        path.push(format!("saml_rs_md_{}.xml", std::process::id()));
         sp.export_metadata(&path)?;
         assert_eq!(std::fs::read_to_string(&path)?, sp.get_metadata());
         std::fs::remove_file(&path)?;

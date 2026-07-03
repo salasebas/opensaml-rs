@@ -13,7 +13,7 @@ categories = ["authentication", "web-programming"]
 include = [
     "/Cargo.toml",
     "/Cargo.lock",
-    "/source/**",
+    "/src/**",
     "/tests/**",
     "/examples/**",
     "/README.md",
@@ -23,7 +23,7 @@ include = [
 
 [lib]
 name = "saml_rs"
-path = "source/lib.rs"
+path = "src/lib.rs"
 
 [features]
 default = ["crypto-bergshamra"]
