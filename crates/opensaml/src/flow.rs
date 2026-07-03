@@ -186,6 +186,7 @@ fn assertion_shortcut(xml: &str, limits: XmlLimits) -> Result<Option<String>, Op
     )
 }
 
+#[cfg(feature = "crypto-bergshamra")]
 fn verified_content_not_covered() -> OpenSamlError {
     OpenSamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
 }
