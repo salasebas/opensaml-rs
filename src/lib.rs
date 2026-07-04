@@ -23,6 +23,7 @@
 
 pub mod api;
 pub mod binding;
+pub mod config;
 pub mod constants;
 pub mod context;
 pub mod crypto;
@@ -40,6 +41,15 @@ pub mod validator;
 pub mod xml;
 
 pub use api::{Idp, Saml, SamlError, Sp, Unknown};
+pub use config::{
+    AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
+    AuthnRequestSignaturePolicy, CertificatePem, Credentials, DataEncryptionAlgorithm,
+    DigestAlgorithm, EntityId, IdpConfig, IdpDescriptor, IdpMetadataConfigTyped,
+    IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy, LogoutSignaturePolicy,
+    MessageSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase,
+    PrivateKeyPem, SignatureAlgorithm, SpConfig, SpDescriptor, SpMetadataConfigTyped,
+    SpValidationPolicy, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
+};
 #[doc = "Compatibility export. Prefer `raw::EntitySetting` for low-level APIs."]
 pub use entity::EntitySetting;
 #[doc = "Compatibility export. Prefer `raw::IdentityProvider` for low-level APIs."]
