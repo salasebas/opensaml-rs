@@ -12,7 +12,7 @@ table when done.
 
 | Plan | Title                                                                | Priority | Effort | Depends on              | Status |
 | ---- | -------------------------------------------------------------------- | -------- | ------ | ----------------------- | ------ |
-| 011  | Establish the typed Saml API contract and raw compatibility boundary | P0       | M      | -                       | TODO   |
+| 011  | Establish the typed Saml API contract and raw compatibility boundary | P0       | M      | -                       | DONE   |
 | 012  | Replace EntitySetting as the primary config with typed policies      | P1       | M      | 011                     | TODO   |
 | 017  | Standardize semantic SAML error variants                             | P1       | M      | 011                     | TODO   |
 | 018  | Add type-narrowed bindings, endpoints, and pending trackers          | P1       | M      | 011, 012                | TODO   |
