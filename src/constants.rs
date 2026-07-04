@@ -175,6 +175,8 @@ pub mod signature_algorithm {
     pub const RSA_SHA256: &str = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
     /// RSASSA-PSS with SHA-256 and MGF1.
     pub const RSA_SHA256_MGF1: &str = "http://www.w3.org/2007/05/xmldsig-more#sha256-rsa-MGF1";
+    /// RSA-SHA384.
+    pub const RSA_SHA384: &str = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384";
     /// RSA-SHA512.
     pub const RSA_SHA512: &str = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512";
 }
@@ -185,6 +187,8 @@ pub mod digest_algorithm {
     pub const SHA1: &str = "http://www.w3.org/2000/09/xmldsig#sha1";
     /// SHA256 digest.
     pub const SHA256: &str = "http://www.w3.org/2001/04/xmlenc#sha256";
+    /// SHA384 digest.
+    pub const SHA384: &str = "http://www.w3.org/2001/04/xmldsig-more#sha384";
     /// SHA512 digest.
     pub const SHA512: &str = "http://www.w3.org/2001/04/xmlenc#sha512";
 }
@@ -195,6 +199,7 @@ pub fn digest_for_signature(sig_alg: &str) -> Option<&'static str> {
         signature_algorithm::RSA_SHA1 => Some(digest_algorithm::SHA1),
         signature_algorithm::RSA_SHA256 => Some(digest_algorithm::SHA256),
         signature_algorithm::RSA_SHA256_MGF1 => Some(digest_algorithm::SHA256),
+        signature_algorithm::RSA_SHA384 => Some(digest_algorithm::SHA384),
         signature_algorithm::RSA_SHA512 => Some(digest_algorithm::SHA512),
         _ => None,
     }
