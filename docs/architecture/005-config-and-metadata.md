@@ -3,6 +3,58 @@
 The typed API should replace `EntitySetting` as the recommended config surface.
 `EntitySetting` remains raw compatibility.
 
+## Construction Style
+
+Typed config construction supports two reviewable paths:
+
+- struct literals for advanced callers that want every policy field visible;
+- manual, dependency-free builders for application setup code that wants
+  required fields checked in one place.
+
+Validated scalar values use fallible constructors for caller-provided input:
+
+```rust
+let entity_id = EntityId::try_new("https://sp.example.com/metadata")?;
+let acs = AcsEndpoint::post("https://sp.example.com/acs")?;
+```
+
+Struct literals keep policy choices explicit:
+
+```rust
+let config = SpConfig {
+    entity_id,
+    metadata: SpMetadataConfig::new(vec![acs]),
+    credentials: load_sp_signing_credentials()?,
+    validation: SpValidationPolicy::strict(),
+    algorithms: AlgorithmPolicy::default(),
+    xml: XmlPolicy::default(),
+    templates: TemplatePolicy::default(),
+};
+config.validate()?;
+```
+
+Builders keep large setup ergonomic while still returning `Result`. Builders use
+strict typed defaults; `SpConfig::new` / `IdpConfig::new`, `try_new`, and public
+`Default` policy values preserve compatibility defaults so callers do not
+silently opt into signature requirements SAML does not universally require.
+
+```rust
+let config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+    .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+    .credentials(load_sp_signing_credentials()?)
+    .validation(SpValidationPolicy::strict())
+    .build()?;
+
+let idp_config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+    .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
+    .validation(IdpValidationPolicy::strict())
+    .build()?;
+```
+
+Typed metadata and config builders validate entity IDs, required endpoints, and
+policy requirements that are meaningful without peer context. Raw compatibility
+structs keep their existing defaults and mutation model.
+
 ## Config Types
 
 ```rust
@@ -35,9 +87,11 @@ implementation helpers.
 ```rust
 pub struct Credentials {
     signing_key: Option<PrivateKeyPem>,
-    signing_cert: Option<CertificatePem>,
+    signing_key_passphrase: Option<Passphrase>,
+    signing_certificate: Option<CertificatePem>,
+    encryption_certificate: Option<CertificatePem>,
     decryption_key: Option<PrivateKeyPem>,
-    encryption_cert: Option<CertificatePem>,
+    decryption_key_passphrase: Option<Passphrase>,
 }
 
 pub struct PrivateKeyPem(String);
@@ -48,7 +102,8 @@ pub struct Passphrase(String);
 Rules:
 
 - Secret-bearing types have redacted `Debug`.
-- Credential strings are exposed only through internal borrowing methods.
+- Credential strings stay behind typed wrappers, with `as_str()` available as a
+  raw compatibility and migration escape hatch.
 - Do not make `EntitySetting` with raw strings the primary typed config.
 
 ## Algorithm Policy
@@ -61,15 +116,31 @@ pub enum SignatureAlgorithm {
     Custom(String),
 }
 
+pub enum DigestAlgorithm {
+    Sha1ForCompatibility,
+    #[deprecated]
+    Sha1,
+    Sha256,
+    Sha384,
+    Sha512,
+    Custom(String),
+}
+
 pub enum DataEncryptionAlgorithm {
-    Aes128Cbc,
-    Aes256Cbc,
+    Aes128,
+    Aes256,
+    TripleDesForCompatibility,
+    #[deprecated]
+    TripleDes,
+    Aes128Gcm,
     Custom(String),
 }
 
 pub enum KeyEncryptionAlgorithm {
-    RsaOaep,
+    RsaOaepMgf1p,
     Rsa15ForCompatibility,
+    #[deprecated]
+    Rsa15,
     Custom(String),
 }
 ```
@@ -77,21 +148,28 @@ pub enum KeyEncryptionAlgorithm {
 Rules:
 
 - Map known variants to existing constants.
-- Keep `Custom(String)` only where the backend can attempt it.
+- Keep custom URI constructors simple; backend support is still checked at
+  runtime.
 - Risky compatibility options must be visible in names.
 
 ## XML and Validation Policy
 
 ```rust
 pub struct XmlPolicy {
-    xml_limits: XmlLimits,
-    redirect_inflate_max_bytes: usize,
-    rsa_key_transport: RsaKeyTransportPolicy,
+    pub clock_drifts: (i64, i64),
+    pub redirect_inflate_max_bytes: usize,
+    pub limits: XmlLimits,
+    pub encryption: XmlEncryptionPolicy,
 }
 
-pub enum RsaKeyTransportPolicy {
-    Disabled,
-    AllowSoftwareRsa15ForCompatibility,
+pub struct XmlEncryptionPolicy {
+    pub assertions: AssertionEncryptionPolicy,
+    // private explicit risk opt-in for software RSA key transport decryption
+}
+
+pub enum AssertionEncryptionPolicy {
+    PlaintextAssertions,
+    EncryptAssertions,
 }
 
 pub enum AssertionSignaturePolicy {
@@ -104,7 +182,12 @@ pub enum MessageSignaturePolicy {
     AllowUnsignedForCompatibility,
 }
 
-pub enum AuthnRequestSignaturePolicy {
+pub enum AuthnRequestSigningPolicy {
+    Sign,
+    DoNotSignForCompatibility,
+}
+
+pub enum AuthnRequestValidationPolicy {
     RequireSigned,
     AllowUnsignedForCompatibility,
 }
@@ -116,21 +199,25 @@ pub enum LogoutSignaturePolicy {
 }
 
 pub struct SpValidationPolicy {
-    assertion_signatures: AssertionSignaturePolicy,
-    message_signatures: MessageSignaturePolicy,
-    validate_audience: bool,
-    clock_skew: ClockSkew,
+    assertions: AssertionSignaturePolicy,
+    messages: MessageSignaturePolicy,
+    authn_requests: AuthnRequestSigningPolicy,
+    audience: AudienceValidationPolicy,
+    name_id_creation: NameIdCreationPolicy,
+    logout: LogoutPolicy,
 }
 
 pub struct IdpValidationPolicy {
-    authn_request_signatures: AuthnRequestSignaturePolicy,
-    logout_signatures: LogoutSignaturePolicy,
-    clock_skew: ClockSkew,
+    authn_requests: AuthnRequestValidationPolicy,
+    logout: LogoutPolicy,
 }
 ```
 
 Avoid bare boolean names for signature requirements and avoid names like
 `insecure(true)`. Compatibility exceptions should be visible in enum variants.
+`LogoutSignaturePolicy::FollowPeerMetadata` is valid typed config, but raw
+`EntitySetting` conversion returns `Unsupported` until peer descriptor context
+is available at that boundary.
 
 ## Descriptors
 

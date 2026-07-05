@@ -9,8 +9,11 @@ Proposed root exports:
 ```rust
 pub use api::{Idp, Saml, Sp, Unknown};
 pub use config::{
-    AlgorithmPolicy, Credentials, IdpConfig, IdpValidationPolicy, SpConfig,
-    SpValidationPolicy, XmlPolicy,
+    AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy,
+    AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, Credentials,
+    IdpConfig, IdpConfigBuilder, IdpValidationPolicy, LogoutSignaturePolicy,
+    SpConfig, SpConfigBuilder, SpValidationPolicy, XmlEncryptionPolicy,
+    XmlPolicy,
 };
 pub use descriptor::{IdpDescriptor, SpDescriptor};
 pub use error::SamlError;

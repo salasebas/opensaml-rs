@@ -4,9 +4,9 @@ use saml_rs::constants::{
 };
 use saml_rs::xml::XmlLimits;
 use saml_rs::{
-    AcsEndpoint, AssertionSignaturePolicy, AuthnRequestSignaturePolicy, CertificatePem,
-    Credentials, DataEncryptionAlgorithm, DigestAlgorithm, EntityId, EntitySetting, IdpConfig,
-    IdpDescriptor, IdpMetadataConfig, KeyEncryptionAlgorithm, MessageSignaturePolicy,
+    AcsEndpoint, AssertionSignaturePolicy, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
+    CertificatePem, Credentials, DataEncryptionAlgorithm, DigestAlgorithm, EntityId, EntitySetting,
+    IdpConfig, IdpDescriptor, IdpMetadataConfig, KeyEncryptionAlgorithm, MessageSignaturePolicy,
     MetadataTrustPolicy, NameIdFormat, Passphrase, PrivateKeyPem, SamlError, SignatureAlgorithm,
     SpConfig, SpDescriptor, SpMetadataConfig, SsoEndpoint, TransformAlgorithm, XmlEncryptionPolicy,
 };
@@ -32,6 +32,15 @@ fn typed_config_passphrase_debug_is_redacted() {
 
     assert!(!debug.contains("dummy-passphrase-for-redaction-test"));
     assert!(debug.contains("redacted"));
+}
+
+#[test]
+fn typed_config_secret_accessors_expose_inner_values() {
+    let key = PrivateKeyPem::new("dummy-private-key-for-accessor-test");
+    let passphrase = Passphrase::new("dummy-passphrase-for-accessor-test");
+
+    assert_eq!(key.as_str(), "dummy-private-key-for-accessor-test");
+    assert_eq!(passphrase.as_str(), "dummy-passphrase-for-accessor-test");
 }
 
 #[test]
@@ -83,12 +92,24 @@ fn typed_config_algorithm_enums_return_existing_uri_constants() {
     assert_eq!(DigestAlgorithm::Sha256.as_uri(), digest_algorithm::SHA256);
     assert_eq!(DigestAlgorithm::Sha384.as_uri(), digest_algorithm::SHA384);
     assert_eq!(
+        DigestAlgorithm::Sha1ForCompatibility.as_uri(),
+        digest_algorithm::SHA1
+    );
+    assert_eq!(
         DataEncryptionAlgorithm::Aes256.as_uri(),
         data_encryption_algorithm::AES_256
     );
     assert_eq!(
+        DataEncryptionAlgorithm::TripleDesForCompatibility.as_uri(),
+        data_encryption_algorithm::TRIPLE_DES
+    );
+    assert_eq!(
         KeyEncryptionAlgorithm::RsaOaepMgf1p.as_uri(),
         key_encryption_algorithm::RSA_OAEP_MGF1P
+    );
+    assert_eq!(
+        KeyEncryptionAlgorithm::Rsa15ForCompatibility.as_uri(),
+        key_encryption_algorithm::RSA_1_5
     );
     assert_eq!(
         TransformAlgorithm::EnvelopedSignature.as_uri(),
@@ -97,6 +118,20 @@ fn typed_config_algorithm_enums_return_existing_uri_constants() {
     assert_eq!(
         TransformAlgorithm::ExclusiveCanonicalization.as_uri(),
         transform_algorithm::EXC_C14N
+    );
+}
+
+#[test]
+#[expect(deprecated, reason = "pin old risky algorithm variant URI aliases")]
+fn typed_config_deprecated_algorithm_aliases_return_existing_uri_constants() {
+    assert_eq!(DigestAlgorithm::Sha1.as_uri(), digest_algorithm::SHA1);
+    assert_eq!(
+        DataEncryptionAlgorithm::TripleDes.as_uri(),
+        data_encryption_algorithm::TRIPLE_DES
+    );
+    assert_eq!(
+        KeyEncryptionAlgorithm::Rsa15.as_uri(),
+        key_encryption_algorithm::RSA_1_5
     );
 }
 
@@ -130,7 +165,7 @@ fn typed_config_name_id_formats_return_existing_uri_constants() {
 #[test]
 fn typed_config_sp_config_converts_selected_settings() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = SpConfig::new(
-        EntityId::new("https://sp.example.com/metadata"),
+        EntityId::try_new("https://sp.example.com/metadata")?,
         SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
     );
     let limits = XmlLimits {
@@ -151,12 +186,12 @@ fn typed_config_sp_config_converts_selected_settings() -> Result<(), Box<dyn std
     };
     config.validation.assertions = AssertionSignaturePolicy::RequireSigned;
     config.validation.messages = MessageSignaturePolicy::RequireSigned;
-    config.validation.authn_requests = AuthnRequestSignaturePolicy::RequireSigned;
+    config.validation.authn_requests = AuthnRequestSigningPolicy::Sign;
     config.xml.clock_drifts = (-120_000, 180_000);
     config.xml.limits = limits;
     config.algorithms.signature = SignatureAlgorithm::RsaSha512;
     config.algorithms.data_encryption = DataEncryptionAlgorithm::Aes128;
-    config.algorithms.key_encryption = KeyEncryptionAlgorithm::Rsa15;
+    config.algorithms.key_encryption = KeyEncryptionAlgorithm::Rsa15ForCompatibility;
     config.algorithms.signed_reference_transforms =
         vec![TransformAlgorithm::ExclusiveCanonicalization];
 
@@ -204,11 +239,11 @@ fn typed_config_sp_config_converts_selected_settings() -> Result<(), Box<dyn std
 fn typed_config_idp_config_converts_authn_request_policy() -> Result<(), Box<dyn std::error::Error>>
 {
     let mut config = IdpConfig::new(
-        EntityId::new("https://idp.example.com/metadata"),
+        EntityId::try_new("https://idp.example.com/metadata")?,
         IdpMetadataConfig::new(vec![SsoEndpoint::redirect("https://idp.example.com/sso")?]),
     );
     config.metadata.name_id_format = vec![NameIdFormat::Transient];
-    config.validation.authn_requests = AuthnRequestSignaturePolicy::RequireSigned;
+    config.validation.authn_requests = AuthnRequestValidationPolicy::RequireSigned;
 
     let setting = EntitySetting::try_from(&config)?;
 
@@ -225,10 +260,21 @@ fn typed_config_idp_config_converts_authn_request_policy() -> Result<(), Box<dyn
 }
 
 #[test]
+fn typed_config_idp_descriptor_rejects_empty_expected_entity_id() {
+    let result = IdpDescriptor::from_metadata_xml_for(
+        EntityId::new(""),
+        IDP_METADATA,
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    );
+
+    assert!(matches!(result, Err(SamlError::Invalid(_))));
+}
+
+#[test]
 fn typed_config_insecure_rsa_key_transport_requires_explicit_policy(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = SpConfig::new(
-        EntityId::new("https://sp.example.com/metadata"),
+        EntityId::try_new("https://sp.example.com/metadata")?,
         SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
     );
     let default_setting = EntitySetting::try_from(&config)?;
@@ -247,7 +293,7 @@ fn typed_config_insecure_rsa_key_transport_requires_explicit_policy(
 fn typed_config_idp_descriptor_accepts_expected_unsigned_metadata(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let descriptor = IdpDescriptor::from_metadata_xml_for(
-        EntityId::new("https://idp.example.com/metadata"),
+        EntityId::try_new("https://idp.example.com/metadata")?,
         IDP_METADATA,
         MetadataTrustPolicy::UnsignedForCompatibility,
     )?;
@@ -261,9 +307,10 @@ fn typed_config_idp_descriptor_accepts_expected_unsigned_metadata(
 }
 
 #[test]
-fn typed_config_idp_descriptor_rejects_unexpected_entity_id() {
+fn typed_config_idp_descriptor_rejects_unexpected_entity_id(
+) -> Result<(), Box<dyn std::error::Error>> {
     let result = IdpDescriptor::from_metadata_xml_for(
-        EntityId::new("https://unexpected.example.com/metadata"),
+        EntityId::try_new("https://unexpected.example.com/metadata")?,
         IDP_METADATA,
         MetadataTrustPolicy::UnsignedForCompatibility,
     );
@@ -278,13 +325,14 @@ fn typed_config_idp_descriptor_rejects_unexpected_entity_id() {
         ),
         "unexpected entity ID error: {result:?}"
     );
+    Ok(())
 }
 
 #[test]
 fn typed_config_sp_descriptor_accepts_expected_unsigned_metadata(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let descriptor = SpDescriptor::from_metadata_xml_for(
-        EntityId::new("https://sp.example.org/metadata"),
+        EntityId::try_new("https://sp.example.org/metadata")?,
         SP_METADATA,
         MetadataTrustPolicy::UnsignedForCompatibility,
     )?;
@@ -298,9 +346,21 @@ fn typed_config_sp_descriptor_accepts_expected_unsigned_metadata(
 }
 
 #[test]
-fn typed_config_pinned_certificate_trust_does_not_accept_unsigned_metadata() {
+fn typed_config_sp_descriptor_rejects_empty_expected_entity_id() {
+    let result = SpDescriptor::from_metadata_xml_for(
+        EntityId::new(""),
+        SP_METADATA,
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    );
+
+    assert!(matches!(result, Err(SamlError::Invalid(_))));
+}
+
+#[test]
+fn typed_config_pinned_certificate_trust_does_not_accept_unsigned_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
     let result = IdpDescriptor::from_metadata_xml_for(
-        EntityId::new("https://idp.example.com/metadata"),
+        EntityId::try_new("https://idp.example.com/metadata")?,
         IDP_METADATA,
         MetadataTrustPolicy::RequireSignature {
             trusted_certificates: &[],
@@ -311,4 +371,5 @@ fn typed_config_pinned_certificate_trust_does_not_accept_unsigned_metadata() {
         result.is_err(),
         "empty pinned certificate trust must not accept unsigned metadata"
     );
+    Ok(())
 }

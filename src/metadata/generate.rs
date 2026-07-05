@@ -186,6 +186,7 @@ fn bool_str(value: bool) -> &'static str {
 
 /// Generate SP metadata XML.
 pub fn generate_sp_metadata(cfg: &SpMetadataConfig) -> String {
+    let is_custom_order = cfg.elements_order.is_some();
     let order = elements_order_or_default(&cfg.elements_order, elements_order::DEFAULT);
     let mut w = MetadataWriter::new();
     w.start(
@@ -207,6 +208,13 @@ pub fn generate_sp_metadata(cfg: &SpMetadataConfig) -> String {
     );
     for name in &order {
         write_sp_group(&mut w, cfg, name);
+    }
+    if is_custom_order
+        && !order
+            .iter()
+            .any(|ordered| ordered == "AssertionConsumerService")
+    {
+        write_sp_group(&mut w, cfg, "AssertionConsumerService");
     }
     w.end("SPSSODescriptor");
     w.end("EntityDescriptor");
@@ -464,6 +472,28 @@ mod tests {
         assert!(parsed.get_name_id_format().is_empty());
         assert_eq!(parsed.x509_certificates(CertUse::Signing).len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn sp_custom_elements_order_preserves_omitted_populated_acs() {
+        let cfg = SpMetadataConfig {
+            entity_id: "https://sp.example.com/metadata".into(),
+            signing_certs: vec!["MIIBsigning".into()],
+            name_id_format: vec![name_id_format::EMAIL_ADDRESS.to_string()],
+            single_logout_service: vec![Endpoint::new(Binding::Redirect, "https://sp/slo")],
+            assertion_consumer_service: vec![Endpoint::new(Binding::Post, "https://sp/acs")],
+            elements_order: Some(vec!["KeyDescriptor".into()]),
+            ..Default::default()
+        };
+
+        let xml = generate_sp_metadata(&cfg);
+        let key = xml.find("<KeyDescriptor").unwrap_or(usize::MAX);
+        let acs = xml.find("<AssertionConsumerService").unwrap_or(usize::MAX);
+
+        assert_eq!(xml.matches("<AssertionConsumerService").count(), 1);
+        assert!(key < acs);
+        assert!(!xml.contains("<NameIDFormat"));
+        assert!(!xml.contains("<SingleLogoutService"));
     }
 
     #[test]

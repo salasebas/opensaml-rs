@@ -4,6 +4,7 @@
 //! and SLO flows. Import from this module when you need direct access to the
 //! existing entity, flow, metadata, and logout building blocks.
 
+pub use crate::constants::Binding;
 pub use crate::entity::{BindingContext, EntitySetting, User};
 pub use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 pub use crate::idp::{IdentityProvider, LoginResponseOptions};

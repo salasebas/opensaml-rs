@@ -2,6 +2,7 @@
 
 use core::fmt;
 use core::ops::Deref;
+use core::str::FromStr;
 
 use crate::binding::MAX_DEFLATE_RAW_DECODE_BYTES;
 use crate::browser::{AcsEndpoint, SloEndpoint, SsoEndpoint};
@@ -28,7 +29,11 @@ impl PrivateKeyPem {
         Self(value.into())
     }
 
-    /// Borrow the PEM text for internal compatibility mapping.
+    /// Borrow the PEM text.
+    ///
+    /// The value is secret-bearing key material. Prefer passing typed
+    /// credentials through config APIs when possible; this accessor exists for
+    /// migration code and raw compatibility escape hatches.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -78,7 +83,11 @@ impl Passphrase {
         Self(value.into())
     }
 
-    /// Borrow the passphrase text for internal compatibility mapping.
+    /// Borrow the passphrase text.
+    ///
+    /// The value is secret-bearing credential material. Prefer passing typed
+    /// credentials through config APIs when possible; this accessor exists for
+    /// migration code and raw compatibility escape hatches.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -125,7 +134,10 @@ impl SignatureAlgorithm {
 /// still fail at runtime when unsupported by that backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DigestAlgorithm {
-    /// SHA-1 digest.
+    /// SHA-1 digest for legacy interoperability.
+    Sha1ForCompatibility,
+    /// Deprecated alias for [`Self::Sha1ForCompatibility`].
+    #[deprecated(note = "use DigestAlgorithm::Sha1ForCompatibility")]
     Sha1,
     /// SHA-256 digest.
     Sha256,
@@ -139,9 +151,13 @@ pub enum DigestAlgorithm {
 
 impl DigestAlgorithm {
     /// Return the XML digest algorithm URI.
+    #[expect(
+        deprecated,
+        reason = "deprecated algorithm aliases remain mapped for compatibility"
+    )]
     pub fn as_uri(&self) -> &str {
         match self {
-            Self::Sha1 => digest_algorithm::SHA1,
+            Self::Sha1ForCompatibility | Self::Sha1 => digest_algorithm::SHA1,
             Self::Sha256 => digest_algorithm::SHA256,
             Self::Sha384 => digest_algorithm::SHA384,
             Self::Sha512 => digest_algorithm::SHA512,
@@ -161,7 +177,10 @@ pub enum DataEncryptionAlgorithm {
     /// AES-256-CBC.
     #[default]
     Aes256,
-    /// Triple DES CBC.
+    /// Triple DES CBC for legacy interoperability.
+    TripleDesForCompatibility,
+    /// Deprecated alias for [`Self::TripleDesForCompatibility`].
+    #[deprecated(note = "use DataEncryptionAlgorithm::TripleDesForCompatibility")]
     TripleDes,
     /// AES-128-GCM.
     Aes128Gcm,
@@ -171,11 +190,17 @@ pub enum DataEncryptionAlgorithm {
 
 impl DataEncryptionAlgorithm {
     /// Return the XML-Enc algorithm URI.
+    #[expect(
+        deprecated,
+        reason = "deprecated algorithm aliases remain mapped for compatibility"
+    )]
     pub fn as_uri(&self) -> &str {
         match self {
             Self::Aes128 => data_encryption_algorithm::AES_128,
             Self::Aes256 => data_encryption_algorithm::AES_256,
-            Self::TripleDes => data_encryption_algorithm::TRIPLE_DES,
+            Self::TripleDesForCompatibility | Self::TripleDes => {
+                data_encryption_algorithm::TRIPLE_DES
+            }
             Self::Aes128Gcm => data_encryption_algorithm::AES_128_GCM,
             Self::Custom(uri) => uri.as_str(),
         }
@@ -191,7 +216,10 @@ pub enum KeyEncryptionAlgorithm {
     /// RSA-OAEP-MGF1P.
     #[default]
     RsaOaepMgf1p,
-    /// RSAES-PKCS1-v1_5.
+    /// RSAES-PKCS1-v1_5 for legacy interoperability.
+    Rsa15ForCompatibility,
+    /// Deprecated alias for [`Self::Rsa15ForCompatibility`].
+    #[deprecated(note = "use KeyEncryptionAlgorithm::Rsa15ForCompatibility")]
     Rsa15,
     /// Backend-specific key transport algorithm URI.
     Custom(String),
@@ -199,10 +227,14 @@ pub enum KeyEncryptionAlgorithm {
 
 impl KeyEncryptionAlgorithm {
     /// Return the XML-Enc key transport algorithm URI.
+    #[expect(
+        deprecated,
+        reason = "deprecated algorithm aliases remain mapped for compatibility"
+    )]
     pub fn as_uri(&self) -> &str {
         match self {
             Self::RsaOaepMgf1p => key_encryption_algorithm::RSA_OAEP_MGF1P,
-            Self::Rsa15 => key_encryption_algorithm::RSA_1_5,
+            Self::Rsa15ForCompatibility | Self::Rsa15 => key_encryption_algorithm::RSA_1_5,
             Self::Custom(uri) => uri.as_str(),
         }
     }
@@ -278,7 +310,10 @@ impl NameIdFormat {
 pub struct EntityId(String);
 
 impl EntityId {
-    /// Wrap an entity ID URI or deployment-specific identifier.
+    /// Wrap an entity ID URI or deployment-specific identifier without validation.
+    ///
+    /// Prefer [`Self::try_new`] for caller-provided input. This constructor is
+    /// retained for already-validated compatibility data.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -290,9 +325,7 @@ impl EntityId {
     /// Returns [`SamlError::Invalid`] when the entity ID is empty.
     pub fn try_new(value: impl Into<String>) -> Result<Self, SamlError> {
         let value = value.into();
-        if value.trim().is_empty() {
-            return Err(SamlError::Invalid("entity ID must not be empty".into()));
-        }
+        validate_entity_id_text(&value)?;
         Ok(Self(value))
     }
 
@@ -302,20 +335,32 @@ impl EntityId {
     }
 }
 
-impl From<&str> for EntityId {
-    fn from(value: &str) -> Self {
-        Self::new(value)
+impl FromStr for EntityId {
+    type Err = SamlError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::try_new(value)
     }
 }
 
-impl From<String> for EntityId {
-    fn from(value: String) -> Self {
-        Self::new(value)
+impl TryFrom<&str> for EntityId {
+    type Error = SamlError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
+impl TryFrom<String> for EntityId {
+    type Error = SamlError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_new(value)
     }
 }
 
 /// Local SP metadata inputs used by typed configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpMetadataConfig {
     /// `<NameIDFormat>` values advertised by the SP.
     pub name_id_format: Vec<NameIdFormat>,
@@ -329,6 +374,9 @@ pub struct SpMetadataConfig {
 
 impl SpMetadataConfig {
     /// Create SP metadata input with required ACS endpoints visible at the call site.
+    ///
+    /// This constructor does not validate the endpoint list. Use
+    /// [`Self::try_new`] for caller-provided endpoint collections.
     pub fn new(assertion_consumer_service: Vec<AcsEndpoint>) -> Self {
         Self {
             name_id_format: Vec::new(),
@@ -337,10 +385,35 @@ impl SpMetadataConfig {
             elements_order: None,
         }
     }
+
+    /// Validate and create SP metadata input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::MissingMetadata`] when no ACS endpoint is supplied.
+    pub fn try_new(assertion_consumer_service: Vec<AcsEndpoint>) -> Result<Self, SamlError> {
+        let config = Self::new(assertion_consumer_service);
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Validate required SP metadata inputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::MissingMetadata`] when no ACS endpoint is supplied.
+    pub fn validate(&self) -> Result<(), SamlError> {
+        if self.assertion_consumer_service.is_empty() {
+            return Err(SamlError::MissingMetadata(
+                "AssertionConsumerService".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Local IdP metadata inputs used by typed configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdpMetadataConfig {
     /// `<NameIDFormat>` values advertised by the IdP.
     pub name_id_format: Vec<NameIdFormat>,
@@ -354,6 +427,9 @@ pub struct IdpMetadataConfig {
 
 impl IdpMetadataConfig {
     /// Create IdP metadata input with required SSO endpoints visible at the call site.
+    ///
+    /// This constructor does not validate the endpoint list. Use
+    /// [`Self::try_new`] for caller-provided endpoint collections.
     pub fn new(single_sign_on_service: Vec<SsoEndpoint>) -> Self {
         Self {
             name_id_format: Vec::new(),
@@ -361,6 +437,29 @@ impl IdpMetadataConfig {
             single_logout_service: Vec::new(),
             elements_order: None,
         }
+    }
+
+    /// Validate and create IdP metadata input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::MissingMetadata`] when no SSO endpoint is supplied.
+    pub fn try_new(single_sign_on_service: Vec<SsoEndpoint>) -> Result<Self, SamlError> {
+        let config = Self::new(single_sign_on_service);
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Validate required IdP metadata inputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::MissingMetadata`] when no SSO endpoint is supplied.
+    pub fn validate(&self) -> Result<(), SamlError> {
+        if self.single_sign_on_service.is_empty() {
+            return Err(SamlError::MissingMetadata("SingleSignOnService".into()));
+        }
+        Ok(())
     }
 }
 
@@ -401,12 +500,22 @@ pub enum MessageSignaturePolicy {
     AllowUnsignedForCompatibility,
 }
 
-/// Whether AuthnRequests are, or must be, signed.
+/// Whether an SP signs outgoing AuthnRequests.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum AuthnRequestSignaturePolicy {
-    /// Require a signed AuthnRequest or sign outgoing AuthnRequests.
+pub enum AuthnRequestSigningPolicy {
+    /// Sign outgoing AuthnRequests.
+    Sign,
+    /// Send unsigned AuthnRequests for legacy interoperability.
+    #[default]
+    DoNotSignForCompatibility,
+}
+
+/// Whether an IdP requires signed inbound AuthnRequests.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AuthnRequestValidationPolicy {
+    /// Reject unsigned AuthnRequests.
     RequireSigned,
-    /// Allow unsigned AuthnRequests for legacy interoperability.
+    /// Accept unsigned AuthnRequests for legacy interoperability.
     #[default]
     AllowUnsignedForCompatibility,
 }
@@ -446,14 +555,14 @@ pub enum NameIdCreationPolicy {
 }
 
 /// SP-side validation and outbound signing policy.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpValidationPolicy {
     /// Assertion signature requirement.
     pub assertions: AssertionSignaturePolicy,
     /// Response/message signature requirement.
     pub messages: MessageSignaturePolicy,
     /// Outbound AuthnRequest signing behavior.
-    pub authn_requests: AuthnRequestSignaturePolicy,
+    pub authn_requests: AuthnRequestSigningPolicy,
     /// Audience validation behavior.
     pub audience: AudienceValidationPolicy,
     /// NameID creation behavior for AuthnRequests.
@@ -462,22 +571,96 @@ pub struct SpValidationPolicy {
     pub logout: LogoutPolicy,
 }
 
+impl SpValidationPolicy {
+    /// Strict SP validation and outbound signing defaults.
+    pub fn strict() -> Self {
+        Self {
+            assertions: AssertionSignaturePolicy::RequireSigned,
+            messages: MessageSignaturePolicy::RequireSigned,
+            authn_requests: AuthnRequestSigningPolicy::Sign,
+            audience: AudienceValidationPolicy::Validate,
+            name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
+            logout: LogoutPolicy::strict(),
+        }
+    }
+
+    /// Legacy interoperability policy with unsigned behavior made explicit.
+    pub fn compatibility() -> Self {
+        Self {
+            assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
+            messages: MessageSignaturePolicy::AllowUnsignedForCompatibility,
+            authn_requests: AuthnRequestSigningPolicy::DoNotSignForCompatibility,
+            audience: AudienceValidationPolicy::SkipForCompatibility,
+            name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
+            logout: LogoutPolicy::compatibility(),
+        }
+    }
+}
+
+impl Default for SpValidationPolicy {
+    fn default() -> Self {
+        Self::compatibility()
+    }
+}
+
 /// IdP-side validation policy.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdpValidationPolicy {
     /// Inbound AuthnRequest signature requirement.
-    pub authn_requests: AuthnRequestSignaturePolicy,
+    pub authn_requests: AuthnRequestValidationPolicy,
     /// Logout signature validation behavior.
     pub logout: LogoutPolicy,
 }
 
+impl IdpValidationPolicy {
+    /// Strict IdP validation defaults.
+    pub fn strict() -> Self {
+        Self {
+            authn_requests: AuthnRequestValidationPolicy::RequireSigned,
+            logout: LogoutPolicy::strict(),
+        }
+    }
+
+    /// Legacy interoperability policy with unsigned behavior made explicit.
+    pub fn compatibility() -> Self {
+        Self {
+            authn_requests: AuthnRequestValidationPolicy::AllowUnsignedForCompatibility,
+            logout: LogoutPolicy::compatibility(),
+        }
+    }
+}
+
+impl Default for IdpValidationPolicy {
+    fn default() -> Self {
+        Self::compatibility()
+    }
+}
+
 /// Logout request and response signature policy.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LogoutPolicy {
     /// LogoutRequest signature behavior.
     pub requests: LogoutSignaturePolicy,
     /// LogoutResponse signature behavior.
     pub responses: LogoutSignaturePolicy,
+}
+
+impl LogoutPolicy {
+    /// Require signed logout requests and responses.
+    pub fn strict() -> Self {
+        Self {
+            requests: LogoutSignaturePolicy::RequireSigned,
+            responses: LogoutSignaturePolicy::RequireSigned,
+        }
+    }
+
+    /// Accept unsigned logout requests and responses for legacy interoperability.
+    pub fn compatibility() -> Self {
+        Self {
+            requests: LogoutSignaturePolicy::AllowUnsignedForCompatibility,
+            responses: LogoutSignaturePolicy::AllowUnsignedForCompatibility,
+        }
+    }
 }
 
 /// Whether assertions are encrypted in generated responses.
@@ -629,10 +812,10 @@ impl Default for TemplatePolicy {
 /// use saml_rs::{AcsEndpoint, EntityId, SpConfig, SpMetadataConfig};
 ///
 /// let acs = AcsEndpoint::post("https://sp.example.com/acs")?;
-/// let config = SpConfig::new(
-///     EntityId::new("https://sp.example.com/metadata"),
+/// let config = SpConfig::try_new(
+///     EntityId::try_new("https://sp.example.com/metadata")?,
 ///     SpMetadataConfig::new(vec![acs]),
-/// );
+/// )?;
 ///
 /// assert_eq!(config.entity_id.as_str(), "https://sp.example.com/metadata");
 /// # Ok::<(), saml_rs::SamlError>(())
@@ -657,6 +840,10 @@ pub struct SpConfig {
 
 impl SpConfig {
     /// Create SP configuration with required identity and metadata inputs.
+    ///
+    /// This convenience constructor accepts already-validated typed inputs but
+    /// does not validate the final config. Use [`Self::try_new`] or
+    /// [`Self::builder`] for caller-provided setup.
     pub fn new(entity_id: EntityId, metadata: SpMetadataConfig) -> Self {
         Self {
             entity_id,
@@ -667,6 +854,136 @@ impl SpConfig {
             xml: XmlPolicy::default(),
             templates: TemplatePolicy::default(),
         }
+    }
+
+    /// Validate and create SP configuration with compatibility defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the entity ID is empty or required SP
+    /// metadata endpoints are missing.
+    pub fn try_new(entity_id: EntityId, metadata: SpMetadataConfig) -> Result<Self, SamlError> {
+        let config = Self::new(entity_id, metadata);
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Start a dependency-free SP config builder with strict typed defaults.
+    pub fn builder(entity_id: EntityId) -> SpConfigBuilder {
+        SpConfigBuilder::new(entity_id)
+    }
+
+    /// Validate required SP config fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the entity ID is empty or required SP
+    /// metadata endpoints are missing.
+    pub fn validate(&self) -> Result<(), SamlError> {
+        validate_entity_id(&self.entity_id)?;
+        self.metadata.validate()?;
+        validate_sp_policy(self)
+    }
+}
+
+/// Dependency-free builder for [`SpConfig`].
+#[derive(Debug, Clone)]
+pub struct SpConfigBuilder {
+    entity_id: EntityId,
+    metadata: SpMetadataConfig,
+    credentials: Credentials,
+    validation: SpValidationPolicy,
+    algorithms: AlgorithmPolicy,
+    xml: XmlPolicy,
+    templates: TemplatePolicy,
+}
+
+impl SpConfigBuilder {
+    fn new(entity_id: EntityId) -> Self {
+        Self {
+            entity_id,
+            metadata: SpMetadataConfig::new(Vec::new()),
+            credentials: Credentials::default(),
+            validation: SpValidationPolicy::strict(),
+            algorithms: AlgorithmPolicy::default(),
+            xml: XmlPolicy::default(),
+            templates: TemplatePolicy::default(),
+        }
+    }
+
+    /// Add an ACS endpoint.
+    pub fn acs_endpoint(mut self, endpoint: AcsEndpoint) -> Self {
+        self.metadata.assertion_consumer_service.push(endpoint);
+        self
+    }
+
+    /// Add an SLO endpoint.
+    pub fn slo_endpoint(mut self, endpoint: SloEndpoint) -> Self {
+        self.metadata.single_logout_service.push(endpoint);
+        self
+    }
+
+    /// Add an advertised NameID format.
+    pub fn name_id_format(mut self, format: NameIdFormat) -> Self {
+        self.metadata.name_id_format.push(format);
+        self
+    }
+
+    /// Set generated metadata element ordering.
+    pub fn elements_order(mut self, elements_order: Vec<String>) -> Self {
+        self.metadata.elements_order = Some(elements_order);
+        self
+    }
+
+    /// Set local credentials.
+    pub fn credentials(mut self, credentials: Credentials) -> Self {
+        self.credentials = credentials;
+        self
+    }
+
+    /// Set SP validation and outbound signing policy.
+    pub fn validation(mut self, validation: SpValidationPolicy) -> Self {
+        self.validation = validation;
+        self
+    }
+
+    /// Set algorithm policy.
+    pub fn algorithms(mut self, algorithms: AlgorithmPolicy) -> Self {
+        self.algorithms = algorithms;
+        self
+    }
+
+    /// Set XML policy.
+    pub fn xml(mut self, xml: XmlPolicy) -> Self {
+        self.xml = xml;
+        self
+    }
+
+    /// Set template policy.
+    pub fn templates(mut self, templates: TemplatePolicy) -> Self {
+        self.templates = templates;
+        self
+    }
+
+    /// Build and validate the SP config.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when required fields are missing, selected policy
+    /// needs unavailable credentials, or selected policy requires crypto in a
+    /// no-default-features build.
+    pub fn build(self) -> Result<SpConfig, SamlError> {
+        let config = SpConfig {
+            entity_id: self.entity_id,
+            metadata: self.metadata,
+            credentials: self.credentials,
+            validation: self.validation,
+            algorithms: self.algorithms,
+            xml: self.xml,
+            templates: self.templates,
+        };
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -691,6 +1008,10 @@ pub struct IdpConfig {
 
 impl IdpConfig {
     /// Create IdP configuration with required identity and metadata inputs.
+    ///
+    /// This convenience constructor accepts already-validated typed inputs but
+    /// does not validate the final config. Use [`Self::try_new`] or
+    /// [`Self::builder`] for caller-provided setup.
     pub fn new(entity_id: EntityId, metadata: IdpMetadataConfig) -> Self {
         Self {
             entity_id,
@@ -701,6 +1022,135 @@ impl IdpConfig {
             xml: XmlPolicy::default(),
             templates: TemplatePolicy::default(),
         }
+    }
+
+    /// Validate and create IdP configuration with compatibility defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the entity ID is empty or required IdP
+    /// metadata endpoints are missing.
+    pub fn try_new(entity_id: EntityId, metadata: IdpMetadataConfig) -> Result<Self, SamlError> {
+        let config = Self::new(entity_id, metadata);
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Start a dependency-free IdP config builder with strict typed defaults.
+    pub fn builder(entity_id: EntityId) -> IdpConfigBuilder {
+        IdpConfigBuilder::new(entity_id)
+    }
+
+    /// Validate required IdP config fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the entity ID is empty or required IdP
+    /// metadata endpoints are missing.
+    pub fn validate(&self) -> Result<(), SamlError> {
+        validate_entity_id(&self.entity_id)?;
+        self.metadata.validate()?;
+        validate_idp_policy(self)
+    }
+}
+
+/// Dependency-free builder for [`IdpConfig`].
+#[derive(Debug, Clone)]
+pub struct IdpConfigBuilder {
+    entity_id: EntityId,
+    metadata: IdpMetadataConfig,
+    credentials: Credentials,
+    validation: IdpValidationPolicy,
+    algorithms: AlgorithmPolicy,
+    xml: XmlPolicy,
+    templates: TemplatePolicy,
+}
+
+impl IdpConfigBuilder {
+    fn new(entity_id: EntityId) -> Self {
+        Self {
+            entity_id,
+            metadata: IdpMetadataConfig::new(Vec::new()),
+            credentials: Credentials::default(),
+            validation: IdpValidationPolicy::strict(),
+            algorithms: AlgorithmPolicy::default(),
+            xml: XmlPolicy::default(),
+            templates: TemplatePolicy::default(),
+        }
+    }
+
+    /// Add an SSO endpoint.
+    pub fn sso_endpoint(mut self, endpoint: SsoEndpoint) -> Self {
+        self.metadata.single_sign_on_service.push(endpoint);
+        self
+    }
+
+    /// Add an SLO endpoint.
+    pub fn slo_endpoint(mut self, endpoint: SloEndpoint) -> Self {
+        self.metadata.single_logout_service.push(endpoint);
+        self
+    }
+
+    /// Add an advertised NameID format.
+    pub fn name_id_format(mut self, format: NameIdFormat) -> Self {
+        self.metadata.name_id_format.push(format);
+        self
+    }
+
+    /// Set generated metadata element ordering.
+    pub fn elements_order(mut self, elements_order: Vec<String>) -> Self {
+        self.metadata.elements_order = Some(elements_order);
+        self
+    }
+
+    /// Set local credentials.
+    pub fn credentials(mut self, credentials: Credentials) -> Self {
+        self.credentials = credentials;
+        self
+    }
+
+    /// Set IdP validation policy.
+    pub fn validation(mut self, validation: IdpValidationPolicy) -> Self {
+        self.validation = validation;
+        self
+    }
+
+    /// Set algorithm policy.
+    pub fn algorithms(mut self, algorithms: AlgorithmPolicy) -> Self {
+        self.algorithms = algorithms;
+        self
+    }
+
+    /// Set XML policy.
+    pub fn xml(mut self, xml: XmlPolicy) -> Self {
+        self.xml = xml;
+        self
+    }
+
+    /// Set template policy.
+    pub fn templates(mut self, templates: TemplatePolicy) -> Self {
+        self.templates = templates;
+        self
+    }
+
+    /// Build and validate the IdP config.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when required fields are missing or selected
+    /// policy requires crypto in a no-default-features build.
+    pub fn build(self) -> Result<IdpConfig, SamlError> {
+        let config = IdpConfig {
+            entity_id: self.entity_id,
+            metadata: self.metadata,
+            credentials: self.credentials,
+            validation: self.validation,
+            algorithms: self.algorithms,
+            xml: self.xml,
+            templates: self.templates,
+        };
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -725,6 +1175,135 @@ enum AppliedMetadataTrust {
     SignedByPinnedCertificates,
 }
 
+fn validate_entity_id_text(value: &str) -> Result<(), SamlError> {
+    if value.trim().is_empty() {
+        return Err(SamlError::Invalid("entity ID must not be empty".into()));
+    }
+    Ok(())
+}
+
+fn validate_entity_id(entity_id: &EntityId) -> Result<(), SamlError> {
+    validate_entity_id_text(entity_id.as_str())
+}
+
+fn validate_common_credentials(credentials: &Credentials) -> Result<(), SamlError> {
+    if credentials.signing_key_passphrase.is_some() && credentials.signing_key.is_none() {
+        return Err(SamlError::MissingKey("signing_key".into()));
+    }
+    if credentials.decryption_key_passphrase.is_some() && credentials.decryption_key.is_none() {
+        return Err(SamlError::MissingKey("decryption_key".into()));
+    }
+    Ok(())
+}
+
+fn validate_sp_policy(config: &SpConfig) -> Result<(), SamlError> {
+    validate_sp_crypto_support(config)?;
+    validate_common_credentials(&config.credentials)?;
+    if matches!(
+        config.validation.authn_requests,
+        AuthnRequestSigningPolicy::Sign
+    ) {
+        validate_signing_credentials(&config.credentials)?;
+    }
+    if matches!(
+        config.xml.encryption.assertions,
+        AssertionEncryptionPolicy::EncryptAssertions
+    ) && config.credentials.decryption_key.is_none()
+    {
+        return Err(SamlError::MissingKey("decryption_key".into()));
+    }
+    Ok(())
+}
+
+fn validate_idp_policy(config: &IdpConfig) -> Result<(), SamlError> {
+    validate_idp_crypto_support(config)?;
+    validate_common_credentials(&config.credentials)
+}
+
+fn validate_signing_credentials(credentials: &Credentials) -> Result<(), SamlError> {
+    if credentials.signing_key.is_none() {
+        return Err(SamlError::MissingKey("signing_key".into()));
+    }
+    if credentials.signing_certificate.is_none() {
+        return Err(SamlError::MissingKey("signing_certificate".into()));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn validate_sp_crypto_support(_config: &SpConfig) -> Result<(), SamlError> {
+    Ok(())
+}
+
+#[cfg(not(feature = "crypto-bergshamra"))]
+fn validate_sp_crypto_support(config: &SpConfig) -> Result<(), SamlError> {
+    if sp_config_requires_crypto(config) {
+        return Err(SamlError::Unsupported(
+            "selected SP config policy requires the crypto-bergshamra feature".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn validate_idp_crypto_support(_config: &IdpConfig) -> Result<(), SamlError> {
+    Ok(())
+}
+
+#[cfg(not(feature = "crypto-bergshamra"))]
+fn validate_idp_crypto_support(config: &IdpConfig) -> Result<(), SamlError> {
+    if idp_config_requires_crypto(config) {
+        return Err(SamlError::Unsupported(
+            "selected IdP config policy requires the crypto-bergshamra feature".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "crypto-bergshamra"))]
+fn sp_config_requires_crypto(config: &SpConfig) -> bool {
+    matches!(
+        config.validation.assertions,
+        AssertionSignaturePolicy::RequireSigned
+    ) || matches!(
+        config.validation.messages,
+        MessageSignaturePolicy::RequireSigned
+    ) || matches!(
+        config.validation.authn_requests,
+        AuthnRequestSigningPolicy::Sign
+    ) || logout_policy_requires_crypto(config.validation.logout)
+        || matches!(
+            config.xml.encryption.assertions,
+            AssertionEncryptionPolicy::EncryptAssertions
+        )
+}
+
+#[cfg(not(feature = "crypto-bergshamra"))]
+fn idp_config_requires_crypto(config: &IdpConfig) -> bool {
+    matches!(
+        config.validation.authn_requests,
+        AuthnRequestValidationPolicy::RequireSigned
+    ) || logout_policy_requires_crypto(config.validation.logout)
+        || matches!(
+            config.xml.encryption.assertions,
+            AssertionEncryptionPolicy::EncryptAssertions
+        )
+}
+
+#[cfg(not(feature = "crypto-bergshamra"))]
+fn logout_policy_requires_crypto(policy: LogoutPolicy) -> bool {
+    logout_signature_policy_requires_crypto(policy.requests)
+        || logout_signature_policy_requires_crypto(policy.responses)
+}
+
+#[cfg(not(feature = "crypto-bergshamra"))]
+fn logout_signature_policy_requires_crypto(policy: LogoutSignaturePolicy) -> bool {
+    matches!(
+        policy,
+        LogoutSignaturePolicy::RequireSigned | LogoutSignaturePolicy::FollowPeerMetadata
+    )
+}
+
 /// Typed IdP peer descriptor imported from metadata.
 #[derive(Debug, Clone)]
 pub struct IdpDescriptor {
@@ -746,6 +1325,7 @@ impl IdpDescriptor {
         xml: &str,
         trust: MetadataTrustPolicy<'_>,
     ) -> Result<Self, SamlError> {
+        validate_entity_id(&expected_entity_id)?;
         let metadata = IdpMetadata::from_xml(xml)?;
         let actual_entity_id = metadata_entity_id(&metadata)?;
         ensure_expected_entity_id(&expected_entity_id, actual_entity_id)?;
@@ -768,7 +1348,7 @@ impl IdpDescriptor {
     /// or the requested trust policy cannot be satisfied.
     pub fn from_metadata_xml(xml: &str, trust: MetadataTrustPolicy<'_>) -> Result<Self, SamlError> {
         let metadata = IdpMetadata::from_xml(xml)?;
-        let entity_id = EntityId::new(metadata_entity_id(&metadata)?.to_string());
+        let entity_id = EntityId::try_new(metadata_entity_id(&metadata)?)?;
         let trust = ensure_metadata_trust(&metadata, trust)?;
         Ok(Self {
             entity_id,
@@ -820,6 +1400,7 @@ impl SpDescriptor {
         xml: &str,
         trust: MetadataTrustPolicy<'_>,
     ) -> Result<Self, SamlError> {
+        validate_entity_id(&expected_entity_id)?;
         let metadata = SpMetadata::from_xml(xml)?;
         let actual_entity_id = metadata_entity_id(&metadata)?;
         ensure_expected_entity_id(&expected_entity_id, actual_entity_id)?;
@@ -842,7 +1423,7 @@ impl SpDescriptor {
     /// or the requested trust policy cannot be satisfied.
     pub fn from_metadata_xml(xml: &str, trust: MetadataTrustPolicy<'_>) -> Result<Self, SamlError> {
         let metadata = SpMetadata::from_xml(xml)?;
-        let entity_id = EntityId::new(metadata_entity_id(&metadata)?.to_string());
+        let entity_id = EntityId::try_new(metadata_entity_id(&metadata)?)?;
         let trust = ensure_metadata_trust(&metadata, trust)?;
         Ok(Self {
             entity_id,
@@ -873,8 +1454,12 @@ impl SpDescriptor {
     }
 }
 
-fn authn_request_signature_required(policy: AuthnRequestSignaturePolicy) -> bool {
-    matches!(policy, AuthnRequestSignaturePolicy::RequireSigned)
+fn authn_request_signing_enabled(policy: AuthnRequestSigningPolicy) -> bool {
+    matches!(policy, AuthnRequestSigningPolicy::Sign)
+}
+
+fn authn_request_signature_required(policy: AuthnRequestValidationPolicy) -> bool {
+    matches!(policy, AuthnRequestValidationPolicy::RequireSigned)
 }
 
 fn assertion_signature_required(policy: AssertionSignaturePolicy) -> bool {
@@ -1050,6 +1635,7 @@ impl TryFrom<&SpConfig> for EntitySetting {
     type Error = SamlError;
 
     fn try_from(config: &SpConfig) -> Result<Self, Self::Error> {
+        config.validate()?;
         let mut setting = Self::default();
         apply_common_settings(
             &config.entity_id,
@@ -1062,7 +1648,7 @@ impl TryFrom<&SpConfig> for EntitySetting {
         );
         setting.allow_create = name_id_creation_allowed(config.validation.name_id_creation);
         setting.authn_requests_signed =
-            authn_request_signature_required(config.validation.authn_requests);
+            authn_request_signing_enabled(config.validation.authn_requests);
         setting.want_assertions_signed = assertion_signature_required(config.validation.assertions);
         setting.validate_audience = audience_validation_enabled(config.validation.audience);
         setting.want_message_signed = message_signature_required(config.validation.messages);
@@ -1078,6 +1664,7 @@ impl TryFrom<&IdpConfig> for EntitySetting {
     type Error = SamlError;
 
     fn try_from(config: &IdpConfig) -> Result<Self, Self::Error> {
+        config.validate()?;
         let mut setting = Self::default();
         apply_common_settings(
             &config.entity_id,
