@@ -211,6 +211,11 @@ impl IdentityProvider {
         user: &User,
         options: &LoginResponseOptions<'_>,
     ) -> Result<BindingContext, SamlError> {
+        if matches!(binding, Binding::Artifact) {
+            return Err(SamlError::UnsupportedBinding {
+                binding: Binding::Artifact,
+            });
+        }
         let acs = sp
             .metadata
             .get_assertion_consumer_service(binding)

@@ -11,7 +11,7 @@
 //! - Only content covered by a verified reference is returned for extraction.
 
 use super::keys::load_certificate;
-use crate::error::SamlError;
+use crate::error::{ReferenceResolutionReason, SamlError, SignatureVerificationReason};
 use crate::util::normalize_cert_string;
 use crate::xml::dom::{self, Node, XmlLimits};
 use bergshamra::{verify, DsigContext, KeysManager, VerifiedReference, VerifyResult};
@@ -71,7 +71,7 @@ enum VerifiedTarget {
     Id(String),
 }
 
-fn reference_resolution(reason: &'static str) -> SamlError {
+fn reference_resolution(reason: ReferenceResolutionReason) -> SamlError {
     SamlError::ReferenceResolution { reason }
 }
 
@@ -82,43 +82,55 @@ fn verified_target_from_uri(uri: &str) -> Result<VerifiedTarget, SamlError> {
 
     let fragment = uri
         .strip_prefix('#')
-        .ok_or_else(|| reference_resolution("external reference"))?;
+        .ok_or_else(|| reference_resolution(ReferenceResolutionReason::ExternalReference))?;
     if fragment.is_empty() {
-        return Err(reference_resolution("unsupported reference URI"));
+        return Err(reference_resolution(
+            ReferenceResolutionReason::UnsupportedReferenceUri,
+        ));
     }
     if let Some(id) = fragment
         .strip_prefix("xpointer(id('")
         .and_then(|rest| rest.strip_suffix("'))"))
     {
         if id.is_empty() {
-            return Err(reference_resolution("unsupported reference URI"));
+            return Err(reference_resolution(
+                ReferenceResolutionReason::UnsupportedReferenceUri,
+            ));
         }
         return Ok(VerifiedTarget::Id(id.to_string()));
     }
     if fragment.starts_with("xpointer(") {
-        return Err(reference_resolution("unsupported reference URI"));
+        return Err(reference_resolution(
+            ReferenceResolutionReason::UnsupportedReferenceUri,
+        ));
     }
     Ok(VerifiedTarget::Id(fragment.to_string()))
 }
 
 fn verified_targets(references: &[VerifiedReference]) -> Result<Vec<VerifiedTarget>, SamlError> {
     if references.is_empty() {
-        return Err(reference_resolution("missing signature reference"));
+        return Err(reference_resolution(
+            ReferenceResolutionReason::MissingSignatureReference,
+        ));
     }
 
     let mut targets = Vec::with_capacity(references.len());
     for reference in references {
         if is_external_reference(&reference.uri) {
-            return Err(reference_resolution("external reference"));
+            return Err(reference_resolution(
+                ReferenceResolutionReason::ExternalReference,
+            ));
         }
         if !reference.digest_verified {
             return Err(SamlError::SignatureVerification {
-                reason: "reference digest",
+                reason: SignatureVerificationReason::ReferenceDigest,
             });
         }
         let target = verified_target_from_uri(&reference.uri)?;
         if matches!(target, VerifiedTarget::Id(_)) && reference.resolved_node.is_none() {
-            return Err(reference_resolution("unresolved reference"));
+            return Err(reference_resolution(
+                ReferenceResolutionReason::UnresolvedReference,
+            ));
         }
         targets.push(target);
     }
@@ -214,6 +226,21 @@ fn is_external_reference(uri: &str) -> bool {
     !uri.is_empty() && !uri.starts_with('#')
 }
 
+fn has_saml_xml_signature(root: &Node) -> bool {
+    has_child(root, "Signature")
+        || children_named(root, "Assertion")
+            .iter()
+            .any(|assertion| has_child(assertion, "Signature"))
+}
+
+pub(crate) fn has_xml_signature_with_limits(
+    xml: &str,
+    limits: XmlLimits,
+) -> Result<bool, SamlError> {
+    let doc = dom::parse_with_limits(xml, limits)?;
+    Ok(has_saml_xml_signature(&doc.root))
+}
+
 /// First `<X509Certificate>` text found inside a `<Signature>` (the cert the
 /// sender embedded in the message), if any.
 fn inline_signature_cert(node: &Node, in_signature: bool) -> Option<String> {
@@ -258,11 +285,7 @@ pub fn verify_signature_with_limits(
     }
 
     // Candidate signatures: message-level (root > Signature) or assertion-level.
-    let message_sig = has_child(root, "Signature");
-    let assertion_sig = children_named(root, "Assertion")
-        .iter()
-        .any(|a| has_child(a, "Signature"));
-    if !message_sig && !assertion_sig {
+    if !has_saml_xml_signature(root) {
         return Ok((false, None));
     }
 
@@ -401,13 +424,15 @@ mod tests {
     fn unsupported_reference_target_parsing_fails() {
         assert!(matches!(
             verified_target_from_uri("#"),
-            Err(SamlError::ReferenceResolution { reason })
-                if reason == "unsupported reference URI"
+            Err(SamlError::ReferenceResolution {
+                reason: ReferenceResolutionReason::UnsupportedReferenceUri
+            })
         ));
         assert!(matches!(
             verified_target_from_uri("#xpointer(//saml:Assertion)"),
-            Err(SamlError::ReferenceResolution { reason })
-                if reason == "unsupported reference URI"
+            Err(SamlError::ReferenceResolution {
+                reason: ReferenceResolutionReason::UnsupportedReferenceUri
+            })
         ));
     }
 
@@ -492,7 +517,7 @@ mod tests {
 
     fn assert_reference_resolution(
         result: Result<(bool, Option<String>), SamlError>,
-        expected: &str,
+        expected: ReferenceResolutionReason,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match result {
             Err(SamlError::ReferenceResolution { reason }) if reason == expected => Ok(()),
@@ -573,7 +598,7 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         assert_reference_resolution(
             verify_signature(&cid_reference_response()?, &[SP_SIGNING_CERT.to_string()]),
-            "external reference",
+            ReferenceResolutionReason::ExternalReference,
         )
     }
 

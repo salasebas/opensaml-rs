@@ -447,6 +447,10 @@ impl ServiceProvider {
 
     /// Like [`Self::parse_login_response`] but also requires `InResponseTo` to
     /// equal `request_id` (anti-replay: bind the response to a request you sent).
+    ///
+    /// An empty caller-provided `request_id` is rejected as
+    /// [`SamlError::InvalidInResponseTo`]. A non-empty `request_id` that does
+    /// not match the SAML response returns [`SamlError::InResponseToMismatch`].
     pub fn parse_login_response_with_request_id(
         &self,
         idp: &IdentityProvider,

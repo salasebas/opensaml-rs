@@ -6,6 +6,107 @@
 
 use crate::constants::Binding;
 use crate::model::RelayStateParam;
+use std::fmt;
+
+/// Reason a required SAML signature verification failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SignatureVerificationReason {
+    /// Enveloped XML-DSig verification failed.
+    XmlSignature,
+    /// HTTP-Redirect or SimpleSign detached message signature verification failed.
+    DetachedMessageSignature,
+    /// Detached signature input could not be correlated with consumed RelayState.
+    RelayStateCorrelation,
+    /// Signed reference digest verification failed.
+    ReferenceDigest,
+}
+
+impl fmt::Display for SignatureVerificationReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::XmlSignature => f.write_str("xml signature"),
+            Self::DetachedMessageSignature => f.write_str("detached message signature"),
+            Self::RelayStateCorrelation => f.write_str("relay state correlation"),
+            Self::ReferenceDigest => f.write_str("reference digest"),
+        }
+    }
+}
+
+/// Reason a signed XML reference could not be resolved safely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ReferenceResolutionReason {
+    /// Reference URI points outside the same XML document.
+    ExternalReference,
+    /// Reference URI syntax is not supported by the SAML verifier.
+    UnsupportedReferenceUri,
+    /// Signature contained no references to validate.
+    MissingSignatureReference,
+    /// Same-document reference did not resolve to an XML node.
+    UnresolvedReference,
+}
+
+impl fmt::Display for ReferenceResolutionReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ExternalReference => f.write_str("external reference"),
+            Self::UnsupportedReferenceUri => f.write_str("unsupported reference URI"),
+            Self::MissingSignatureReference => f.write_str("missing signature reference"),
+            Self::UnresolvedReference => f.write_str("unresolved reference"),
+        }
+    }
+}
+
+/// Bearer subject confirmation validation failure reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SubjectConfirmationReason {
+    /// SubjectConfirmation `Method` was missing or was not bearer.
+    InvalidMethod,
+    /// SubjectConfirmationData omitted `NotOnOrAfter`.
+    MissingNotOnOrAfter,
+    /// SubjectConfirmationData `NotOnOrAfter` time bounds were not satisfied.
+    TimeWindowInvalid,
+    /// SubjectConfirmationData `Recipient` did not match the ACS URL.
+    RecipientMismatch,
+    /// SubjectConfirmationData `InResponseTo` did not match the request ID.
+    InResponseToMismatch,
+    /// No bearer SubjectConfirmation satisfied the validation requirements.
+    MissingBearerConfirmation,
+}
+
+impl fmt::Display for SubjectConfirmationReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidMethod => f.write_str("method"),
+            Self::MissingNotOnOrAfter => f.write_str("missing NotOnOrAfter"),
+            Self::TimeWindowInvalid => f.write_str("time window"),
+            Self::RecipientMismatch => f.write_str("recipient"),
+            Self::InResponseToMismatch => f.write_str("InResponseTo"),
+            Self::MissingBearerConfirmation => f.write_str("missing bearer confirmation"),
+        }
+    }
+}
+
+/// SAML time-bound field whose validation failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TimeWindowField {
+    /// Assertion session `SessionNotOnOrAfter`.
+    SessionNotOnOrAfter,
+    /// Assertion `Conditions` NotBefore/NotOnOrAfter window.
+    Conditions,
+}
+
+impl fmt::Display for TimeWindowField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SessionNotOnOrAfter => f.write_str("SessionNotOnOrAfter"),
+            Self::Conditions => f.write_str("Conditions"),
+        }
+    }
+}
 
 /// Errors produced by the SAML-RS library.
 ///
@@ -98,19 +199,13 @@ pub enum SamlError {
     #[error("SAML time window is invalid for {field}")]
     TimeWindowInvalid {
         /// SAML field or validation scope whose time window failed.
-        field: &'static str,
+        field: TimeWindowField,
     },
     /// Bearer subject confirmation requirements are not satisfied.
     #[error("subject confirmation is not satisfied: {reason}")]
     SubjectConfirmationInvalid {
         /// Stable validation reason for callers and logs.
-        reason: &'static str,
-    },
-    /// A duplicate SAML message or assertion key was detected.
-    #[error("replayed SAML message or assertion: {key}")]
-    ReplayDetected {
-        /// Replay cache key or duplicate identifier.
-        key: String,
+        reason: SubjectConfirmationReason,
     },
 
     // Signature / crypto validation.
@@ -127,13 +222,13 @@ pub enum SamlError {
     #[error("signature verification failed: {reason}")]
     SignatureVerification {
         /// Stable verification reason for callers and logs.
-        reason: &'static str,
+        reason: SignatureVerificationReason,
     },
     /// Signed reference could not be resolved safely.
     #[error("signed reference could not be resolved: {reason}")]
     ReferenceResolution {
         /// Stable reference-resolution reason for callers and logs.
-        reason: &'static str,
+        reason: ReferenceResolutionReason,
     },
     /// Verified signed reference does not cover the consumed payload.
     #[error("signed reference does not cover consumed payload")]
@@ -147,23 +242,26 @@ pub enum SamlError {
     #[error("certificate mismatch")]
     CertificateMismatch,
 
-    // Legacy compatibility variants kept while callers migrate.
-    /// Issuer in the message does not match the one declared in metadata.
+    // Legacy compatibility and lower-level operational variants.
+    /// Compatibility variant for issuer validation; prefer [`Self::IssuerMismatch`].
     #[error("ERR_UNMATCH_ISSUER")]
     UnmatchIssuer,
-    /// `<Audience>` does not include this Service Provider's entity ID.
+    /// Compatibility variant for audience validation; prefer [`Self::AudienceMismatch`].
     #[error("ERR_UNMATCH_AUDIENCE")]
     UnmatchAudience,
-    /// Response `Destination` does not match this Service Provider's ACS URL.
+    /// Compatibility variant for destination validation; prefer [`Self::DestinationMismatch`].
     #[error("ERR_UNMATCH_DESTINATION")]
     UnmatchDestination,
-    /// `InResponseTo` does not match the originating request ID.
+    /// Caller supplied a malformed request ID for response correlation.
+    ///
+    /// Prefer [`Self::InResponseToMismatch`] when a message value fails request
+    /// correlation.
     #[error("ERR_INVALID_IN_RESPONSE_TO")]
     InvalidInResponseTo,
-    /// Response carried an undefined `<StatusCode>`.
+    /// Response status code is missing, empty, or could not be extracted.
     #[error("ERR_UNDEFINED_STATUS")]
     UndefinedStatus,
-    /// Response carried a non-success status (two-tier code).
+    /// Compatibility variant for non-success status; prefer [`Self::StatusNotSuccess`].
     #[error("ERR_FAILED_STATUS with top tier code: {top}, second tier code: {second}")]
     FailedStatus {
         /// Top-tier status code.
@@ -171,28 +269,31 @@ pub enum SamlError {
         /// Second-tier status code (empty when absent).
         second: String,
     },
-    /// `SessionNotOnOrAfter` has elapsed.
+    /// Compatibility variant for elapsed session bounds; prefer [`Self::TimeWindowInvalid`].
     #[error("ERR_EXPIRED_SESSION")]
     ExpiredSession,
-    /// Assertion `<Conditions>` time window is invalid.
+    /// Compatibility variant for subject confirmation failures; prefer
+    /// [`Self::SubjectConfirmationInvalid`].
     #[error("ERR_SUBJECT_UNCONFIRMED")]
     SubjectUnconfirmed,
     /// A signature-wrapping (XSW) attempt was detected.
     #[error("ERR_POTENTIAL_WRAPPING_ATTACK")]
     PotentialWrappingAttack,
-    /// Signed redirect/simpleSign message is missing `Signature`/`SigAlg`.
+    /// Compatibility variant for missing binding signature parameters; prefer
+    /// [`Self::SignatureMissing`] or [`Self::MissingBindingParameter`].
     #[error("ERR_MISSING_SIG_ALG")]
     MissingSigAlg,
-    /// Detached (redirect/simpleSign) message signature failed verification.
+    /// Compatibility variant for detached signature failures; prefer
+    /// [`Self::SignatureVerification`].
     #[error("ERR_FAILED_MESSAGE_SIGNATURE_VERIFICATION")]
     FailedMessageSignatureVerification,
-    /// XML-DSig signature failed verification.
+    /// Compatibility variant for XML-DSig failures; prefer [`Self::SignatureVerification`].
     #[error("FAILED_TO_VERIFY_SIGNATURE")]
     FailedToVerifySignature,
-    /// Certificate in the message does not match the metadata declaration.
+    /// Compatibility variant for certificate mismatch; prefer [`Self::CertificateMismatch`].
     #[error("ERROR_UNMATCH_CERTIFICATE_DECLARATION_IN_METADATA")]
     UnmatchCertificate,
-    /// Requested protocol binding is not supported.
+    /// Compatibility variant for unsupported bindings; prefer [`Self::UnsupportedBinding`].
     #[error("ERR_UNDEFINED_BINDING")]
     UndefinedBinding,
     /// Required metadata (endpoint/certificate) was missing.

@@ -11,12 +11,14 @@ use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_encode};
 use saml_rs::constants::signature_algorithm::RSA_SHA256;
 use saml_rs::constants::Binding;
 use saml_rs::entity::{iso8601_offset, BindingContext, EntitySetting, User};
+use saml_rs::error::SignatureVerificationReason;
 use saml_rs::flow::{FlowResult, HttpRequest};
 use saml_rs::idp::LoginResponseOptions;
 use saml_rs::logout::{
     create_logout_request, create_logout_response, parse_logout_request, parse_logout_response,
 };
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
+use saml_rs::sp::LoginRequestOptions;
 use saml_rs::template::{replace_tags_by_value, LoginResponseAttribute, LoginResponseTemplate};
 use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
@@ -258,7 +260,7 @@ fn assert_failed_message_signature(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match result {
         Err(SamlError::SignatureVerification {
-            reason: "detached message signature",
+            reason: SignatureVerificationReason::DetachedMessageSignature,
         }) => Ok(()),
         other => {
             Err(format!("expected detached signature verification failure, got {other:?}").into())
@@ -406,6 +408,37 @@ fn flow_conformance_simplesign_signature_rejects_mismatched_consumed_request(
     detached_signature_rejects_mismatched_login_request(Binding::SimpleSign)
 }
 
+#[test]
+fn flow_conformance_redirect_signature_rejects_mismatched_relay_state(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = ServiceProvider::from_config(&sp_config(true, false, false), signing())?;
+    let idp = idp(true);
+    let ctx = sp.create_login_request_with_options(
+        &idp,
+        Binding::Redirect,
+        &LoginRequestOptions {
+            relay_state: Some("relay-expected"),
+            ..Default::default()
+        },
+    )?;
+    let mut request = redirect_request(&ctx.context)?;
+    let (_, relay_state) = request
+        .query
+        .iter_mut()
+        .find(|(key, _)| key == "RelayState")
+        .ok_or("missing RelayState")?;
+    *relay_state = "relay-actual".to_string();
+
+    match idp.parse_login_request(&sp, Binding::Redirect, &request) {
+        Err(SamlError::RelayStateMismatch { expected, actual }) => {
+            assert_eq!(expected.as_deref(), Some("relay-expected"));
+            assert_eq!(actual.as_deref(), Some("relay-actual"));
+            Ok(())
+        }
+        other => Err(format!("expected RelayStateMismatch, got {other:?}").into()),
+    }
+}
+
 // ----- create login request signed with PKCS#8 keys (8,9) -----
 
 fn signed_request_with_key(
@@ -444,12 +477,15 @@ fn flow_conformance_login_request_redirect_signed_encrypted_pkcs8(
 // ----- create login response (12-15) -----
 
 #[test]
-fn flow_conformance_login_response_undefined_binding() {
+fn flow_conformance_login_response_undefined_binding() -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(true, false);
-    assert!(idp
-        .create_login_response(&sp, Binding::Artifact, &User::new("a@e.com"), &opts("_r"))
-        .is_err());
+    match idp.create_login_response(&sp, Binding::Artifact, &User::new("a@e.com"), &opts("_r")) {
+        Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        }) => Ok(()),
+        other => Err(format!("expected UnsupportedBinding(Artifact), got {other:?}").into()),
+    }
 }
 
 fn create_login_response(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
@@ -561,10 +597,10 @@ fn flow_conformance_logout_request_one_binding() -> Result<(), Box<dyn std::erro
 // ----- create logout response (19-21) -----
 
 #[test]
-fn flow_conformance_logout_response_undefined_binding() {
+fn flow_conformance_logout_response_undefined_binding() -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(false, false);
-    assert!(create_logout_response(
+    match create_logout_response(
         &idp.setting,
         &idp.metadata,
         &sp.metadata,
@@ -572,8 +608,12 @@ fn flow_conformance_logout_response_undefined_binding() {
         Some("_r"),
         None,
         false,
-    )
-    .is_err());
+    ) {
+        Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        }) => Ok(()),
+        other => Err(format!("expected UnsupportedBinding(Artifact), got {other:?}").into()),
+    }
 }
 
 fn logout_response(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {

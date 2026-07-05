@@ -6,7 +6,9 @@ use crate::binding::{
 };
 use crate::constants::{Binding, ParserType};
 use crate::context::is_valid_xml_with_limits;
-use crate::error::SamlError;
+#[cfg(feature = "crypto-bergshamra")]
+use crate::error::SignatureVerificationReason;
+use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
 #[cfg(feature = "crypto-bergshamra")]
 use crate::model::RelayStateParam;
 use crate::util::Value;
@@ -211,7 +213,7 @@ fn decoded_octet_params(octet: &str) -> Vec<(String, String)> {
 #[cfg(feature = "crypto-bergshamra")]
 fn detached_signature_verification() -> SamlError {
     SamlError::SignatureVerification {
-        reason: "detached message signature",
+        reason: SignatureVerificationReason::DetachedMessageSignature,
     }
 }
 
@@ -225,7 +227,7 @@ fn detached_relay_state_mismatch(expected: Option<&str>, actual: Option<&str>) -
     match (relay_state_param(expected), relay_state_param(actual)) {
         (Some(expected), Some(actual)) => SamlError::RelayStateMismatch { expected, actual },
         _ => SamlError::SignatureVerification {
-            reason: "relay state correlation",
+            reason: SignatureVerificationReason::RelayStateCorrelation,
         },
     }
 }
@@ -327,6 +329,17 @@ fn ensure_detached_octet_matches_consumed_fields(
     }
 }
 
+#[cfg(feature = "crypto-bergshamra")]
+fn required_xml_signature_failed(signature_present: bool) -> SamlError {
+    if signature_present {
+        SamlError::SignatureVerification {
+            reason: SignatureVerificationReason::XmlSignature,
+        }
+    } else {
+        SamlError::SignatureMissing
+    }
+}
+
 /// Verify and optionally decrypt the message, returning the authenticated
 /// `(saml_content, assertion)`. Requires `crypto-bergshamra`.
 #[cfg(feature = "crypto-bergshamra")]
@@ -339,9 +352,11 @@ fn verify_and_prepare(
         decrypt_assertion_with_limits,
         enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
         keys::load_private_key,
+        verify::has_xml_signature_with_limits,
         verify_signature_with_limits,
     };
 
+    let signature_present = has_xml_signature_with_limits(xml, opts.xml_limits)?;
     let (verified, verified_node) =
         verify_signature_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
     let decrypt_required = opts.decrypt_key.is_some();
@@ -371,14 +386,13 @@ fn verify_and_prepare(
         // encrypted-then-signed: decrypt first, then verify the result.
         let (content, _) =
             decrypt_assertion_with_limits(xml, &load_key()?, decrypt_options, opts.xml_limits)?;
+        let signature_present = has_xml_signature_with_limits(&content, opts.xml_limits)?;
         let (re_verified, re_node) =
             verify_signature_with_limits(&content, opts.signing_certs, opts.xml_limits)?;
         return if re_verified {
             Ok((content, re_node))
         } else {
-            Err(SamlError::SignatureVerification {
-                reason: "xml signature",
-            })
+            Err(required_xml_signature_failed(signature_present))
         };
     }
     if verified {
@@ -391,9 +405,7 @@ fn verify_and_prepare(
         }
         return Ok((xml.to_string(), verified_node));
     }
-    Err(SamlError::SignatureVerification {
-        reason: "xml signature",
-    })
+    Err(required_xml_signature_failed(signature_present))
 }
 
 #[cfg(not(feature = "crypto-bergshamra"))]
@@ -479,7 +491,7 @@ fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SubjectConfirmationCheck {
     Valid,
-    Invalid(&'static str),
+    Invalid(SubjectConfirmationReason),
 }
 
 fn check_bearer_subject_confirmation(
@@ -498,25 +510,35 @@ fn check_bearer_subject_confirmation(
     let extracted = extract_with_limits(xml, &fields, opts.xml_limits)?;
 
     if extracted.get_str("subjectConfirmation") != Some(BEARER_SUBJECT_CONFIRMATION_METHOD) {
-        return Ok(SubjectConfirmationCheck::Invalid("method"));
+        return Ok(SubjectConfirmationCheck::Invalid(
+            SubjectConfirmationReason::InvalidMethod,
+        ));
     }
 
     let Some(not_on_or_after) = extracted.get_str("subjectConfirmationData.notOnOrAfter") else {
-        return Ok(SubjectConfirmationCheck::Invalid("missing notOnOrAfter"));
+        return Ok(SubjectConfirmationCheck::Invalid(
+            SubjectConfirmationReason::MissingNotOnOrAfter,
+        ));
     };
     if !verify_time(None, Some(not_on_or_after), opts.clock_drifts) {
-        return Ok(SubjectConfirmationCheck::Invalid("time window"));
+        return Ok(SubjectConfirmationCheck::Invalid(
+            SubjectConfirmationReason::TimeWindowInvalid,
+        ));
     }
 
     if let Some(expected) = expected_recipient {
         if extracted.get_str("subjectConfirmationData.recipient") != Some(expected) {
-            return Ok(SubjectConfirmationCheck::Invalid("recipient"));
+            return Ok(SubjectConfirmationCheck::Invalid(
+                SubjectConfirmationReason::RecipientMismatch,
+            ));
         }
     }
 
     if let Some(expected) = opts.expected_in_response_to {
         if extracted.get_str("subjectConfirmationData.inResponseTo") != Some(expected) {
-            return Ok(SubjectConfirmationCheck::Invalid("inResponseTo"));
+            return Ok(SubjectConfirmationCheck::Invalid(
+                SubjectConfirmationReason::InResponseToMismatch,
+            ));
         }
     }
 
@@ -536,7 +558,7 @@ fn validate_subject_confirmation(
         }
     }
     Err(SamlError::SubjectConfirmationInvalid {
-        reason: reason.unwrap_or("missing bearer confirmation"),
+        reason: reason.unwrap_or(SubjectConfirmationReason::MissingBearerConfirmation),
     })
 }
 
@@ -602,7 +624,7 @@ fn validate_context(
         {
             if !verify_time(None, Some(session_not_on_or_after), opts.clock_drifts) {
                 return Err(SamlError::TimeWindowInvalid {
-                    field: "SessionNotOnOrAfter",
+                    field: TimeWindowField::SessionNotOnOrAfter,
                 });
             }
         }
@@ -611,7 +633,7 @@ fn validate_context(
             let not_on_or_after = conditions.get_str("notOnOrAfter");
             if !verify_time(not_before, not_on_or_after, opts.clock_drifts) {
                 return Err(SamlError::TimeWindowInvalid {
-                    field: "Conditions",
+                    field: TimeWindowField::Conditions,
                 });
             }
         }
