@@ -54,18 +54,15 @@ Rust-only and delegates XML crypto to a Rust crate.
 | Crypto | XML-DSig sign/verify, XML-Enc encrypt/decrypt, detached message signatures, metadata key pinning |
 | Extraction | `quick-xml` DOM plus local-name field extraction |
 
-### Current Scope
+### Unsupported SAML profiles
 
-`saml-rs` currently focuses on browser-facing SAML 2.0 SSO/SLO flows. It does
-not yet implement every SAML profile or binding defined by OASIS. In
-particular, HTTP-Artifact resolution, SOAP bindings, Enhanced Client or Proxy
-(ECP/PAOS), assertion query/request protocols, authorization decision queries,
-NameID management, and advanced federation profiles are out of scope for the
-current release line.
-
-If your deployment needs one of these profiles, please open an issue with the
-target IdP/SP, binding, profile, and interoperability requirements so we can
-evaluate the implementation scope.
+The high-level `Saml` API currently focuses on browser Web SSO, metadata-driven
+SP/IdP setup, XML signature/encryption through `bergshamra`, and Single Logout.
+It does not yet implement Artifact resolution, SOAP/back-channel profiles,
+ECP/PAOS, SAML query protocols, NameID management, or metadata federation. If
+you need one of those profiles for a real interoperability target, please open
+an issue with the profile, binding, IdP/SP product, and a minimal expected flow
+so we can consider the implementation.
 
 ## Quick Start
 
@@ -83,6 +80,10 @@ cargo run -p saml-rs --example sso
 ```
 
 Source: [`examples/sso.rs`](examples/sso.rs).
+
+The repository also includes a typed Single Logout walkthrough in
+[`examples/slo.rs`](examples/slo.rs) and a low-level compatibility walkthrough
+in [`examples/raw_compat.rs`](examples/raw_compat.rs).
 
 ### Service Provider - start SSO
 
