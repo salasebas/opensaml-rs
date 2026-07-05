@@ -361,11 +361,7 @@ mod crypto {
         result: Result<(bool, Option<String>), SamlError>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match result {
-            Err(SamlError::Crypto(message))
-                if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
-            {
-                Ok(())
-            }
+            Err(SamlError::SignedReferenceMismatch) => Ok(()),
             other => {
                 Err(format!("expected uncovered signed content rejection, got {other:?}").into())
             }

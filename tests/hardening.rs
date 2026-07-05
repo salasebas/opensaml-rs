@@ -219,7 +219,7 @@ fn audience_mismatch_rejected() {
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp1))]);
     assert!(matches!(
         sp2.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(SamlError::UnmatchAudience)
+        Err(SamlError::AudienceMismatch { .. })
     ));
 }
 
@@ -249,7 +249,7 @@ fn in_response_to_mismatch_rejected() {
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp))]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_wrong"),
-        Err(SamlError::InvalidInResponseTo)
+        Err(SamlError::InResponseToMismatch { .. })
     ));
 }
 
@@ -259,7 +259,7 @@ fn default_login_response_rejects_non_empty_in_response_to() {
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp))]);
     assert!(matches!(
         sp.parse_login_response(&idp(), Binding::Post, &req),
-        Err(SamlError::InvalidInResponseTo)
+        Err(SamlError::InResponseToMismatch { .. })
     ));
 }
 
@@ -301,7 +301,7 @@ fn unsolicited_response_rejects_subject_confirmation_in_response_to(
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_unsolicited_login_response(&idp(), Binding::Post, &req),
-        Err(SamlError::InvalidInResponseTo)
+        Err(SamlError::InResponseToMismatch { .. })
     ));
     Ok(())
 }
@@ -322,7 +322,7 @@ fn subject_confirmation_method_must_be_bearer() -> Result<(), Box<dyn std::error
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(SamlError::SubjectUnconfirmed)
+        Err(SamlError::SubjectConfirmationInvalid { .. })
     ));
     Ok(())
 }
@@ -343,7 +343,7 @@ fn subject_confirmation_data_expiry_is_enforced() -> Result<(), Box<dyn std::err
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(SamlError::SubjectUnconfirmed)
+        Err(SamlError::SubjectConfirmationInvalid { .. })
     ));
     Ok(())
 }
@@ -364,7 +364,7 @@ fn subject_confirmation_recipient_must_match_acs() -> Result<(), Box<dyn std::er
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(SamlError::SubjectUnconfirmed)
+        Err(SamlError::SubjectConfirmationInvalid { .. })
     ));
     Ok(())
 }
@@ -376,7 +376,7 @@ fn response_destination_must_match_acs_when_present() -> Result<(), Box<dyn std:
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(SamlError::UnmatchDestination)
+        Err(SamlError::DestinationMismatch { .. })
     ));
     Ok(())
 }
@@ -407,7 +407,7 @@ fn subject_confirmation_request_id_must_match() -> Result<(), Box<dyn std::error
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
     assert!(matches!(
         sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
-        Err(SamlError::SubjectUnconfirmed)
+        Err(SamlError::SubjectConfirmationInvalid { .. })
     ));
     Ok(())
 }
@@ -521,11 +521,7 @@ fn metadata_signature_requires_root_coverage() -> Result<(), Box<dyn std::error:
         Some("https://evil.example.com/metadata")
     );
     match verify_metadata_signature(&wrapped_metadata, &[CERT.to_string()]) {
-        Err(SamlError::Crypto(message))
-            if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
-        {
-            Ok(())
-        }
+        Err(SamlError::SignedReferenceMismatch) => Ok(()),
         other => Err(format!(
             "metadata verification must reject signatures that do not cover the consumed root: {other:?}"
         )

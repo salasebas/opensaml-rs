@@ -83,7 +83,7 @@ fn authn_request_signed_over_issuer() -> Result<String, Box<dyn std::error::Erro
 
 /// The legitimately signed Response must verify and yield the real assertion.
 #[test]
-fn baseline_signed_response_verifies() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_baseline_signed_response_verifies() -> Result<(), Box<dyn std::error::Error>> {
     let (verified, content) = verify_signature(&signed_response(), &[CERT.to_string()])?;
     assert!(verified);
     assert!(content.unwrap_or_default().contains("Assertion"));
@@ -91,12 +91,11 @@ fn baseline_signed_response_verifies() -> Result<(), Box<dyn std::error::Error>>
 }
 
 #[test]
-fn authn_request_reference_must_cover_consumed_root() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_authn_request_reference_must_cover_consumed_root() -> Result<(), Box<dyn std::error::Error>>
+{
     let signed = authn_request_signed_over_issuer()?;
     match verify_signature(&signed, &[CERT.to_string()]) {
-        Err(SamlError::Crypto(message))
-            if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
-        {
+        Err(SamlError::SignedReferenceMismatch) => {
             // Expected rejection.
         }
         Ok((true, content)) => {
@@ -118,11 +117,7 @@ fn authn_request_reference_must_cover_consumed_root() -> Result<(), Box<dyn std:
     options.from_issuer = Some("https://sp.example.com/metadata");
     options.signing_certs = &certs;
     match flow(&options, &request) {
-        Err(SamlError::Crypto(message))
-            if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
-        {
-            Ok(())
-        }
+        Err(SamlError::SignedReferenceMismatch) => Ok(()),
         Ok(result) => Err(format!(
             "flow must not consume attacker AuthnRequest ACS: {:?}",
             result
@@ -135,15 +130,11 @@ fn authn_request_reference_must_cover_consumed_root() -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn reference_must_cover_returned_assertion() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_reference_must_cover_returned_assertion() -> Result<(), Box<dyn std::error::Error>> {
     let signed = response_signed_over_top_level_issuer()?;
     match verify_signature(&signed, &[CERT.to_string()]) {
         Err(SamlError::PotentialWrappingAttack) => Ok(()),
-        Err(SamlError::Crypto(message))
-            if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
-        {
-            Ok(())
-        }
+        Err(SamlError::SignedReferenceMismatch) => Ok(()),
         Ok((true, content)) => Err(format!(
             "issuer-only signature must not verify assertion content: {content:?}"
         )
@@ -154,7 +145,7 @@ fn reference_must_cover_returned_assertion() -> Result<(), Box<dyn std::error::E
 
 /// Assertion/Signature smuggled under `SubjectConfirmationData` is rejected.
 #[test]
-fn subjectconfirmation_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_subjectconfirmation_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
     match verify_signature(ATTACK, &[CERT.to_string()]) {
         Err(SamlError::PotentialWrappingAttack) => Ok(()),
         Ok((false, _)) => Ok(()),
@@ -168,7 +159,7 @@ fn subjectconfirmation_wrapping_rejected() -> Result<(), Box<dyn std::error::Err
 
 /// A forged sibling assertion prepended before the signed one is never trusted.
 #[test]
-fn sibling_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_sibling_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Error>> {
     let signed = signed_response();
     let pos = signed.find("<saml:Assertion").ok_or("no assertion")?;
     let wrapped = format!("{}{}{}", &signed[..pos], FORGED, &signed[pos..]);
@@ -184,7 +175,7 @@ fn sibling_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[test]
-fn duplicate_id_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_duplicate_id_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let signed = signed_response();
     let duplicate = FORGED.replace(
         "ID=\"_forged\"",
@@ -205,7 +196,7 @@ fn duplicate_id_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
 
 /// A forged sibling assertion appended after the signed one is never trusted.
 #[test]
-fn trailing_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_trailing_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Error>> {
     let signed = signed_response();
     let pos = signed
         .rfind("</samlp:Response>")
@@ -224,7 +215,7 @@ fn trailing_forged_assertion_not_trusted() -> Result<(), Box<dyn std::error::Err
 
 /// Tampering with signed content invalidates the signature.
 #[test]
-fn tampered_signed_content_rejected() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_tampered_signed_content_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let signed = signed_response();
     let tampered = signed.replacen(
         "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7",
@@ -237,7 +228,7 @@ fn tampered_signed_content_rejected() -> Result<(), Box<dyn std::error::Error>> 
 
 /// An XML comment inside a value must not truncate it (comment-splice resistance).
 #[test]
-fn comment_splice_reads_full_value() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_comment_splice_reads_full_value() -> Result<(), Box<dyn std::error::Error>> {
     let xml = "<saml:Assertion xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\"><saml:Subject><saml:NameID>user<!---->@victim.com</saml:NameID></saml:Subject></saml:Assertion>";
     let r = extract(
         xml,
@@ -252,7 +243,7 @@ fn comment_splice_reads_full_value() -> Result<(), Box<dyn std::error::Error>> {
 
 /// An unsigned response is never trusted.
 #[test]
-fn unsigned_response_not_trusted() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_unsigned_response_not_trusted() -> Result<(), Box<dyn std::error::Error>> {
     let (verified, content) = verify_signature(RESPONSE, &[CERT.to_string()])?;
     assert!(!verified);
     assert!(content.is_none());

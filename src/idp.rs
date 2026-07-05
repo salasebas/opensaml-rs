@@ -277,7 +277,9 @@ impl IdentityProvider {
                     Some(sig_alg.clone()),
                 ))
             }
-            Binding::Artifact => Err(SamlError::UndefinedBinding),
+            Binding::Artifact => Err(SamlError::UnsupportedBinding {
+                binding: Binding::Artifact,
+            }),
         }
     }
 
@@ -506,7 +508,7 @@ mod tests {
 
         let result = idp.parse_login_request(&expected_sp, Binding::Post, &request);
 
-        assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
+        assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
         Ok(())
     }
 }
@@ -716,7 +718,7 @@ mod crypto_tests {
 
         let result = idp.parse_login_request(&expected_sp, Binding::Post, &request);
 
-        assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
+        assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
         Ok(())
     }
 }

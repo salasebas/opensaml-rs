@@ -133,7 +133,10 @@ fn reject_unsolicited_request_bound_bearer_confirmations(
             .get_str("subjectConfirmationData")
             .is_some_and(|actual| !actual.is_empty());
         if is_bearer && is_request_bound {
-            return Err(SamlError::InvalidInResponseTo);
+            return Err(SamlError::in_response_to_mismatch(
+                None,
+                confirmation.get_str("subjectConfirmationData"),
+            ));
         }
     }
     Ok(())
@@ -294,7 +297,11 @@ impl ServiceProvider {
                 relay_state.as_deref(),
             )?,
             Binding::Post | Binding::SimpleSign => base64_encode(xml.as_bytes()),
-            Binding::Artifact => return Err(SamlError::UndefinedBinding),
+            Binding::Artifact => {
+                return Err(SamlError::UnsupportedBinding {
+                    binding: Binding::Artifact,
+                });
+            }
         };
         Ok(BindingContext {
             id,
@@ -372,7 +379,11 @@ impl ServiceProvider {
                     Some(sig_alg.clone()),
                 )
             }
-            Binding::Artifact => return Err(SamlError::UndefinedBinding),
+            Binding::Artifact => {
+                return Err(SamlError::UnsupportedBinding {
+                    binding: Binding::Artifact,
+                });
+            }
         };
         Ok(BindingContext {
             id,
@@ -503,7 +514,10 @@ impl ServiceProvider {
                 .get_str("response.inResponseTo")
                 .is_some_and(|actual| !actual.is_empty())
         {
-            return Err(SamlError::InvalidInResponseTo);
+            return Err(SamlError::in_response_to_mismatch(
+                None,
+                result.extract.get_str("response.inResponseTo"),
+            ));
         }
         if matches!(correlation, LoginResponseCorrelation::Unsolicited) {
             reject_unsolicited_request_bound_bearer_confirmations(

@@ -119,7 +119,9 @@ fn sign_logout(
     };
 
     if matches!(binding, Binding::Artifact) {
-        return Err(SamlError::UndefinedBinding);
+        return Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        });
     }
 
     let sig_alg = &setting.request_signature_algorithm;
@@ -164,7 +166,9 @@ fn sign_logout(
                 Some(sig_alg.clone()),
             ))
         }
-        Binding::Artifact => Err(SamlError::UndefinedBinding),
+        Binding::Artifact => Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        }),
     }
 }
 
@@ -192,7 +196,9 @@ fn unsigned_context(
     match binding {
         Binding::Redirect => build_redirect_url(destination, parser_type, xml, relay),
         Binding::Post | Binding::SimpleSign => Ok(base64_encode(xml.as_bytes())),
-        Binding::Artifact => Err(SamlError::UndefinedBinding),
+        Binding::Artifact => Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        }),
     }
 }
 
@@ -622,7 +628,7 @@ mod tests {
         let result =
             parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
 
-        assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
+        assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
         Ok(())
     }
 
@@ -679,7 +685,7 @@ mod tests {
             let result =
                 parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
 
-            assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
+            assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
             Ok(())
         }
     }
@@ -756,7 +762,7 @@ mod tests {
                 &request,
                 "_other"
             ),
-            Err(SamlError::InvalidInResponseTo)
+            Err(SamlError::InResponseToMismatch { .. })
         ));
         Ok(())
     }
@@ -780,7 +786,12 @@ mod tests {
             parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, "_req1");
 
         #[cfg(feature = "crypto-bergshamra")]
-        assert!(matches!(result, Err(SamlError::FailedToVerifySignature)));
+        assert!(matches!(
+            result,
+            Err(SamlError::SignatureVerification {
+                reason: "xml signature"
+            })
+        ));
 
         #[cfg(not(feature = "crypto-bergshamra"))]
         assert!(matches!(result, Err(SamlError::Unsupported(_))));
