@@ -90,6 +90,7 @@ jobs:
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
       - run: cargo nextest run -p ${{ matrix.package }}
       - run: cargo test -p ${{ matrix.package }} --doc
+      - run: cargo run -p ${{ matrix.package }} --example sso
 
   ci:
     name: CI

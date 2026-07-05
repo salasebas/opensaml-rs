@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 
-use saml_rs::binding::base64_decode;
+use saml_rs::binding::{base64_decode, deflate_raw_decode};
 use saml_rs::error::TimeWindowField;
+use saml_rs::raw::Binding;
 use saml_rs::{
     AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, FormField,
     IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId, NameIdFormat,
@@ -20,6 +21,29 @@ const SP_ACS_POST: &str = "https://sp.example.com/acs/post";
 const SP_ACS_SIMPLESIGN: &str = "https://sp.example.com/acs/simple-sign";
 const IDP_SSO_POST: &str = "https://idp.example.com/sso/post";
 const IDP_SSO_REDIRECT: &str = "https://idp.example.com/sso/redirect";
+const IDP_SSO_SIMPLESIGN: &str = "https://idp.example.com/sso/simple-sign";
+
+const HOSTILE_SP_ENTITY_ID: &str = concat!(
+    "https://sp.example.com/metadata",
+    "</saml:Issuer>",
+    "<evil:Injected>issuer</evil:Injected>",
+    "<saml:Issuer>"
+);
+const HOSTILE_IDP_SSO_DESTINATION: &str = concat!(
+    "https://idp.example.com/sso?",
+    "continue=%3Cevil:Injected%3Edestination%3C%2Fevil:Injected%3E",
+    "&quote=%22"
+);
+const HOSTILE_ACS_URL: &str = concat!(
+    "https://sp.example.com/acs?",
+    "continue=%3Cevil:Injected%3Eacs%3C%2Fevil:Injected%3E",
+    "&quote=%22"
+);
+const HOSTILE_NAME_ID_FORMAT: &str = concat!(
+    "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress\"/>",
+    "<evil:Injected>nameid</evil:Injected>",
+    "<samlp:NameIDPolicy Format=\""
+);
 
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
@@ -65,6 +89,26 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
     IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
         .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
         .sso_endpoint(SsoEndpoint::redirect(IDP_SSO_REDIRECT)?)
+        .sso_endpoint(SsoEndpoint::simple_sign(IDP_SSO_SIMPLESIGN)?)
+        .credentials(credentials())
+        .validation(IdpValidationPolicy::strict())
+        .build()
+}
+
+fn hostile_sp_config() -> Result<SpConfig, SamlError> {
+    SpConfig::builder(EntityId::try_new(HOSTILE_SP_ENTITY_ID)?)
+        .acs_endpoint(AcsEndpoint::post(HOSTILE_ACS_URL)?.mark_default())
+        .credentials(credentials())
+        .validation(SpValidationPolicy::strict())
+        .name_id_format(NameIdFormat::Custom(HOSTILE_NAME_ID_FORMAT.to_string()))
+        .build()
+}
+
+fn hostile_idp_config() -> Result<IdpConfig, SamlError> {
+    IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+        .sso_endpoint(SsoEndpoint::post(HOSTILE_IDP_SSO_DESTINATION)?)
+        .sso_endpoint(SsoEndpoint::redirect(HOSTILE_IDP_SSO_DESTINATION)?)
+        .sso_endpoint(SsoEndpoint::simple_sign(HOSTILE_IDP_SSO_DESTINATION)?)
         .credentials(credentials())
         .validation(IdpValidationPolicy::strict())
         .build()
@@ -72,6 +116,13 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
 
 fn facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
     Ok((Saml::sp(sp_config()?)?, Saml::idp(idp_config()?)?))
+}
+
+fn hostile_facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
+    Ok((
+        Saml::sp(hostile_sp_config()?)?,
+        Saml::idp(hostile_idp_config()?)?,
+    ))
 }
 
 fn descriptors(
@@ -115,6 +166,45 @@ fn form_value<'a>(fields: &'a [FormField], name: &str) -> Option<&'a str> {
         .iter()
         .find(|field| field.name() == name)
         .map(FormField::value)
+}
+
+fn authn_request_xml(
+    outbound: &Outbound<AuthnRequest>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match outbound.raw_context().binding {
+        Binding::Redirect => {
+            let url = url::Url::parse(outbound.redirect_url()?)?;
+            let (_, encoded) = url
+                .query_pairs()
+                .find(|(key, _)| key == "SAMLRequest")
+                .ok_or("missing SAMLRequest")?;
+            Ok(String::from_utf8(deflate_raw_decode(&base64_decode(
+                encoded.as_ref(),
+            )?)?)?)
+        }
+        Binding::Post | Binding::SimpleSign => {
+            Ok(String::from_utf8(base64_decode(&outbound.raw_context().context)?)?)
+        }
+        Binding::Artifact => Err("artifact binding is unsupported".into()),
+    }
+}
+
+fn authn_request_input(
+    outbound: &Outbound<AuthnRequest>,
+) -> Result<BrowserInput<AuthnRequest>, Box<dyn std::error::Error>> {
+    match outbound.raw_context().binding {
+        Binding::Redirect => {
+            let url = url::Url::parse(outbound.redirect_url()?)?;
+            Ok(BrowserInput::<AuthnRequest>::redirect(
+                url.query().unwrap_or_default(),
+            ))
+        }
+        Binding::Post => Ok(BrowserInput::<AuthnRequest>::post(post_fields(outbound)?)),
+        Binding::SimpleSign => Ok(BrowserInput::<AuthnRequest>::simple_sign(post_fields(
+            outbound,
+        )?)),
+        Binding::Artifact => Err("artifact binding is unsupported".into()),
+    }
 }
 
 struct SsoExchange {
@@ -162,6 +252,121 @@ fn start_receive_respond() -> Result<SsoExchange, SamlError> {
         StartSso::post().relay_state(relay_state.clone()),
         RespondSso::post().relay_state(relay_state),
     )
+}
+
+#[test]
+fn typed_builder_authn_request_escapes_hostile_values_for_all_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = hostile_facades()?;
+    let sp_descriptor = SpDescriptor::from_metadata_xml_for(
+        EntityId::try_new(HOSTILE_SP_ENTITY_ID)?,
+        sp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new(IDP_ENTITY_ID)?,
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+
+    for start in [
+        StartSso::redirect(),
+        StartSso::post(),
+        StartSso::simple_sign(),
+    ] {
+        let relay_state = RelayStateParam::try_from_option(Some("typed-state".to_string()))?;
+        let started = sp.start_sso(
+            &idp_descriptor,
+            start.force_authn(true).relay_state(relay_state),
+        )?;
+        let xml = authn_request_xml(&started.outbound)?;
+
+        assert_eq!(xml.matches("<samlp:AuthnRequest").count(), 1);
+        assert_eq!(xml.matches("<saml:Issuer").count(), 1);
+        assert!(!xml.contains("<evil:Injected"));
+        assert!(!xml.contains("</evil:Injected"));
+        assert!(xml.contains("ForceAuthn=\"true\""));
+        assert!(xml.contains("issuer&lt;/evil:Injected"));
+        assert!(xml.contains(
+            "Destination=\"https://idp.example.com/sso?continue=%3Cevil:Injected%3Edestination%3C%2Fevil:Injected%3E&amp;quote=%22\""
+        ));
+        assert!(xml.contains(
+            "AssertionConsumerServiceURL=\"https://sp.example.com/acs?continue=%3Cevil:Injected%3Eacs%3C%2Fevil:Injected%3E&amp;quote=%22\""
+        ));
+        assert!(
+            xml.contains("Format=\"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress&quot;/")
+        );
+        assert!(xml.contains("nameid&lt;/evil:Injected"));
+
+        let received = idp.receive_sso(
+            &sp_descriptor,
+            authn_request_input(&started.outbound)?,
+            validation(),
+        )?;
+        assert_eq!(received.message().issuer().as_str(), HOSTILE_SP_ENTITY_ID);
+        assert_eq!(
+            started.outbound.relay_state().map(|state| state.as_str()),
+            Some("typed-state")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_builder_authn_request_options_render_force_authn_and_acs_index(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+
+    for force_authn in [Some(true), Some(false), None] {
+        let mut options = StartSso::post();
+        if let Some(force_authn) = force_authn {
+            options = options.force_authn(force_authn);
+        }
+        let xml = authn_request_xml(&sp.start_sso(&idp_descriptor, options)?.outbound)?;
+        match force_authn {
+            Some(force_authn) => assert!(xml.contains(&format!("ForceAuthn=\"{force_authn}\""))),
+            None => assert!(!xml.contains("ForceAuthn=")),
+        }
+    }
+
+    let xml = authn_request_xml(
+        &sp.start_sso(
+            &idp_descriptor,
+            StartSso::post()
+                .response_binding(SsoResponseBinding::SimpleSign)
+                .acs_index(1),
+        )?
+        .outbound,
+    )?;
+    assert!(xml.contains("AssertionConsumerServiceIndex=\"1\""));
+    assert!(!xml.contains("AssertionConsumerServiceURL="));
+    assert!(!xml.contains("ProtocolBinding="));
+    Ok(())
+}
+
+#[test]
+fn typed_detached_authn_requests_parse_with_relay_state() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+
+    for start in [StartSso::redirect(), StartSso::simple_sign()] {
+        let relay_state = RelayStateParam::try_from_option(Some("signed-state".to_string()))?;
+        let started = sp.start_sso(&idp_descriptor, start.relay_state(relay_state))?;
+        let received = idp.receive_sso(
+            &sp_descriptor,
+            authn_request_input(&started.outbound)?,
+            validation(),
+        )?;
+
+        assert_eq!(received.message().id(), started.pending.request_id());
+        assert_eq!(
+            started.outbound.relay_state().map(|state| state.as_str()),
+            Some("signed-state")
+        );
+    }
+    Ok(())
 }
 
 #[test]

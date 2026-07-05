@@ -9,13 +9,15 @@ use saml_rs::logout::{create_logout_request, create_logout_response};
 use saml_rs::metadata::{Endpoint, IdpMetadata, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::xml::{extract, ExtractorField};
 use saml_rs::{
-    AcsEndpoint, AssertionSignaturePolicy, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
-    CertificatePem, EntityId, IdentityProvider, IdpConfig, IdpDescriptor, IdpValidationPolicy,
-    LogoutSignaturePolicy, LogoutSigning, LogoutSubject, MessageSignaturePolicy,
-    MetadataTrustPolicy, NameId, Saml, SamlError, ServiceProvider, SloEndpoint, SpConfig,
-    SpDescriptor, SpValidationPolicy, SsoEndpoint, StartSlo, StartSso, XmlEncryptionPolicy,
-    XmlPolicy,
+    AcsEndpoint, AssertionSignaturePolicy, AuthnRequest, AuthnRequestSigningPolicy,
+    AuthnRequestValidationPolicy, BrowserInput, CertificatePem, EntityId, IdentityProvider,
+    IdpConfig, IdpDescriptor, IdpValidationPolicy, LogoutSignaturePolicy, LogoutSigning,
+    LogoutSubject, MessageSignaturePolicy, MetadataTrustPolicy, NameId, RelayStateParam,
+    ReplayPolicy, RespondSso, Saml, SamlError, SamlValidationContext, ServiceProvider, SloEndpoint,
+    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, StartSlo, StartSso, Subject,
+    XmlEncryptionPolicy, XmlPolicy,
 };
+use time::OffsetDateTime;
 
 fn idp_config(want_authn_requests_signed: bool) -> IdpMetadataConfig {
     IdpMetadataConfig {
@@ -71,6 +73,53 @@ fn idp_config_builder() -> Result<saml_rs::IdpConfigBuilder, SamlError> {
         IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
             .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
             .validation(IdpValidationPolicy::compatibility()),
+    )
+}
+
+fn typed_sp_config() -> Result<SpConfig, SamlError> {
+    SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+        .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .slo_endpoint(SloEndpoint::post("https://sp.example.com/slo")?)
+        .validation(SpValidationPolicy::compatibility())
+        .build()
+}
+
+fn typed_idp_config() -> Result<IdpConfig, SamlError> {
+    IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+        .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+        .slo_endpoint(SloEndpoint::post("https://idp.example.com/slo")?)
+        .validation(IdpValidationPolicy::compatibility())
+        .build()
+}
+
+fn typed_protocol_facades() -> Result<
+    (
+        Saml<saml_rs::Sp>,
+        Saml<saml_rs::Idp>,
+        SpDescriptor,
+        IdpDescriptor,
+    ),
+    SamlError,
+> {
+    let sp = Saml::sp(typed_sp_config()?)?;
+    let idp = Saml::idp(typed_idp_config()?)?;
+    let sp_descriptor = SpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://sp.example.com/metadata")?,
+        sp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    Ok((sp, idp, sp_descriptor, idp_descriptor))
+}
+
+fn typed_validation() -> SamlValidationContext<'static> {
+    SamlValidationContext::new(
+        OffsetDateTime::now_utc(),
+        ReplayPolicy::DisabledForCompatibility,
     )
 }
 
@@ -199,6 +248,30 @@ fn typed_facades_start_unsigned_sso_and_slo_without_default_crypto(
 }
 
 #[test]
+fn typed_facade_creates_and_receives_unsigned_protocol_sso_without_default_crypto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = typed_protocol_facades()?;
+    let relay_state = RelayStateParam::try_from_option(Some("protocol-only".to_string()))?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post().relay_state(relay_state))?;
+
+    let form = started.outbound.post_form()?;
+    assert_eq!(form.action().as_str(), "https://idp.example.com/sso");
+    assert!(form.value("SAMLRequest").is_some());
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(form.fields().to_vec()),
+        typed_validation(),
+    )?;
+
+    assert_eq!(
+        received.message().issuer().as_str(),
+        "https://sp.example.com/metadata"
+    );
+    assert_eq!(received.message().id(), started.pending.request_id());
+    Ok(())
+}
+
+#[test]
 fn typed_signed_logout_returns_unsupported_without_default_crypto(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sp = Saml::sp(
@@ -221,6 +294,24 @@ fn typed_signed_logout_returns_unsupported_without_default_crypto(
         &idp_descriptor,
         LogoutSubject::from_name_id(NameId::new("user@example.com", None)),
         StartSlo::post().signing(LogoutSigning::Sign),
+    ));
+    Ok(())
+}
+
+#[test]
+fn typed_facade_crypto_required_paths_return_unsupported_without_default_crypto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = typed_protocol_facades()?;
+
+    assert_unsupported(sp.start_slo(
+        &idp_descriptor,
+        LogoutSubject::from_name_id(NameId::new("alice@example.com", None)),
+        StartSlo::post().signing(LogoutSigning::Sign),
+    ));
+    assert_unsupported(idp.initiate_sso(
+        &sp_descriptor,
+        Subject::new(NameId::new("alice@example.com", None), Vec::new()),
+        RespondSso::post().encrypt_then_sign(),
     ));
     Ok(())
 }

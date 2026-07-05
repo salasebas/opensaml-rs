@@ -1,7 +1,7 @@
 #![cfg(feature = "crypto-bergshamra")]
 
-use saml_rs::binding::{base64_decode, base64_encode};
-use saml_rs::raw::FlowResult;
+use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode};
+use saml_rs::raw::{Binding, FlowResult};
 use saml_rs::util::Value;
 use saml_rs::{
     AcsEndpoint, BrowserInput, CertificatePem, Credentials, EntityId, FormField, IdpConfig,
@@ -157,6 +157,28 @@ fn redirect_query<Message>(
     Ok(url.query().unwrap_or_default().to_string())
 }
 
+fn outbound_xml<Message>(
+    outbound: &Outbound<Message>,
+    message_field: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match outbound.raw_context().binding {
+        Binding::Redirect => {
+            let url = url::Url::parse(outbound.redirect_url()?)?;
+            let (_, encoded) = url
+                .query_pairs()
+                .find(|(key, _)| key == message_field)
+                .ok_or("missing SAML message")?;
+            Ok(String::from_utf8(deflate_raw_decode(&base64_decode(
+                encoded.as_ref(),
+            )?)?)?)
+        }
+        Binding::Post | Binding::SimpleSign => {
+            Ok(String::from_utf8(base64_decode(&outbound.raw_context().context)?)?)
+        }
+        Binding::Artifact => Err("artifact binding is unsupported".into()),
+    }
+}
+
 struct SloExchange {
     sp: Saml<saml_rs::Sp>,
     idp: Saml<saml_rs::Idp>,
@@ -268,6 +290,106 @@ fn typed_facade_starts_slo_redirect() -> Result<(), Box<dyn std::error::Error>> 
     assert_eq!(started.pending.request_binding(), LogoutBinding::Redirect);
     assert_eq!(started.pending.peer_entity_id().as_str(), IDP_ENTITY_ID);
     Ok(())
+}
+
+#[test]
+fn typed_slo_logout_request_session_index_follows_subject() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (sp, idp) = facades()?;
+    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let with_session = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let with_session_xml = outbound_xml(&with_session.outbound, "SAMLRequest")?;
+    assert!(with_session_xml.contains("<samlp:SessionIndex>_session123</samlp:SessionIndex>"));
+
+    let without_session = sp.start_slo(
+        &idp_descriptor,
+        LogoutSubject::from_name_id(NameId::new("alice@example.com", None)),
+        StartSlo::post(),
+    )?;
+    let without_session_xml = outbound_xml(&without_session.outbound, "SAMLRequest")?;
+    assert!(!without_session_xml.contains("SessionIndex"));
+    Ok(())
+}
+
+#[test]
+fn typed_slo_start_and_response_bindings_use_peer_endpoints(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+
+    let redirect = sp.start_slo(&idp_descriptor, subject()?, StartSlo::redirect())?;
+    assert!(redirect.outbound.redirect_url()?.starts_with(IDP_SLO_REDIRECT));
+    assert_eq!(redirect.pending.request_binding(), LogoutBinding::Redirect);
+
+    let post = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    assert_eq!(post.outbound.post_form()?.action().as_str(), IDP_SLO_POST);
+    assert_eq!(post.pending.request_binding(), LogoutBinding::Post);
+
+    let simple_sign = sp.start_slo(&idp_descriptor, subject()?, StartSlo::simple_sign())?;
+    let simple_sign_form = simple_sign.outbound.post_form()?;
+    assert_eq!(simple_sign_form.action().as_str(), IDP_SLO_SIMPLESIGN);
+    assert!(simple_sign_form.value("SigAlg").is_some());
+    assert!(simple_sign_form.value("Signature").is_some());
+    assert_eq!(
+        simple_sign.pending.request_binding(),
+        LogoutBinding::SimpleSign
+    );
+
+    let exchange = sp_started_exchange()?;
+    let redirect_response =
+        exchange
+            .idp
+            .respond_slo(&sp_descriptor, &exchange.received, RespondSlo::redirect())?;
+    assert!(redirect_response
+        .redirect_url()?
+        .starts_with(SP_SLO_REDIRECT));
+
+    let post_response =
+        exchange
+            .idp
+            .respond_slo(&sp_descriptor, &exchange.received, RespondSlo::post())?;
+    assert_eq!(post_response.post_form()?.action().as_str(), SP_SLO_POST);
+
+    let simple_sign_response = exchange.idp.respond_slo(
+        &sp_descriptor,
+        &exchange.received,
+        RespondSlo::simple_sign(),
+    )?;
+    let simple_sign_response_form = simple_sign_response.post_form()?;
+    assert_eq!(
+        simple_sign_response_form.action().as_str(),
+        SP_SLO_SIMPLESIGN
+    );
+    assert!(simple_sign_response_form.value("SigAlg").is_some());
+    assert!(simple_sign_response_form.value("Signature").is_some());
+    Ok(())
+}
+
+#[test]
+fn typed_slo_rejects_peer_without_requested_logout_binding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_config()?)?;
+    let idp = Saml::idp(
+        IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+            .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+            .slo_endpoint(SloEndpoint::post(IDP_SLO_POST)?)
+            .credentials(credentials())
+            .validation(IdpValidationPolicy::strict())
+            .build()?,
+    )?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new(IDP_ENTITY_ID)?,
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+
+    match sp.start_slo(&idp_descriptor, subject()?, StartSlo::redirect()) {
+        Err(SamlError::MissingMetadata(field)) => {
+            assert_eq!(field, "SingleLogoutService");
+            Ok(())
+        }
+        other => Err(format!("expected MissingMetadata, got {other:?}").into()),
+    }
 }
 
 #[test]
