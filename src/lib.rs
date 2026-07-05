@@ -51,11 +51,11 @@ pub use browser::{
 pub use config::{
     AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
     AuthnRequestSignaturePolicy, CertificatePem, Credentials, DataEncryptionAlgorithm,
-    DigestAlgorithm, EntityId, IdpConfig, IdpDescriptor, IdpMetadataConfig, IdpValidationPolicy,
-    KeyEncryptionAlgorithm, LogoutPolicy, LogoutSignaturePolicy, MessageSignaturePolicy,
-    MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase, PrivateKeyPem,
-    SignatureAlgorithm, SpConfig, SpDescriptor, SpMetadataConfig, SpValidationPolicy,
-    TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
+    DigestAlgorithm, EntityId, IdpConfig, IdpConfigBuilder, IdpDescriptor, IdpMetadataConfig,
+    IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy, LogoutSignaturePolicy,
+    MessageSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase,
+    PrivateKeyPem, SignatureAlgorithm, SpConfig, SpConfigBuilder, SpDescriptor, SpMetadataConfig,
+    SpValidationPolicy, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
 };
 #[doc = "Compatibility export. Prefer `raw::EntitySetting` for low-level APIs."]
 pub use entity::EntitySetting;

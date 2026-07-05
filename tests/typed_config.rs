@@ -130,7 +130,7 @@ fn typed_config_name_id_formats_return_existing_uri_constants() {
 #[test]
 fn typed_config_sp_config_converts_selected_settings() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = SpConfig::new(
-        EntityId::new("https://sp.example.com/metadata"),
+        EntityId::try_new("https://sp.example.com/metadata")?,
         SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
     );
     let limits = XmlLimits {
@@ -156,7 +156,7 @@ fn typed_config_sp_config_converts_selected_settings() -> Result<(), Box<dyn std
     config.xml.limits = limits;
     config.algorithms.signature = SignatureAlgorithm::RsaSha512;
     config.algorithms.data_encryption = DataEncryptionAlgorithm::Aes128;
-    config.algorithms.key_encryption = KeyEncryptionAlgorithm::Rsa15;
+    config.algorithms.key_encryption = KeyEncryptionAlgorithm::Rsa15ForCompatibility;
     config.algorithms.signed_reference_transforms =
         vec![TransformAlgorithm::ExclusiveCanonicalization];
 
@@ -204,7 +204,7 @@ fn typed_config_sp_config_converts_selected_settings() -> Result<(), Box<dyn std
 fn typed_config_idp_config_converts_authn_request_policy() -> Result<(), Box<dyn std::error::Error>>
 {
     let mut config = IdpConfig::new(
-        EntityId::new("https://idp.example.com/metadata"),
+        EntityId::try_new("https://idp.example.com/metadata")?,
         IdpMetadataConfig::new(vec![SsoEndpoint::redirect("https://idp.example.com/sso")?]),
     );
     config.metadata.name_id_format = vec![NameIdFormat::Transient];
@@ -228,7 +228,7 @@ fn typed_config_idp_config_converts_authn_request_policy() -> Result<(), Box<dyn
 fn typed_config_insecure_rsa_key_transport_requires_explicit_policy(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = SpConfig::new(
-        EntityId::new("https://sp.example.com/metadata"),
+        EntityId::try_new("https://sp.example.com/metadata")?,
         SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
     );
     let default_setting = EntitySetting::try_from(&config)?;
@@ -247,7 +247,7 @@ fn typed_config_insecure_rsa_key_transport_requires_explicit_policy(
 fn typed_config_idp_descriptor_accepts_expected_unsigned_metadata(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let descriptor = IdpDescriptor::from_metadata_xml_for(
-        EntityId::new("https://idp.example.com/metadata"),
+        EntityId::try_new("https://idp.example.com/metadata")?,
         IDP_METADATA,
         MetadataTrustPolicy::UnsignedForCompatibility,
     )?;
@@ -261,9 +261,10 @@ fn typed_config_idp_descriptor_accepts_expected_unsigned_metadata(
 }
 
 #[test]
-fn typed_config_idp_descriptor_rejects_unexpected_entity_id() {
+fn typed_config_idp_descriptor_rejects_unexpected_entity_id(
+) -> Result<(), Box<dyn std::error::Error>> {
     let result = IdpDescriptor::from_metadata_xml_for(
-        EntityId::new("https://unexpected.example.com/metadata"),
+        EntityId::try_new("https://unexpected.example.com/metadata")?,
         IDP_METADATA,
         MetadataTrustPolicy::UnsignedForCompatibility,
     );
@@ -278,13 +279,14 @@ fn typed_config_idp_descriptor_rejects_unexpected_entity_id() {
         ),
         "unexpected entity ID error: {result:?}"
     );
+    Ok(())
 }
 
 #[test]
 fn typed_config_sp_descriptor_accepts_expected_unsigned_metadata(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let descriptor = SpDescriptor::from_metadata_xml_for(
-        EntityId::new("https://sp.example.org/metadata"),
+        EntityId::try_new("https://sp.example.org/metadata")?,
         SP_METADATA,
         MetadataTrustPolicy::UnsignedForCompatibility,
     )?;
@@ -298,9 +300,10 @@ fn typed_config_sp_descriptor_accepts_expected_unsigned_metadata(
 }
 
 #[test]
-fn typed_config_pinned_certificate_trust_does_not_accept_unsigned_metadata() {
+fn typed_config_pinned_certificate_trust_does_not_accept_unsigned_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
     let result = IdpDescriptor::from_metadata_xml_for(
-        EntityId::new("https://idp.example.com/metadata"),
+        EntityId::try_new("https://idp.example.com/metadata")?,
         IDP_METADATA,
         MetadataTrustPolicy::RequireSignature {
             trusted_certificates: &[],
@@ -311,4 +314,5 @@ fn typed_config_pinned_certificate_trust_does_not_accept_unsigned_metadata() {
         result.is_err(),
         "empty pinned certificate trust must not accept unsigned metadata"
     );
+    Ok(())
 }

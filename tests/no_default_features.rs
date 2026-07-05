@@ -9,8 +9,9 @@ use saml_rs::logout::{create_logout_request, create_logout_response};
 use saml_rs::metadata::{Endpoint, IdpMetadata, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::xml::{extract, ExtractorField};
 use saml_rs::{
-    EntityId, IdentityProvider, IdpDescriptor, MetadataTrustPolicy, SamlError, ServiceProvider,
-    SpDescriptor,
+    AcsEndpoint, EntityId, IdentityProvider, IdpConfig, IdpDescriptor, IdpValidationPolicy,
+    MetadataTrustPolicy, SamlError, ServiceProvider, SpConfig, SpDescriptor, SpValidationPolicy,
+    SsoEndpoint,
 };
 
 fn idp_config(want_authn_requests_signed: bool) -> IdpMetadataConfig {
@@ -98,6 +99,47 @@ fn typed_metadata_descriptors_parse_unsigned_metadata_without_default_crypto(
     assert_eq!(
         sp_descriptor.entity_id().as_str(),
         "https://sp.example.com/metadata"
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_config_builders_construct_protocol_only_without_default_crypto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp_config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+        .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .validation(SpValidationPolicy::compatibility())
+        .build()?;
+    let idp_config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+        .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
+        .validation(IdpValidationPolicy::compatibility())
+        .build()?;
+
+    assert_eq!(
+        sp_config.entity_id.as_str(),
+        "https://sp.example.com/metadata"
+    );
+    assert_eq!(
+        idp_config.entity_id.as_str(),
+        "https://idp.example.com/metadata"
+    );
+    assert_eq!(sp_config.validation, SpValidationPolicy::compatibility());
+    assert_eq!(idp_config.validation, IdpValidationPolicy::compatibility());
+    Ok(())
+}
+
+#[test]
+fn typed_config_builders_return_unsupported_for_crypto_required_policy_without_default_crypto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_unsupported(
+        SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+            .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+            .build(),
+    );
+    assert_unsupported(
+        IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+            .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
+            .build(),
     );
     Ok(())
 }

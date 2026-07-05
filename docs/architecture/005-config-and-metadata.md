@@ -3,6 +3,54 @@
 The typed API should replace `EntitySetting` as the recommended config surface.
 `EntitySetting` remains raw compatibility.
 
+## Construction Style
+
+Typed config construction supports two reviewable paths:
+
+- struct literals for advanced callers that want every policy field visible;
+- manual, dependency-free builders for application setup code that wants
+  required fields checked in one place.
+
+Validated scalar values use fallible constructors for caller-provided input:
+
+```rust
+let entity_id = EntityId::try_new("https://sp.example.com/metadata")?;
+let acs = AcsEndpoint::post("https://sp.example.com/acs")?;
+```
+
+Struct literals keep policy choices explicit:
+
+```rust
+let config = SpConfig {
+    entity_id,
+    metadata: SpMetadataConfig::new(vec![acs]),
+    credentials: load_sp_signing_credentials()?,
+    validation: SpValidationPolicy::strict(),
+    algorithms: AlgorithmPolicy::default(),
+    xml: XmlPolicy::default(),
+    templates: TemplatePolicy::default(),
+};
+config.validate()?;
+```
+
+Builders keep large setup ergonomic while still returning `Result`:
+
+```rust
+let config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+    .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+    .credentials(load_sp_signing_credentials()?)
+    .validation(SpValidationPolicy::strict())
+    .build()?;
+
+let idp_config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+    .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
+    .validation(IdpValidationPolicy::strict())
+    .build()?;
+```
+
+Typed metadata and config builders validate entity IDs and required endpoints.
+Raw compatibility structs keep their existing defaults and mutation model.
+
 ## Config Types
 
 ```rust
@@ -61,14 +109,24 @@ pub enum SignatureAlgorithm {
     Custom(String),
 }
 
+pub enum DigestAlgorithm {
+    Sha1ForCompatibility,
+    Sha256,
+    Sha384,
+    Sha512,
+    Custom(String),
+}
+
 pub enum DataEncryptionAlgorithm {
-    Aes128Cbc,
-    Aes256Cbc,
+    Aes128,
+    Aes256,
+    TripleDesForCompatibility,
+    Aes128Gcm,
     Custom(String),
 }
 
 pub enum KeyEncryptionAlgorithm {
-    RsaOaep,
+    RsaOaepMgf1p,
     Rsa15ForCompatibility,
     Custom(String),
 }
@@ -77,7 +135,8 @@ pub enum KeyEncryptionAlgorithm {
 Rules:
 
 - Map known variants to existing constants.
-- Keep `Custom(String)` only where the backend can attempt it.
+- Keep custom URI constructors simple; backend support is still checked at
+  runtime.
 - Risky compatibility options must be visible in names.
 
 ## XML and Validation Policy
@@ -118,7 +177,7 @@ pub enum LogoutSignaturePolicy {
 pub struct SpValidationPolicy {
     assertion_signatures: AssertionSignaturePolicy,
     message_signatures: MessageSignaturePolicy,
-    validate_audience: bool,
+    audience: AudienceValidationPolicy,
     clock_skew: ClockSkew,
 }
 
