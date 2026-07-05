@@ -42,13 +42,16 @@ pub mod xml;
 
 pub use api::{Idp, Saml, SamlError, Sp, Unknown};
 pub use config::{
-    AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
-    AuthnRequestSignaturePolicy, CertificatePem, Credentials, DataEncryptionAlgorithm,
-    DigestAlgorithm, EntityId, IdpConfig, IdpDescriptor, IdpMetadataConfigTyped,
-    IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy, LogoutSignaturePolicy,
-    MessageSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase,
-    PrivateKeyPem, SignatureAlgorithm, SpConfig, SpDescriptor, SpMetadataConfigTyped,
-    SpValidationPolicy, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
+    AcsEndpoint, AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy,
+    AudienceValidationPolicy, AuthnRequest, AuthnRequestSignaturePolicy, CertificatePem,
+    Credentials, DataEncryptionAlgorithm, DigestAlgorithm, EndpointUrl, EntityId, IdpConfig,
+    IdpDescriptor, IdpMetadataConfigTyped, IdpValidationPolicy, KeyEncryptionAlgorithm,
+    LogoutBinding, LogoutPolicy, LogoutSignaturePolicy, MessageSignaturePolicy,
+    MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase, PendingAuthnRequest,
+    PendingSnapshot, PrivateKeyPem, RelayStateState, RequestId, SamlInstant, SignatureAlgorithm,
+    SloEndpoint, SpConfig, SpDescriptor, SpMetadataConfigTyped, SpValidationPolicy, SsoEndpoint,
+    SsoRequestBinding, SsoResponseBinding, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy,
+    XmlPolicy,
 };
 #[doc = "Compatibility export. Prefer `raw::EntitySetting` for low-level APIs."]
 pub use entity::EntitySetting;
