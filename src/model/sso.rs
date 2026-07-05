@@ -6,9 +6,11 @@ use super::extract::{
 use super::identifiers::{AssertionId, MessageId, SamlInstant};
 use super::session::AuthnSession;
 use super::subject::{NameId, Subject};
+use super::{ReplayKey, ReplayPolicy, SamlValidationContext};
 use crate::config::EntityId;
 use crate::error::SamlError;
 use crate::raw::FlowResult;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 /// Parsed SSO response envelope.
 #[derive(Debug, Clone)]
@@ -178,9 +180,58 @@ impl SsoSession {
         )
     }
 
+    /// Replay keys available from this validated SSO session.
+    pub fn replay_keys(&self) -> Vec<ReplayKey> {
+        let mut keys = Vec::with_capacity(3);
+        keys.push(ReplayKey::ResponseId(self.response_id.clone()));
+        if let Some(assertion_id) = &self.assertion_id {
+            keys.push(ReplayKey::AssertionId(assertion_id.clone()));
+        }
+        if let Some(session_index) = self.authn_session.session_index() {
+            keys.push(ReplayKey::SessionIndex(session_index.clone()));
+        }
+        keys
+    }
+
+    /// Check and store this session's replay keys using the caller cache.
+    ///
+    /// This method is intended for typed inbound SSO facades. It should be
+    /// called only after signature, issuer, audience, destination, recipient,
+    /// `InResponseTo`, and time validation have already passed.
+    pub fn check_replay(
+        &self,
+        validation: &mut SamlValidationContext<'_>,
+    ) -> Result<(), SamlError> {
+        match validation.replay_policy() {
+            ReplayPolicy::DisabledForCompatibility => Ok(()),
+            ReplayPolicy::RequireCache(cache) => {
+                let expires_at = self.replay_expires_at()?;
+                let keys = self.replay_keys();
+                for key in keys {
+                    cache.check_and_store(key, expires_at)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
     /// Raw validated flow result.
     pub fn raw_flow(&self) -> &FlowResult {
         &self.raw_flow
+    }
+
+    fn replay_expires_at(&self) -> Result<OffsetDateTime, SamlError> {
+        let instant = self
+            .not_on_or_after()
+            .or_else(|| self.authn_session().not_on_or_after())
+            .ok_or(SamlError::TimeWindowInvalid {
+                field: "ReplayExpiration",
+            })?;
+        OffsetDateTime::parse(instant.as_str(), &Rfc3339).map_err(|_| {
+            SamlError::TimeWindowInvalid {
+                field: "ReplayExpiration",
+            }
+        })
     }
 }
 

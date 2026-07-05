@@ -64,8 +64,9 @@ pub use entity::EntitySetting;
 pub use idp::IdentityProvider;
 pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
-    LogoutCompleted, LogoutRequest, LogoutResponse, MessageId, NameId, NameIdCreationRequest,
-    NameIdPolicy, Received, RelayState, RelayStateParam, SamlInstant, SessionIndex, SsoResponse,
+    ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, MessageId, NameId,
+    NameIdCreationRequest, NameIdPolicy, Received, RelayState, RelayStateParam, ReplayCache,
+    ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex, SsoResponse,
     SsoSession, Subject, SubjectConfirmation, MAX_RELAY_STATE_BYTES,
 };
 #[doc = "Compatibility export. Prefer `raw::ServiceProvider` for low-level APIs."]

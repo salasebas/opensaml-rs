@@ -12,8 +12,9 @@ use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
 #[cfg(feature = "crypto-bergshamra")]
 use crate::model::RelayStateParam;
 use crate::util::Value;
-use crate::validator::{check_status_with_limits, verify_time};
+use crate::validator::{check_status_with_limits, verify_time_at};
 use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
+use time::OffsetDateTime;
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
@@ -107,6 +108,9 @@ pub struct FlowOptions<'a> {
     pub allow_insecure_software_rsa_key_transport_decryption: bool,
     /// Clock drift tolerance `(not_before_ms, not_on_or_after_ms)`.
     pub clock_drifts: (i64, i64),
+    /// Validation instant. `None` keeps raw compatibility behavior by reading
+    /// the process clock during validation.
+    pub now: Option<OffsetDateTime>,
     /// Expected `<Audience>` (this SP's entity ID); `None` skips the check.
     pub expected_audience: Option<&'a str>,
     /// Expected `InResponseTo` (originating request ID); `None` skips the check.
@@ -127,9 +131,16 @@ impl<'a> Default for FlowOptions<'a> {
             decrypt_key_pass: None,
             allow_insecure_software_rsa_key_transport_decryption: false,
             clock_drifts: (0, 0),
+            now: None,
             expected_audience: None,
             expected_in_response_to: None,
         }
+    }
+}
+
+impl FlowOptions<'_> {
+    fn validation_now(&self) -> OffsetDateTime {
+        self.now.unwrap_or_else(OffsetDateTime::now_utc)
     }
 }
 
@@ -520,7 +531,12 @@ fn check_bearer_subject_confirmation(
             SubjectConfirmationReason::MissingNotOnOrAfter,
         ));
     };
-    if !verify_time(None, Some(not_on_or_after), opts.clock_drifts) {
+    if !verify_time_at(
+        None,
+        Some(not_on_or_after),
+        opts.clock_drifts,
+        opts.validation_now(),
+    ) {
         return Ok(SubjectConfirmationCheck::Invalid(
             SubjectConfirmationReason::TimeWindowInvalid,
         ));
@@ -622,7 +638,12 @@ fn validate_context(
         }
         if let Some(session_not_on_or_after) = extracted.get_str("sessionIndex.sessionNotOnOrAfter")
         {
-            if !verify_time(None, Some(session_not_on_or_after), opts.clock_drifts) {
+            if !verify_time_at(
+                None,
+                Some(session_not_on_or_after),
+                opts.clock_drifts,
+                opts.validation_now(),
+            ) {
                 return Err(SamlError::TimeWindowInvalid {
                     field: TimeWindowField::SessionNotOnOrAfter,
                 });
@@ -631,7 +652,12 @@ fn validate_context(
         if let Some(conditions) = extracted.get("conditions") {
             let not_before = conditions.get_str("notBefore");
             let not_on_or_after = conditions.get_str("notOnOrAfter");
-            if !verify_time(not_before, not_on_or_after, opts.clock_drifts) {
+            if !verify_time_at(
+                not_before,
+                not_on_or_after,
+                opts.clock_drifts,
+                opts.validation_now(),
+            ) {
                 return Err(SamlError::TimeWindowInvalid {
                     field: TimeWindowField::Conditions,
                 });

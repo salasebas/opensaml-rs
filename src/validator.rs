@@ -19,7 +19,20 @@ pub fn verify_time(
     not_on_or_after: Option<&str>,
     drift: (i64, i64),
 ) -> bool {
-    let now = OffsetDateTime::now_utc();
+    verify_time_at(
+        not_before,
+        not_on_or_after,
+        drift,
+        OffsetDateTime::now_utc(),
+    )
+}
+
+pub(crate) fn verify_time_at(
+    not_before: Option<&str>,
+    not_on_or_after: Option<&str>,
+    drift: (i64, i64),
+    now: OffsetDateTime,
+) -> bool {
     let (nb_drift, na_drift) = (
         Duration::milliseconds(drift.0),
         Duration::milliseconds(drift.1),
