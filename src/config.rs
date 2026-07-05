@@ -1,12 +1,13 @@
 //! Typed configuration building blocks for high-level SAML APIs.
 
 use core::fmt;
+use core::marker::PhantomData;
 use core::ops::Deref;
 
 use crate::binding::MAX_DEFLATE_RAW_DECODE_BYTES;
 use crate::constants::{
     data_encryption_algorithm, digest_algorithm, key_encryption_algorithm, name_id_format,
-    signature_algorithm, transform_algorithm, MessageSignatureOrder,
+    signature_algorithm, transform_algorithm, Binding, MessageSignatureOrder,
 };
 use crate::entity::{EntitySetting, SignatureConfig};
 use crate::error::SamlError;
@@ -282,6 +283,19 @@ impl EntityId {
         Self(value.into())
     }
 
+    /// Validate and wrap a non-empty entity ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when the entity ID is empty.
+    pub fn try_new(value: impl Into<String>) -> Result<Self, SamlError> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(SamlError::Invalid("entity ID must not be empty".into()));
+        }
+        Ok(Self(value))
+    }
+
     /// Borrow the entity ID string.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -297,6 +311,659 @@ impl From<&str> for EntityId {
 impl From<String> for EntityId {
     fn from(value: String) -> Self {
         Self::new(value)
+    }
+}
+
+/// Browser SSO request bindings supported by the typed API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SsoRequestBinding {
+    /// HTTP-Redirect binding.
+    Redirect,
+    /// HTTP-POST binding.
+    Post,
+    /// HTTP-POST-SimpleSign binding.
+    SimpleSign,
+}
+
+impl SsoRequestBinding {
+    /// Convert to the raw compatibility binding.
+    pub fn as_binding(self) -> Binding {
+        match self {
+            Self::Redirect => Binding::Redirect,
+            Self::Post => Binding::Post,
+            Self::SimpleSign => Binding::SimpleSign,
+        }
+    }
+}
+
+impl From<SsoRequestBinding> for Binding {
+    fn from(value: SsoRequestBinding) -> Self {
+        value.as_binding()
+    }
+}
+
+impl TryFrom<Binding> for SsoRequestBinding {
+    type Error = SamlError;
+
+    fn try_from(value: Binding) -> Result<Self, Self::Error> {
+        match value {
+            Binding::Redirect => Ok(Self::Redirect),
+            Binding::Post => Ok(Self::Post),
+            Binding::SimpleSign => Ok(Self::SimpleSign),
+            Binding::Artifact => Err(SamlError::UndefinedBinding),
+        }
+    }
+}
+
+/// Browser SSO response bindings supported by the typed API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SsoResponseBinding {
+    /// HTTP-POST binding.
+    Post,
+    /// HTTP-POST-SimpleSign binding.
+    SimpleSign,
+}
+
+impl SsoResponseBinding {
+    /// Convert to the raw compatibility binding.
+    pub fn as_binding(self) -> Binding {
+        match self {
+            Self::Post => Binding::Post,
+            Self::SimpleSign => Binding::SimpleSign,
+        }
+    }
+}
+
+impl From<SsoResponseBinding> for Binding {
+    fn from(value: SsoResponseBinding) -> Self {
+        value.as_binding()
+    }
+}
+
+impl TryFrom<Binding> for SsoResponseBinding {
+    type Error = SamlError;
+
+    fn try_from(value: Binding) -> Result<Self, Self::Error> {
+        match value {
+            Binding::Post => Ok(Self::Post),
+            Binding::SimpleSign => Ok(Self::SimpleSign),
+            Binding::Redirect | Binding::Artifact => Err(SamlError::UndefinedBinding),
+        }
+    }
+}
+
+/// Single Logout bindings supported by the typed API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LogoutBinding {
+    /// HTTP-Redirect binding.
+    Redirect,
+    /// HTTP-POST binding.
+    Post,
+    /// HTTP-POST-SimpleSign binding.
+    SimpleSign,
+}
+
+impl LogoutBinding {
+    /// Convert to the raw compatibility binding.
+    pub fn as_binding(self) -> Binding {
+        match self {
+            Self::Redirect => Binding::Redirect,
+            Self::Post => Binding::Post,
+            Self::SimpleSign => Binding::SimpleSign,
+        }
+    }
+}
+
+impl From<LogoutBinding> for Binding {
+    fn from(value: LogoutBinding) -> Self {
+        value.as_binding()
+    }
+}
+
+impl TryFrom<Binding> for LogoutBinding {
+    type Error = SamlError;
+
+    fn try_from(value: Binding) -> Result<Self, Self::Error> {
+        match value {
+            Binding::Redirect => Ok(Self::Redirect),
+            Binding::Post => Ok(Self::Post),
+            Binding::SimpleSign => Ok(Self::SimpleSign),
+            Binding::Artifact => Err(SamlError::UndefinedBinding),
+        }
+    }
+}
+
+/// Absolute HTTP(S) endpoint URL used by typed SAML endpoint wrappers.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EndpointUrl(String);
+
+impl EndpointUrl {
+    /// Validate and wrap an absolute HTTP(S) URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when the URL is not absolute HTTP(S).
+    pub fn new(value: impl Into<String>) -> Result<Self, SamlError> {
+        let value = value.into();
+        let parsed = url::Url::parse(&value).map_err(|err| SamlError::Invalid(err.to_string()))?;
+        if matches!(parsed.scheme(), "http" | "https") && parsed.has_host() {
+            return Ok(Self(value));
+        }
+        Err(SamlError::Invalid(
+            "endpoint URL must be absolute HTTP(S)".into(),
+        ))
+    }
+
+    /// Borrow the URL string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Single Sign-On service endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SsoEndpoint {
+    binding: SsoRequestBinding,
+    url: EndpointUrl,
+}
+
+impl SsoEndpoint {
+    /// Create an SSO endpoint from an already validated URL.
+    pub fn new(binding: SsoRequestBinding, url: EndpointUrl) -> Self {
+        Self { binding, url }
+    }
+
+    /// Create an HTTP-Redirect SSO endpoint.
+    pub fn redirect(url: impl Into<String>) -> Result<Self, SamlError> {
+        Ok(Self::new(
+            SsoRequestBinding::Redirect,
+            EndpointUrl::new(url)?,
+        ))
+    }
+
+    /// Create an HTTP-POST SSO endpoint.
+    pub fn post(url: impl Into<String>) -> Result<Self, SamlError> {
+        Ok(Self::new(SsoRequestBinding::Post, EndpointUrl::new(url)?))
+    }
+
+    /// Create an HTTP-POST-SimpleSign SSO endpoint.
+    pub fn simple_sign(url: impl Into<String>) -> Result<Self, SamlError> {
+        Ok(Self::new(
+            SsoRequestBinding::SimpleSign,
+            EndpointUrl::new(url)?,
+        ))
+    }
+
+    /// Narrow a raw metadata endpoint into an SSO endpoint.
+    pub fn try_from_raw(endpoint: Endpoint) -> Result<Self, SamlError> {
+        Ok(Self::new(
+            SsoRequestBinding::try_from(endpoint.binding)?,
+            EndpointUrl::new(endpoint.location)?,
+        ))
+    }
+
+    /// Convert to the raw metadata endpoint shape.
+    pub fn to_raw(&self) -> Endpoint {
+        Endpoint {
+            binding: self.binding.as_binding(),
+            location: self.url.as_str().to_string(),
+            is_default: false,
+        }
+    }
+
+    /// Endpoint binding.
+    pub fn binding(&self) -> SsoRequestBinding {
+        self.binding
+    }
+
+    /// Endpoint URL.
+    pub fn url(&self) -> &EndpointUrl {
+        &self.url
+    }
+}
+
+/// Assertion Consumer Service endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcsEndpoint {
+    binding: SsoResponseBinding,
+    url: EndpointUrl,
+    index: Option<u16>,
+    is_default: bool,
+}
+
+impl AcsEndpoint {
+    /// Create an ACS endpoint from an already validated URL.
+    pub fn new(binding: SsoResponseBinding, url: EndpointUrl) -> Self {
+        Self {
+            binding,
+            url,
+            index: None,
+            is_default: false,
+        }
+    }
+
+    /// Create an HTTP-POST ACS endpoint.
+    pub fn post(url: impl Into<String>) -> Result<Self, SamlError> {
+        Ok(Self::new(SsoResponseBinding::Post, EndpointUrl::new(url)?))
+    }
+
+    /// Create an HTTP-POST-SimpleSign ACS endpoint.
+    pub fn simple_sign(url: impl Into<String>) -> Result<Self, SamlError> {
+        Ok(Self::new(
+            SsoResponseBinding::SimpleSign,
+            EndpointUrl::new(url)?,
+        ))
+    }
+
+    /// Set the ACS index advertised in metadata.
+    pub fn with_index(mut self, index: u16) -> Self {
+        self.index = Some(index);
+        self
+    }
+
+    /// Mark this ACS endpoint as the default endpoint in metadata.
+    pub fn with_default(mut self, is_default: bool) -> Self {
+        self.is_default = is_default;
+        self
+    }
+
+    /// Narrow a raw metadata endpoint into an ACS endpoint.
+    pub fn try_from_raw(endpoint: Endpoint) -> Result<Self, SamlError> {
+        Ok(Self {
+            binding: SsoResponseBinding::try_from(endpoint.binding)?,
+            url: EndpointUrl::new(endpoint.location)?,
+            index: None,
+            is_default: endpoint.is_default,
+        })
+    }
+
+    /// Convert to the raw metadata endpoint shape.
+    pub fn to_raw(&self) -> Endpoint {
+        Endpoint {
+            binding: self.binding.as_binding(),
+            location: self.url.as_str().to_string(),
+            is_default: self.is_default,
+        }
+    }
+
+    /// Endpoint binding.
+    pub fn binding(&self) -> SsoResponseBinding {
+        self.binding
+    }
+
+    /// Endpoint URL.
+    pub fn url(&self) -> &EndpointUrl {
+        &self.url
+    }
+
+    /// ACS index advertised in metadata.
+    pub fn index(&self) -> Option<u16> {
+        self.index
+    }
+
+    /// Whether this ACS endpoint is the default metadata endpoint.
+    pub fn is_default(&self) -> bool {
+        self.is_default
+    }
+}
+
+/// Correlation ID for an AuthnRequest.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RequestId(String);
+
+impl RequestId {
+    /// Validate and wrap a request ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when the request ID is empty.
+    pub fn new(value: impl Into<String>) -> Result<Self, SamlError> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(SamlError::Invalid("request ID must not be empty".into()));
+        }
+        Ok(Self(value))
+    }
+
+    /// Borrow the request ID string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// RelayState represented as absent, present empty, or present with a value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RelayStateState {
+    /// No RelayState parameter was sent.
+    Absent,
+    /// RelayState was sent with an empty value.
+    PresentEmpty,
+    /// RelayState was sent with a non-empty value.
+    PresentValue(String),
+}
+
+impl RelayStateState {
+    /// Preserve the exact RelayState presence state from an optional value.
+    pub fn from_option(value: Option<impl Into<String>>) -> Self {
+        match value {
+            None => Self::Absent,
+            Some(value) => {
+                let value = value.into();
+                if value.is_empty() {
+                    Self::PresentEmpty
+                } else {
+                    Self::PresentValue(value)
+                }
+            }
+        }
+    }
+
+    /// Borrow RelayState as an optional value.
+    pub fn as_deref(&self) -> Option<&str> {
+        match self {
+            Self::Absent => None,
+            Self::PresentEmpty => Some(""),
+            Self::PresentValue(value) => Some(value.as_str()),
+        }
+    }
+
+    fn validate(&self) -> Result<(), SamlError> {
+        if matches!(self, Self::PresentValue(value) if value.is_empty()) {
+            return Err(SamlError::Invalid(
+                "RelayState PresentValue must not be empty".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// SAML instant text carried in pending snapshots.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SamlInstant(String);
+
+impl SamlInstant {
+    /// Validate and wrap a SAML instant string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when the instant is empty. Full temporal
+    /// enforcement is left to the validation policy that consumes the pending
+    /// state.
+    pub fn new(value: impl Into<String>) -> Result<Self, SamlError> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(SamlError::Invalid("SAML instant must not be empty".into()));
+        }
+        Ok(Self(value))
+    }
+
+    /// Borrow the instant string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Marker type for AuthnRequest pending state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AuthnRequest {}
+
+/// Persistable correlation snapshot for a pending SAML message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSnapshot<Message> {
+    /// Correlation ID.
+    pub id: String,
+    /// Exact RelayState state.
+    pub relay_state: RelayStateState,
+    /// Peer entity ID.
+    pub peer_entity_id: String,
+    /// Expected response binding keyword.
+    pub expected_binding: String,
+    /// Selected ACS URL.
+    pub acs_url: String,
+    /// Selected ACS binding keyword.
+    pub acs_binding: String,
+    /// Selected ACS index, if any.
+    pub acs_index: Option<u16>,
+    /// Whether the selected ACS was default.
+    pub acs_is_default: bool,
+    /// Issue instant, if recorded.
+    pub issued_at: Option<SamlInstant>,
+    /// Expiration instant, if recorded.
+    pub expires_at: Option<SamlInstant>,
+    _message: PhantomData<Message>,
+}
+
+impl PendingSnapshot<AuthnRequest> {
+    /// Build an AuthnRequest snapshot from persistence fields.
+    pub fn authn_request(
+        id: impl Into<String>,
+        relay_state: RelayStateState,
+        peer_entity_id: impl Into<String>,
+        expected_binding: impl Into<String>,
+        acs_url: impl Into<String>,
+        acs_binding: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            relay_state,
+            peer_entity_id: peer_entity_id.into(),
+            expected_binding: expected_binding.into(),
+            acs_url: acs_url.into(),
+            acs_binding: acs_binding.into(),
+            acs_index: None,
+            acs_is_default: false,
+            issued_at: None,
+            expires_at: None,
+            _message: PhantomData,
+        }
+    }
+}
+
+/// Pending AuthnRequest correlation state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAuthnRequest {
+    request_id: RequestId,
+    relay_state: RelayStateState,
+    acs: AcsEndpoint,
+    response_binding: SsoResponseBinding,
+    idp_entity_id: EntityId,
+    issued_at: Option<SamlInstant>,
+    expires_at: Option<SamlInstant>,
+}
+
+impl PendingAuthnRequest {
+    /// Create pending AuthnRequest state without storing keys or metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when the RelayState state is malformed,
+    /// the IdP entity ID is empty, or the selected ACS binding does not match
+    /// the expected response binding.
+    pub fn new(
+        request_id: RequestId,
+        relay_state: RelayStateState,
+        acs: AcsEndpoint,
+        response_binding: SsoResponseBinding,
+        idp_entity_id: EntityId,
+    ) -> Result<Self, SamlError> {
+        relay_state.validate()?;
+        EntityId::try_new(idp_entity_id.as_str().to_string())?;
+        if acs.binding() != response_binding {
+            return Err(SamlError::Invalid(
+                "ACS binding must match expected response binding".into(),
+            ));
+        }
+        Ok(Self {
+            request_id,
+            relay_state,
+            acs,
+            response_binding,
+            idp_entity_id,
+            issued_at: None,
+            expires_at: None,
+        })
+    }
+
+    /// Record an issue instant.
+    pub fn with_issue_instant(mut self, issued_at: SamlInstant) -> Self {
+        self.issued_at = Some(issued_at);
+        self
+    }
+
+    /// Record an expiration instant.
+    pub fn with_expiration(mut self, expires_at: SamlInstant) -> Self {
+        self.expires_at = Some(expires_at);
+        self
+    }
+
+    /// Reconstruct pending AuthnRequest state from a snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when any snapshot field is malformed or
+    /// inconsistent.
+    pub fn from_snapshot(snapshot: PendingSnapshot<AuthnRequest>) -> Result<Self, SamlError> {
+        snapshot.relay_state.validate()?;
+        if snapshot.expires_at.is_some() && snapshot.issued_at.is_none() {
+            return Err(SamlError::Invalid(
+                "pending snapshot expiration requires an issue instant".into(),
+            ));
+        }
+        let request_id = RequestId::new(snapshot.id)?;
+        let idp_entity_id = EntityId::try_new(snapshot.peer_entity_id)?;
+        let response_binding =
+            sso_response_binding_from_snapshot_value(&snapshot.expected_binding)?;
+        let acs_binding = sso_response_binding_from_snapshot_value(&snapshot.acs_binding)?;
+        let mut acs = AcsEndpoint::new(acs_binding, EndpointUrl::new(snapshot.acs_url)?)
+            .with_default(snapshot.acs_is_default);
+        if let Some(index) = snapshot.acs_index {
+            acs = acs.with_index(index);
+        }
+        let mut pending = Self::new(
+            request_id,
+            snapshot.relay_state,
+            acs,
+            response_binding,
+            idp_entity_id,
+        )?;
+        pending.issued_at = snapshot.issued_at;
+        pending.expires_at = snapshot.expires_at;
+        Ok(pending)
+    }
+
+    /// Build a persistable snapshot.
+    pub fn snapshot(&self) -> PendingSnapshot<AuthnRequest> {
+        let mut snapshot = PendingSnapshot::authn_request(
+            self.request_id.as_str(),
+            self.relay_state.clone(),
+            self.idp_entity_id.as_str(),
+            self.response_binding.as_binding().short_name(),
+            self.acs.url().as_str(),
+            self.acs.binding().as_binding().short_name(),
+        );
+        snapshot.acs_index = self.acs.index();
+        snapshot.acs_is_default = self.acs.is_default();
+        snapshot.issued_at = self.issued_at.clone();
+        snapshot.expires_at = self.expires_at.clone();
+        snapshot
+    }
+
+    /// Request ID.
+    pub fn request_id(&self) -> &RequestId {
+        &self.request_id
+    }
+
+    /// RelayState state.
+    pub fn relay_state(&self) -> &RelayStateState {
+        &self.relay_state
+    }
+
+    /// Selected ACS endpoint.
+    pub fn acs(&self) -> &AcsEndpoint {
+        &self.acs
+    }
+
+    /// Expected response binding.
+    pub fn response_binding(&self) -> SsoResponseBinding {
+        self.response_binding
+    }
+
+    /// Selected IdP entity ID.
+    pub fn idp_entity_id(&self) -> &EntityId {
+        &self.idp_entity_id
+    }
+
+    /// Issue instant, if recorded.
+    pub fn issued_at(&self) -> Option<&SamlInstant> {
+        self.issued_at.as_ref()
+    }
+
+    /// Expiration instant, if recorded.
+    pub fn expires_at(&self) -> Option<&SamlInstant> {
+        self.expires_at.as_ref()
+    }
+}
+
+fn sso_response_binding_from_snapshot_value(value: &str) -> Result<SsoResponseBinding, SamlError> {
+    let binding = Binding::from_short_name(value)
+        .or_else(|| Binding::from_urn(value))
+        .ok_or(SamlError::UndefinedBinding)?;
+    SsoResponseBinding::try_from(binding)
+}
+
+/// Single Logout service endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SloEndpoint {
+    binding: LogoutBinding,
+    url: EndpointUrl,
+}
+
+impl SloEndpoint {
+    /// Create an SLO endpoint from an already validated URL.
+    pub fn new(binding: LogoutBinding, url: EndpointUrl) -> Self {
+        Self { binding, url }
+    }
+
+    /// Create an HTTP-Redirect SLO endpoint.
+    pub fn redirect(url: impl Into<String>) -> Result<Self, SamlError> {
+        Ok(Self::new(LogoutBinding::Redirect, EndpointUrl::new(url)?))
+    }
+
+    /// Create an HTTP-POST SLO endpoint.
+    pub fn post(url: impl Into<String>) -> Result<Self, SamlError> {
+        Ok(Self::new(LogoutBinding::Post, EndpointUrl::new(url)?))
+    }
+
+    /// Create an HTTP-POST-SimpleSign SLO endpoint.
+    pub fn simple_sign(url: impl Into<String>) -> Result<Self, SamlError> {
+        Ok(Self::new(LogoutBinding::SimpleSign, EndpointUrl::new(url)?))
+    }
+
+    /// Narrow a raw metadata endpoint into an SLO endpoint.
+    pub fn try_from_raw(endpoint: Endpoint) -> Result<Self, SamlError> {
+        Ok(Self::new(
+            LogoutBinding::try_from(endpoint.binding)?,
+            EndpointUrl::new(endpoint.location)?,
+        ))
+    }
+
+    /// Convert to the raw metadata endpoint shape.
+    pub fn to_raw(&self) -> Endpoint {
+        Endpoint {
+            binding: self.binding.as_binding(),
+            location: self.url.as_str().to_string(),
+            is_default: false,
+        }
+    }
+
+    /// Endpoint binding.
+    pub fn binding(&self) -> LogoutBinding {
+        self.binding
+    }
+
+    /// Endpoint URL.
+    pub fn url(&self) -> &EndpointUrl {
+        &self.url
     }
 }
 
