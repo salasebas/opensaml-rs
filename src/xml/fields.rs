@@ -52,6 +52,9 @@ pub fn logout_response_status_fields() -> Vec<ExtractorField> {
 /// for assertion-scoped fields; `response` is read from the full message.
 pub fn login_response_fields(assertion: &str) -> Vec<ExtractorField> {
     vec![
+        ExtractorField::new("assertion", &["Assertion"])
+            .attrs(&["ID", "IssueInstant"])
+            .with_shortcut(assertion),
         ExtractorField::new("conditions", &["Assertion", "Conditions"])
             .attrs(&["NotBefore", "NotOnOrAfter"])
             .with_shortcut(assertion),

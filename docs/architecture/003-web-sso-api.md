@@ -51,13 +51,13 @@ pub struct Started<Message> {
 - issue instant;
 - expiration if configured or derivable.
 
-`Pending<AuthnRequest>` has private fields, but web applications need durable
-storage. Provide accessors plus a serializable-without-`serde`
-`PendingSnapshot<AuthnRequest>` value. `Pending::snapshot()` returns the
-snapshot, and `Pending::from_snapshot(snapshot)` validates required fields,
-entity ID syntax, binding values, and timing before reconstructing typed
-pending state. The snapshot stores no keys, raw metadata, or raw entity
-settings.
+`Pending<AuthnRequest>` (also exported as `PendingAuthnRequest`) has private
+fields, but web applications need durable storage. Provide accessors plus a
+serializable-without-`serde` `PendingSnapshot<AuthnRequest>` value.
+`Pending::snapshot()` returns the snapshot, and
+`Pending::from_snapshot(snapshot)` validates required fields, entity ID syntax,
+binding values, ACS data, and timing before reconstructing typed pending state.
+The snapshot stores no keys, raw metadata, or raw entity settings.
 
 ## Finishing SP-Initiated Login
 
@@ -250,6 +250,11 @@ raw form body with `BrowserInput::<M>::simple_sign_body(raw_body)`. The library
 parses the form fields and derives the exact octets used for signature
 verification. Raw `raw::HttpRequest` compatibility may still accept manual
 detached octet data for legacy interop.
+
+Constructors are marker-specific. `BrowserInput<SsoResponse>` exposes POST and
+SimpleSign constructors only; a manually constructed Redirect variant is
+rejected by typed conversion. `Outbound<SsoResponse>` rejects Redirect raw
+contexts.
 
 Raw `BindingContext` should remain available through:
 

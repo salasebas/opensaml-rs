@@ -21,8 +21,10 @@ pub use metadata::{MetadataTrustPolicy, VerifiedIdpMetadata, VerifiedSpMetadata}
 pub use model::{
     AcsEndpoint, AuthnRequest, AuthnSession, BrowserInput, LogoutBinding,
     LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSigning,
-    LogoutSubject, NameId, Outbound, Pending, PendingSnapshot, Received,
-    RelayState, SamlStatus, SloEndpoint, SsoEndpoint, SsoRequestBinding,
+    LogoutSubject, NameId, NameIdCreationRequest, Outbound, Pending,
+    PendingAuthnRequest, PendingLogoutRequest, PendingSnapshot, Received,
+    RelayState, SamlStatus,
+    SloEndpoint, SsoEndpoint, SsoRequestBinding,
     SsoResponse, SsoResponseBinding, SsoSession, StartSlo, StartSso,
     Started, Subject, RespondSlo, RespondSso,
 };
@@ -113,16 +115,17 @@ let session = sp_saml.finish_sso(
 | `Endpoint` | `SsoEndpoint`, `AcsEndpoint`, `SloEndpoint` | Endpoint role matters. |
 | `BindingContext` | `Outbound<Message>` | Binding-specific browser output. |
 | `HttpRequest` | `BrowserInput<Message>` | Typed inbound browser input. |
-| bare request ID string | `Pending<AuthnRequest>`, `Pending<LogoutRequest>`, `PendingSnapshot<_>` | Correlation state. |
+| bare request ID string | `PendingAuthnRequest`, `PendingLogoutRequest`, `PendingSnapshot<_>` | Correlation state. |
 | `FlowResult` | `SsoSession`, `Received<_>`, `LogoutCompleted` | Typed results with raw escape hatches. |
 | `FlowResult.extract.get_str(...)` | typed accessors | String keys become internal. |
 
-`Pending<Message>` has private fields. Applications persist
-`PendingSnapshot<Message>` through accessors and rebuild a pending value with a
-validating `Pending::from_snapshot` constructor. Snapshots carry correlation
-data only: request ID, exact RelayState state, peer entity ID, expected binding,
-and timing metadata. They do not carry keys, raw metadata, or raw entity
-settings.
+`Pending<Message>` has private fields and marker-specific binding storage.
+Applications persist `PendingSnapshot<Message>` through accessors and rebuild a
+pending value with a validating `Pending::from_snapshot` constructor. Authn
+snapshots carry the selected ACS endpoint; logout snapshots carry the selected
+logout binding. Snapshots carry correlation data only: request ID, exact
+RelayState state, peer entity ID, binding data, and timing metadata. They do
+not carry keys, raw metadata, or raw entity settings.
 
 ## Compatibility Rule
 

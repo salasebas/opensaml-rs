@@ -67,7 +67,7 @@ impl Saml<Idp> {
 }
 ```
 
-`Pending<LogoutRequest>` should include:
+`PendingLogoutRequest` should include:
 
 - request ID;
 - RelayState as exact tri-state: absent, present empty, or present value;
@@ -76,11 +76,11 @@ impl Saml<Idp> {
 - issue instant;
 - expiration if configured.
 
-`Pending<LogoutRequest>` exposes accessors and a
+`PendingLogoutRequest` exposes accessors and a
 `PendingSnapshot<LogoutRequest>` persistence shape. Reconstruct with
-`Pending::from_snapshot(snapshot)`, validating peer entity ID, binding, timing,
-and RelayState state. The snapshot stores no keys, raw metadata, or raw entity
-settings.
+`Pending::from_snapshot(snapshot)`, validating peer entity ID, logout binding,
+timing, and RelayState state. The snapshot stores no keys, raw metadata, or raw
+entity settings.
 
 ## Receiving LogoutRequest
 
@@ -152,7 +152,7 @@ impl Saml<Sp> {
     pub fn finish_slo(
         &self,
         idp: &IdpDescriptor,
-        pending: &Pending<LogoutRequest>,
+        pending: &PendingLogoutRequest,
         input: BrowserInput<LogoutResponse>,
         validation: SamlValidationContext<'_>,
     ) -> Result<LogoutCompleted, SamlError>;
@@ -162,7 +162,7 @@ impl Saml<Idp> {
     pub fn finish_slo(
         &self,
         sp: &SpDescriptor,
-        pending: &Pending<LogoutRequest>,
+        pending: &PendingLogoutRequest,
         input: BrowserInput<LogoutResponse>,
         validation: SamlValidationContext<'_>,
     ) -> Result<LogoutCompleted, SamlError>;
@@ -171,7 +171,7 @@ impl Saml<Idp> {
 
 Rules:
 
-- Use `Pending<LogoutRequest>` as the only source of expected `InResponseTo`.
+- Use `PendingLogoutRequest` as the only source of expected `InResponseTo`.
 - Check pending peer entity ID against the passed descriptor.
 - Check inbound binding against the pending expected logout binding.
 - Match RelayState exactly: absent, present empty, and present value are

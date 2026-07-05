@@ -1,16 +1,65 @@
 use core::marker::PhantomData;
 
-use super::bindings::{SsoRequestBinding, SsoResponseBinding};
+use super::bindings::{LogoutBinding, SsoRequestBinding, SsoResponseBinding};
 use super::endpoints::AcsEndpoint;
 use super::outbound::Outbound;
 use crate::config::EntityId;
 use crate::constants::Binding;
 use crate::error::SamlError;
-use crate::model::{AuthnRequest, EndpointUrl, MessageId, RelayStateParam, SamlInstant};
+use crate::model::{
+    AuthnRequest, EndpointUrl, LogoutRequest, MessageId, RelayStateParam, SamlInstant,
+};
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// Message marker support for typed pending state.
+#[doc(hidden)]
+pub trait PendingMessage: sealed::Sealed {
+    /// Private storage for protocol-specific pending fields.
+    type Details: Clone + core::fmt::Debug + PartialEq + Eq;
+    /// Binding type used for outbound request dispatch.
+    type RequestBinding: Copy + core::fmt::Debug + PartialEq + Eq;
+    /// Binding type expected for the correlated response.
+    type ResponseBinding: Copy + core::fmt::Debug + PartialEq + Eq;
+}
+
+/// Protocol-specific pending AuthnRequest details.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthnPendingDetails {
+    request_binding: Option<SsoRequestBinding>,
+    response_binding: SsoResponseBinding,
+    acs: AcsEndpoint,
+}
+
+/// Protocol-specific pending LogoutRequest details.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogoutPendingDetails {
+    binding: LogoutBinding,
+}
+
+impl sealed::Sealed for AuthnRequest {}
+
+impl PendingMessage for AuthnRequest {
+    type Details = AuthnPendingDetails;
+    type RequestBinding = SsoRequestBinding;
+    type ResponseBinding = SsoResponseBinding;
+}
+
+impl sealed::Sealed for LogoutRequest {}
+
+impl PendingMessage for LogoutRequest {
+    type Details = LogoutPendingDetails;
+    type RequestBinding = LogoutBinding;
+    type ResponseBinding = LogoutBinding;
+}
 
 /// Persistable correlation snapshot for a pending SAML message.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingSnapshot<Message> {
+pub struct PendingSnapshot<Message: PendingMessage> {
     /// Correlation ID.
     pub id: String,
     /// Exact RelayState state.
@@ -21,13 +70,25 @@ pub struct PendingSnapshot<Message> {
     pub expected_binding: String,
     /// Selected request binding keyword, if tracked.
     pub request_binding: Option<String>,
-    /// Selected ACS URL.
+    /// Selected ACS URL for AuthnRequest snapshots.
+    ///
+    /// LogoutRequest snapshots leave this empty and [`PendingLogoutRequest::from_snapshot`]
+    /// ignores it.
     pub acs_url: String,
-    /// Selected ACS binding keyword.
+    /// Selected ACS binding keyword for AuthnRequest snapshots.
+    ///
+    /// LogoutRequest snapshots leave this empty and [`PendingLogoutRequest::from_snapshot`]
+    /// ignores it.
     pub acs_binding: String,
-    /// Selected ACS index, if any.
+    /// Selected ACS index for AuthnRequest snapshots, if any.
+    ///
+    /// LogoutRequest snapshots leave this unset and [`PendingLogoutRequest::from_snapshot`]
+    /// ignores it.
     pub acs_index: Option<u16>,
-    /// Whether the selected ACS was default.
+    /// Whether the selected AuthnRequest ACS was default.
+    ///
+    /// LogoutRequest snapshots leave this false and [`PendingLogoutRequest::from_snapshot`]
+    /// ignores it.
     pub acs_is_default: bool,
     /// Issue instant, if recorded.
     pub issued_at: Option<SamlInstant>,
@@ -63,44 +124,71 @@ impl PendingSnapshot<AuthnRequest> {
     }
 }
 
+impl PendingSnapshot<LogoutRequest> {
+    /// Build a LogoutRequest snapshot from persistence fields.
+    ///
+    /// ACS fields are AuthnRequest-only and are intentionally left empty.
+    pub fn logout_request(
+        id: impl Into<String>,
+        relay_state: RelayStateParam,
+        peer_entity_id: impl Into<String>,
+        binding: LogoutBinding,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            relay_state,
+            peer_entity_id: peer_entity_id.into(),
+            expected_binding: binding.as_binding().short_name().to_string(),
+            request_binding: Some(binding.as_binding().short_name().to_string()),
+            acs_url: String::new(),
+            acs_binding: String::new(),
+            acs_index: None,
+            acs_is_default: false,
+            issued_at: None,
+            expires_at: None,
+            _message: PhantomData,
+        }
+    }
+}
+
 /// Pending SAML message correlation state.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pending<Message> {
+pub struct Pending<Message: PendingMessage> {
     id: MessageId,
     relay_state: RelayStateParam,
-    request_binding: Option<SsoRequestBinding>,
-    response_binding: Option<SsoResponseBinding>,
+    details: Message::Details,
     peer_entity_id: EntityId,
     issued_at: Option<SamlInstant>,
     expires_at: Option<SamlInstant>,
     _message: PhantomData<Message>,
 }
 
-impl<Message> Pending<Message> {
-    /// Create pending message state.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SamlError::Invalid`] when RelayState or peer entity ID are malformed.
-    pub fn try_new(
-        id: MessageId,
-        relay_state: RelayStateParam,
-        request_binding: Option<SsoRequestBinding>,
-        response_binding: Option<SsoResponseBinding>,
-        peer_entity_id: EntityId,
-    ) -> Result<Self, SamlError> {
+/// Pending AuthnRequest correlation state.
+pub type PendingAuthnRequest = Pending<AuthnRequest>;
+
+/// Pending LogoutRequest correlation state.
+pub type PendingLogoutRequest = Pending<LogoutRequest>;
+
+impl<Message: PendingMessage> Pending<Message> {
+    fn validate_common(
+        relay_state: &RelayStateParam,
+        peer_entity_id: &EntityId,
+    ) -> Result<(), SamlError> {
         relay_state.validate()?;
         EntityId::try_new(peer_entity_id.as_str().to_string())?;
-        Ok(Self {
-            id,
-            relay_state,
-            request_binding,
-            response_binding,
-            peer_entity_id,
-            issued_at: None,
-            expires_at: None,
-            _message: PhantomData,
-        })
+        Ok(())
+    }
+
+    fn validate_snapshot_timing(
+        issued_at: &Option<SamlInstant>,
+        expires_at: &Option<SamlInstant>,
+    ) -> Result<(), SamlError> {
+        if expires_at.is_some() && issued_at.is_none() {
+            return Err(SamlError::Invalid(
+                "pending snapshot expiration requires an issue instant".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Record an issue instant.
@@ -125,16 +213,6 @@ impl<Message> Pending<Message> {
         &self.relay_state
     }
 
-    /// Request binding, when tracked.
-    pub fn request_binding(&self) -> Option<SsoRequestBinding> {
-        self.request_binding
-    }
-
-    /// Expected response binding, when tracked.
-    pub fn response_binding(&self) -> Option<SsoResponseBinding> {
-        self.response_binding
-    }
-
     /// Peer entity ID.
     pub fn peer_entity_id(&self) -> &EntityId {
         &self.peer_entity_id
@@ -149,80 +227,9 @@ impl<Message> Pending<Message> {
     pub fn expires_at(&self) -> Option<&SamlInstant> {
         self.expires_at.as_ref()
     }
-
-    /// Build a persistable snapshot.
-    pub fn snapshot(&self) -> PendingSnapshot<Message> {
-        PendingSnapshot {
-            id: self.id.as_str().to_string(),
-            relay_state: self.relay_state.clone(),
-            peer_entity_id: self.peer_entity_id.as_str().to_string(),
-            expected_binding: self
-                .response_binding
-                .map(|binding| binding.as_binding().short_name().to_string())
-                .unwrap_or_default(),
-            request_binding: self
-                .request_binding
-                .map(|binding| binding.as_binding().short_name().to_string()),
-            acs_url: String::new(),
-            acs_binding: String::new(),
-            acs_index: None,
-            acs_is_default: false,
-            issued_at: self.issued_at.clone(),
-            expires_at: self.expires_at.clone(),
-            _message: PhantomData,
-        }
-    }
-
-    /// Reconstruct pending state from a snapshot.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SamlError`] when any snapshot field is malformed or inconsistent.
-    pub fn from_snapshot(snapshot: PendingSnapshot<Message>) -> Result<Self, SamlError> {
-        snapshot.relay_state.validate()?;
-        if snapshot.expires_at.is_some() && snapshot.issued_at.is_none() {
-            return Err(SamlError::Invalid(
-                "pending snapshot expiration requires an issue instant".into(),
-            ));
-        }
-        let request_binding = snapshot
-            .request_binding
-            .as_deref()
-            .map(sso_request_binding_from_snapshot_value)
-            .transpose()?;
-        let response_binding = if snapshot.expected_binding.is_empty() {
-            None
-        } else {
-            Some(sso_response_binding_from_snapshot_value(
-                &snapshot.expected_binding,
-            )?)
-        };
-        Ok(Self {
-            id: MessageId::try_new(snapshot.id)?,
-            relay_state: snapshot.relay_state,
-            request_binding,
-            response_binding,
-            peer_entity_id: EntityId::try_new(snapshot.peer_entity_id)?,
-            issued_at: snapshot.issued_at,
-            expires_at: snapshot.expires_at,
-            _message: PhantomData,
-        })
-    }
 }
 
-/// Pending AuthnRequest correlation state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingAuthnRequest {
-    request_id: MessageId,
-    relay_state: RelayStateParam,
-    acs: AcsEndpoint,
-    response_binding: SsoResponseBinding,
-    idp_entity_id: EntityId,
-    issued_at: Option<SamlInstant>,
-    expires_at: Option<SamlInstant>,
-}
-
-impl PendingAuthnRequest {
+impl Pending<AuthnRequest> {
     /// Create pending AuthnRequest state without storing keys or metadata.
     ///
     /// # Errors
@@ -237,33 +244,30 @@ impl PendingAuthnRequest {
         response_binding: SsoResponseBinding,
         idp_entity_id: EntityId,
     ) -> Result<Self, SamlError> {
-        relay_state.validate()?;
-        EntityId::try_new(idp_entity_id.as_str().to_string())?;
+        Self::validate_common(&relay_state, &idp_entity_id)?;
         if acs.binding() != response_binding {
             return Err(SamlError::Invalid(
                 "ACS binding must match expected response binding".into(),
             ));
         }
         Ok(Self {
-            request_id,
+            id: request_id,
             relay_state,
-            acs,
-            response_binding,
-            idp_entity_id,
+            details: AuthnPendingDetails {
+                request_binding: None,
+                response_binding,
+                acs,
+            },
+            peer_entity_id: idp_entity_id,
             issued_at: None,
             expires_at: None,
+            _message: PhantomData,
         })
     }
 
-    /// Record an issue instant.
-    pub fn with_issue_instant(mut self, issued_at: SamlInstant) -> Self {
-        self.issued_at = Some(issued_at);
-        self
-    }
-
-    /// Record an expiration instant.
-    pub fn with_expiration(mut self, expires_at: SamlInstant) -> Self {
-        self.expires_at = Some(expires_at);
+    /// Record the outbound AuthnRequest binding selected for dispatch.
+    pub fn with_request_binding(mut self, request_binding: SsoRequestBinding) -> Self {
+        self.details.request_binding = Some(request_binding);
         self
     }
 
@@ -275,11 +279,7 @@ impl PendingAuthnRequest {
     /// inconsistent.
     pub fn from_snapshot(snapshot: PendingSnapshot<AuthnRequest>) -> Result<Self, SamlError> {
         snapshot.relay_state.validate()?;
-        if snapshot.expires_at.is_some() && snapshot.issued_at.is_none() {
-            return Err(SamlError::Invalid(
-                "pending snapshot expiration requires an issue instant".into(),
-            ));
-        }
+        Self::validate_snapshot_timing(&snapshot.issued_at, &snapshot.expires_at)?;
         let request_id = MessageId::try_new(snapshot.id)?;
         let idp_entity_id = EntityId::try_new(snapshot.peer_entity_id)?;
         let response_binding =
@@ -290,6 +290,11 @@ impl PendingAuthnRequest {
         if let Some(index) = snapshot.acs_index {
             acs = acs.with_index(index);
         }
+        let request_binding = snapshot
+            .request_binding
+            .as_deref()
+            .map(sso_request_binding_from_snapshot_value)
+            .transpose()?;
         let mut pending = Self::try_new(
             request_id,
             snapshot.relay_state,
@@ -297,6 +302,7 @@ impl PendingAuthnRequest {
             response_binding,
             idp_entity_id,
         )?;
+        pending.details.request_binding = request_binding;
         pending.issued_at = snapshot.issued_at;
         pending.expires_at = snapshot.expires_at;
         Ok(pending)
@@ -305,15 +311,19 @@ impl PendingAuthnRequest {
     /// Build a persistable snapshot.
     pub fn snapshot(&self) -> PendingSnapshot<AuthnRequest> {
         let mut snapshot = PendingSnapshot::authn_request(
-            self.request_id.as_str(),
+            self.id.as_str(),
             self.relay_state.clone(),
-            self.idp_entity_id.as_str(),
-            self.response_binding.as_binding().short_name(),
-            self.acs.location().as_str(),
-            self.acs.binding().as_binding().short_name(),
+            self.peer_entity_id.as_str(),
+            self.details.response_binding.as_binding().short_name(),
+            self.details.acs.location().as_str(),
+            self.details.acs.binding().as_binding().short_name(),
         );
-        snapshot.acs_index = self.acs.index();
-        snapshot.acs_is_default = self.acs.is_default();
+        snapshot.request_binding = self
+            .details
+            .request_binding
+            .map(|binding| binding.as_binding().short_name().to_string());
+        snapshot.acs_index = self.details.acs.index();
+        snapshot.acs_is_default = self.details.acs.is_default();
         snapshot.issued_at = self.issued_at.clone();
         snapshot.expires_at = self.expires_at.clone();
         snapshot
@@ -321,37 +331,111 @@ impl PendingAuthnRequest {
 
     /// Request ID.
     pub fn request_id(&self) -> &MessageId {
-        &self.request_id
+        &self.id
     }
 
-    /// RelayState state.
-    pub fn relay_state(&self) -> &RelayStateParam {
-        &self.relay_state
-    }
-
-    /// Selected ACS endpoint.
-    pub fn acs(&self) -> &AcsEndpoint {
-        &self.acs
+    /// Request binding, when tracked.
+    pub fn request_binding(&self) -> Option<SsoRequestBinding> {
+        self.details.request_binding
     }
 
     /// Expected response binding.
     pub fn response_binding(&self) -> SsoResponseBinding {
-        self.response_binding
+        self.details.response_binding
+    }
+
+    /// Selected ACS endpoint.
+    pub fn acs(&self) -> &AcsEndpoint {
+        &self.details.acs
     }
 
     /// Selected IdP entity ID.
     pub fn idp_entity_id(&self) -> &EntityId {
-        &self.idp_entity_id
+        &self.peer_entity_id
+    }
+}
+
+impl Pending<LogoutRequest> {
+    /// Create pending LogoutRequest state without storing keys or metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when RelayState or peer entity ID are malformed.
+    pub fn try_new(
+        request_id: MessageId,
+        relay_state: RelayStateParam,
+        binding: LogoutBinding,
+        peer_entity_id: EntityId,
+    ) -> Result<Self, SamlError> {
+        Self::validate_common(&relay_state, &peer_entity_id)?;
+        Ok(Self {
+            id: request_id,
+            relay_state,
+            details: LogoutPendingDetails { binding },
+            peer_entity_id,
+            issued_at: None,
+            expires_at: None,
+            _message: PhantomData,
+        })
     }
 
-    /// Issue instant, if recorded.
-    pub fn issued_at(&self) -> Option<&SamlInstant> {
-        self.issued_at.as_ref()
+    /// Reconstruct pending LogoutRequest state from a snapshot.
+    ///
+    /// AuthnRequest-only ACS snapshot fields are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when any snapshot field is malformed or
+    /// inconsistent.
+    pub fn from_snapshot(snapshot: PendingSnapshot<LogoutRequest>) -> Result<Self, SamlError> {
+        snapshot.relay_state.validate()?;
+        Self::validate_snapshot_timing(&snapshot.issued_at, &snapshot.expires_at)?;
+        let request_id = MessageId::try_new(snapshot.id)?;
+        let peer_entity_id = EntityId::try_new(snapshot.peer_entity_id)?;
+        let response_binding = logout_binding_from_snapshot_value(&snapshot.expected_binding)?;
+        let request_binding = snapshot
+            .request_binding
+            .as_deref()
+            .map(logout_binding_from_snapshot_value)
+            .transpose()?
+            .unwrap_or(response_binding);
+        if request_binding != response_binding {
+            return Err(SamlError::Invalid(
+                "logout request and response bindings must match".into(),
+            ));
+        }
+        let mut pending = Self::try_new(
+            request_id,
+            snapshot.relay_state,
+            response_binding,
+            peer_entity_id,
+        )?;
+        pending.issued_at = snapshot.issued_at;
+        pending.expires_at = snapshot.expires_at;
+        Ok(pending)
     }
 
-    /// Expiration instant, if recorded.
-    pub fn expires_at(&self) -> Option<&SamlInstant> {
-        self.expires_at.as_ref()
+    /// Build a persistable snapshot.
+    pub fn snapshot(&self) -> PendingSnapshot<LogoutRequest> {
+        let mut snapshot = PendingSnapshot::logout_request(
+            self.id.as_str(),
+            self.relay_state.clone(),
+            self.peer_entity_id.as_str(),
+            self.details.binding,
+        );
+        snapshot.issued_at = self.issued_at.clone();
+        snapshot.expires_at = self.expires_at.clone();
+        snapshot
+    }
+
+    /// Logout request binding selected for dispatch.
+    pub fn request_binding(&self) -> LogoutBinding {
+        self.details.binding
+    }
+
+    /// Expected logout response binding.
+    pub fn response_binding(&self) -> LogoutBinding {
+        self.details.binding
     }
 }
 
@@ -369,9 +453,16 @@ fn sso_request_binding_from_snapshot_value(value: &str) -> Result<SsoRequestBind
     SsoRequestBinding::try_from(binding)
 }
 
+fn logout_binding_from_snapshot_value(value: &str) -> Result<LogoutBinding, SamlError> {
+    let binding = Binding::from_short_name(value)
+        .or_else(|| Binding::from_urn(value))
+        .ok_or(SamlError::UndefinedBinding)?;
+    LogoutBinding::try_from(binding)
+}
+
 /// Started browser flow with pending state and outbound browser action.
 #[derive(Debug, Clone)]
-pub struct Started<Message> {
+pub struct Started<Message: PendingMessage> {
     /// Pending correlation state.
     pub pending: Pending<Message>,
     /// Outbound browser action.

@@ -1,16 +1,41 @@
 use core::marker::PhantomData;
 
 use super::forms::{FormField, PostForm};
+use crate::constants::url_params;
 use crate::constants::Binding;
 use crate::entity::BindingContext;
 use crate::error::SamlError;
-use crate::model::{EndpointUrl, MessageId, RelayState};
+use crate::model::{
+    AuthnRequest, EndpointUrl, LogoutRequest, LogoutResponse, MessageId, RelayState, SsoResponse,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutboundKind {
     Redirect,
     Post,
     SimpleSignPost,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageField {
+    Request,
+    Response,
+}
+
+impl MessageField {
+    fn param_name(self) -> &'static str {
+        match self {
+            Self::Request => url_params::SAML_REQUEST,
+            Self::Response => url_params::SAML_RESPONSE,
+        }
+    }
+
+    fn opposite_param_name(self) -> &'static str {
+        match self {
+            Self::Request => url_params::SAML_RESPONSE,
+            Self::Response => url_params::SAML_REQUEST,
+        }
+    }
 }
 
 /// Typed outbound browser action.
@@ -77,57 +102,141 @@ impl<Message> Outbound<Message> {
     }
 }
 
-impl<Message> TryFrom<BindingContext> for Outbound<Message> {
+impl TryFrom<BindingContext> for Outbound<AuthnRequest> {
     type Error = SamlError;
 
     fn try_from(raw_context: BindingContext) -> Result<Self, Self::Error> {
-        let id = MessageId::try_new(raw_context.id.clone())?;
-        let relay_state = raw_context
-            .relay_state
-            .clone()
-            .map(RelayState::try_new)
-            .transpose()?;
-        match raw_context.binding {
-            Binding::Redirect => {
-                EndpointUrl::try_new(raw_context.context.clone())?;
-                Ok(Self {
-                    id,
-                    relay_state,
-                    kind: OutboundKind::Redirect,
-                    redirect_url: Some(raw_context.context.clone()),
-                    post_form: None,
-                    raw_context,
-                    _message: PhantomData,
-                })
+        outbound_from_context(raw_context, true, MessageField::Request)
+    }
+}
+
+impl TryFrom<BindingContext> for Outbound<SsoResponse> {
+    type Error = SamlError;
+
+    fn try_from(raw_context: BindingContext) -> Result<Self, Self::Error> {
+        outbound_from_context(raw_context, false, MessageField::Response)
+    }
+}
+
+impl TryFrom<BindingContext> for Outbound<LogoutRequest> {
+    type Error = SamlError;
+
+    fn try_from(raw_context: BindingContext) -> Result<Self, Self::Error> {
+        outbound_from_context(raw_context, true, MessageField::Request)
+    }
+}
+
+impl TryFrom<BindingContext> for Outbound<LogoutResponse> {
+    type Error = SamlError;
+
+    fn try_from(raw_context: BindingContext) -> Result<Self, Self::Error> {
+        outbound_from_context(raw_context, true, MessageField::Response)
+    }
+}
+
+fn outbound_from_context<Message>(
+    raw_context: BindingContext,
+    allow_redirect: bool,
+    expected_message: MessageField,
+) -> Result<Outbound<Message>, SamlError> {
+    validate_context_message_kind(&raw_context, expected_message)?;
+    let id = MessageId::try_new(raw_context.id.clone())?;
+    let relay_state = raw_context
+        .relay_state
+        .clone()
+        .map(RelayState::try_new)
+        .transpose()?;
+    match raw_context.binding {
+        Binding::Redirect => {
+            if !allow_redirect {
+                return Err(SamlError::UndefinedBinding);
             }
-            Binding::Post => {
-                reject_detached_signature_for_post(&raw_context)?;
-                let form = post_form_from_context(&raw_context, false)?;
-                Ok(Self {
-                    id,
-                    relay_state,
-                    kind: OutboundKind::Post,
-                    redirect_url: None,
-                    post_form: Some(form),
-                    raw_context,
-                    _message: PhantomData,
-                })
-            }
-            Binding::SimpleSign => {
-                require_complete_detached_signature(&raw_context)?;
-                let form = post_form_from_context(&raw_context, true)?;
-                Ok(Self {
-                    id,
-                    relay_state,
-                    kind: OutboundKind::SimpleSignPost,
-                    redirect_url: None,
-                    post_form: Some(form),
-                    raw_context,
-                    _message: PhantomData,
-                })
-            }
-            Binding::Artifact => Err(SamlError::UndefinedBinding),
+            EndpointUrl::try_new(raw_context.context.clone())?;
+            validate_redirect_message_kind(&raw_context.context, expected_message)?;
+            Ok(Outbound {
+                id,
+                relay_state,
+                kind: OutboundKind::Redirect,
+                redirect_url: Some(raw_context.context.clone()),
+                post_form: None,
+                raw_context,
+                _message: PhantomData,
+            })
         }
+        Binding::Post => {
+            reject_detached_signature_for_post(&raw_context)?;
+            let form = post_form_from_context(&raw_context, false)?;
+            Ok(Outbound {
+                id,
+                relay_state,
+                kind: OutboundKind::Post,
+                redirect_url: None,
+                post_form: Some(form),
+                raw_context,
+                _message: PhantomData,
+            })
+        }
+        Binding::SimpleSign => {
+            require_complete_detached_signature(&raw_context)?;
+            let form = post_form_from_context(&raw_context, true)?;
+            Ok(Outbound {
+                id,
+                relay_state,
+                kind: OutboundKind::SimpleSignPost,
+                redirect_url: None,
+                post_form: Some(form),
+                raw_context,
+                _message: PhantomData,
+            })
+        }
+        Binding::Artifact => Err(SamlError::UndefinedBinding),
+    }
+}
+
+fn validate_context_message_kind(
+    context: &BindingContext,
+    expected_message: MessageField,
+) -> Result<(), SamlError> {
+    let expected_name = expected_message.param_name();
+    if context.request_type == expected_name {
+        return Ok(());
+    }
+    Err(SamlError::Invalid(format!(
+        "outbound context request_type must be {expected_name}"
+    )))
+}
+
+fn validate_redirect_message_kind(
+    raw_url: &str,
+    expected_message: MessageField,
+) -> Result<(), SamlError> {
+    let expected_name = expected_message.param_name();
+    let opposite_name = expected_message.opposite_param_name();
+    let parsed = url::Url::parse(raw_url).map_err(|err| SamlError::Invalid(err.to_string()))?;
+    let (expected_count, opposite_count) =
+        parsed
+            .query_pairs()
+            .fold((0usize, 0usize), |(expected, opposite), (name, _)| {
+                if name == expected_name {
+                    (expected + 1, opposite)
+                } else if name == opposite_name {
+                    (expected, opposite + 1)
+                } else {
+                    (expected, opposite)
+                }
+            });
+
+    match (expected_count, opposite_count) {
+        (1, 0) => Ok(()),
+        (0, 0) => Err(SamlError::Invalid(format!(
+            "missing Redirect field {expected_name}"
+        ))),
+        (count, 0) if count > 1 => Err(SamlError::Invalid(format!(
+            "ambiguous Redirect field {expected_name}"
+        ))),
+        (_, _) => Err(SamlError::Invalid(format!(
+            "expected Redirect field {expected_name}, found {opposite_name}"
+        ))),
     }
 }
 

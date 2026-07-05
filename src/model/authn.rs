@@ -57,7 +57,7 @@ impl TryFrom<FlowResult> for AuthnRequest {
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let destination = optional_endpoint(&raw_flow.extract, "request.destination")?;
         let acs_url = optional_endpoint(&raw_flow.extract, "request.assertionConsumerServiceUrl")?;
-        let name_id_policy = name_id_policy_from_extract(&raw_flow.extract);
+        let name_id_policy = name_id_policy_from_extract(&raw_flow.extract)?;
         Ok(Self {
             id,
             issuer,

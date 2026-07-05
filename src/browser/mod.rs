@@ -15,4 +15,4 @@ pub use endpoints::{AcsEndpoint, SloEndpoint, SsoEndpoint};
 pub use forms::{FormField, PostForm};
 pub use input::BrowserInput;
 pub use outbound::Outbound;
-pub use pending::{Pending, PendingAuthnRequest, PendingSnapshot, Started};
+pub use pending::{Pending, PendingAuthnRequest, PendingLogoutRequest, PendingSnapshot, Started};
