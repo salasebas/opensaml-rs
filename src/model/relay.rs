@@ -10,10 +10,6 @@ pub const MAX_RELAY_STATE_BYTES: usize = 80;
 pub struct RelayState(String);
 
 impl RelayState {
-    pub(crate) fn from_preserved_value(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
     /// Wrap a RelayState value after enforcing the SAML Bindings byte limit.
     ///
     /// Explicit empty RelayState is allowed so callers can preserve browser
@@ -47,16 +43,31 @@ pub enum RelayStateParam {
 }
 
 impl RelayStateParam {
-    /// Preserve the exact RelayState presence state from an optional value.
-    pub fn from_option(value: Option<impl Into<String>>) -> Self {
+    /// Construct an absent RelayState parameter.
+    pub fn absent() -> Self {
+        Self::Absent
+    }
+
+    /// Construct a present RelayState parameter with an empty value.
+    pub fn present_empty() -> Self {
+        Self::PresentEmpty
+    }
+
+    /// Preserve the exact RelayState presence state from optional caller input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when a present non-empty value exceeds
+    /// the SAML Bindings 80-byte RelayState limit.
+    pub fn try_from_option(value: Option<impl Into<String>>) -> Result<Self, SamlError> {
         match value {
-            None => Self::Absent,
+            None => Ok(Self::Absent),
             Some(value) => {
                 let value = value.into();
                 if value.is_empty() {
-                    Self::PresentEmpty
+                    Ok(Self::PresentEmpty)
                 } else {
-                    Self::PresentValue(RelayState::from_preserved_value(value))
+                    Ok(Self::PresentValue(RelayState::try_new(value)?))
                 }
             }
         }
@@ -81,6 +92,14 @@ impl RelayStateParam {
             validate_relay_state_bytes(value)?;
         }
         Ok(())
+    }
+}
+
+impl TryFrom<Option<String>> for RelayStateParam {
+    type Error = SamlError;
+
+    fn try_from(value: Option<String>) -> Result<Self, Self::Error> {
+        Self::try_from_option(value)
     }
 }
 

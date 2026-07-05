@@ -45,8 +45,8 @@ pub mod xml;
 pub use api::{Idp, Saml, SamlError, Sp, Unknown};
 pub use browser::{
     AcsEndpoint, BrowserInput, EndpointUrl, FormField, LogoutBinding, Outbound, Pending,
-    PendingAuthnRequest, PendingSnapshot, PostForm, SloEndpoint, SsoEndpoint, SsoRequestBinding,
-    SsoResponseBinding, Started,
+    PendingAuthnRequest, PendingLogoutRequest, PendingSnapshot, PostForm, SloEndpoint, SsoEndpoint,
+    SsoRequestBinding, SsoResponseBinding, Started,
 };
 pub use config::{
     AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
@@ -64,9 +64,9 @@ pub use entity::EntitySetting;
 pub use idp::IdentityProvider;
 pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
-    LogoutCompleted, LogoutRequest, LogoutResponse, MessageId, NameId, NameIdPolicy, Received,
-    RelayState, RelayStateParam, SamlInstant, SessionIndex, SsoResponse, SsoSession, Subject,
-    SubjectConfirmation, MAX_RELAY_STATE_BYTES,
+    LogoutCompleted, LogoutRequest, LogoutResponse, MessageId, NameId, NameIdCreationRequest,
+    NameIdPolicy, Received, RelayState, RelayStateParam, SamlInstant, SessionIndex, SsoResponse,
+    SsoSession, Subject, SubjectConfirmation, MAX_RELAY_STATE_BYTES,
 };
 #[doc = "Compatibility export. Prefer `raw::ServiceProvider` for low-level APIs."]
 pub use sp::ServiceProvider;

@@ -23,4 +23,4 @@ pub use received::Received;
 pub use relay::{RelayState, RelayStateParam, MAX_RELAY_STATE_BYTES};
 pub use session::AuthnSession;
 pub use sso::{Assertion, SsoResponse, SsoSession};
-pub use subject::{NameId, NameIdPolicy, Subject, SubjectConfirmation};
+pub use subject::{NameId, NameIdCreationRequest, NameIdPolicy, Subject, SubjectConfirmation};

@@ -189,6 +189,11 @@ impl TryFrom<FlowResult> for SsoSession {
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
         let response_id = MessageId::try_new(required_str(&raw_flow.extract, "response.id")?)?;
+        let assertion_id = raw_flow
+            .extract
+            .get_str("assertion.id")
+            .map(AssertionId::try_new)
+            .transpose()?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let in_response_to = optional_request_id(&raw_flow.extract, "response.inResponseTo")?;
         let name_id = NameId::new(required_str(&raw_flow.extract, "nameID")?, None);
@@ -204,7 +209,7 @@ impl TryFrom<FlowResult> for SsoSession {
         let sig_alg = raw_flow.sig_alg.clone();
         Ok(Self {
             response_id,
-            assertion_id: None,
+            assertion_id,
             issuer,
             in_response_to,
             subject,

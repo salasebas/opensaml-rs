@@ -8,6 +8,7 @@ use super::forms::FormField;
 use crate::binding::{base64_decode_with_limit, build_simplesign_octet};
 use crate::constants::url_params;
 use crate::error::SamlError;
+use crate::model::{AuthnRequest, LogoutRequest, LogoutResponse, SsoResponse};
 use crate::raw::HttpRequest;
 use crate::xml::XmlLimits;
 
@@ -39,73 +40,184 @@ pub enum BrowserInput<Message> {
     },
 }
 
-impl<Message> BrowserInput<Message> {
+impl BrowserInput<AuthnRequest> {
     /// Create Redirect input from a raw query string.
     pub fn redirect(raw_query: impl Into<String>) -> Self {
-        Self::Redirect {
-            raw_query: raw_query.into(),
-            _message: PhantomData,
-        }
+        redirect_input(raw_query)
     }
 
     /// Create POST input from parsed fields.
     pub fn post(fields: Vec<FormField>) -> Self {
-        Self::Post {
-            fields,
-            _message: PhantomData,
-        }
+        post_input(fields)
     }
 
     /// Create SimpleSign input from parsed fields.
     pub fn simple_sign(fields: Vec<FormField>) -> Self {
-        Self::SimpleSignPost {
-            raw_body: String::new(),
-            fields,
-            _message: PhantomData,
-        }
+        simple_sign_input(fields)
     }
 
     /// Parse a raw `application/x-www-form-urlencoded` SimpleSign body.
     pub fn simple_sign_body(raw_body: impl Into<String>) -> Self {
-        let raw_body = raw_body.into();
-        let fields = parse_form_fields(&raw_body);
-        Self::SimpleSignPost {
-            raw_body,
-            fields,
-            _message: PhantomData,
-        }
+        simple_sign_body_input(raw_body)
     }
 }
 
-impl<Message> TryFrom<BrowserInput<Message>> for HttpRequest {
+impl BrowserInput<SsoResponse> {
+    /// Create POST input from parsed fields.
+    pub fn post(fields: Vec<FormField>) -> Self {
+        post_input(fields)
+    }
+
+    /// Create SimpleSign input from parsed fields.
+    pub fn simple_sign(fields: Vec<FormField>) -> Self {
+        simple_sign_input(fields)
+    }
+
+    /// Parse a raw `application/x-www-form-urlencoded` SimpleSign body.
+    pub fn simple_sign_body(raw_body: impl Into<String>) -> Self {
+        simple_sign_body_input(raw_body)
+    }
+}
+
+impl BrowserInput<LogoutRequest> {
+    /// Create Redirect input from a raw query string.
+    pub fn redirect(raw_query: impl Into<String>) -> Self {
+        redirect_input(raw_query)
+    }
+
+    /// Create POST input from parsed fields.
+    pub fn post(fields: Vec<FormField>) -> Self {
+        post_input(fields)
+    }
+
+    /// Create SimpleSign input from parsed fields.
+    pub fn simple_sign(fields: Vec<FormField>) -> Self {
+        simple_sign_input(fields)
+    }
+
+    /// Parse a raw `application/x-www-form-urlencoded` SimpleSign body.
+    pub fn simple_sign_body(raw_body: impl Into<String>) -> Self {
+        simple_sign_body_input(raw_body)
+    }
+}
+
+impl BrowserInput<LogoutResponse> {
+    /// Create Redirect input from a raw query string.
+    pub fn redirect(raw_query: impl Into<String>) -> Self {
+        redirect_input(raw_query)
+    }
+
+    /// Create POST input from parsed fields.
+    pub fn post(fields: Vec<FormField>) -> Self {
+        post_input(fields)
+    }
+
+    /// Create SimpleSign input from parsed fields.
+    pub fn simple_sign(fields: Vec<FormField>) -> Self {
+        simple_sign_input(fields)
+    }
+
+    /// Parse a raw `application/x-www-form-urlencoded` SimpleSign body.
+    pub fn simple_sign_body(raw_body: impl Into<String>) -> Self {
+        simple_sign_body_input(raw_body)
+    }
+}
+
+impl TryFrom<BrowserInput<AuthnRequest>> for HttpRequest {
     type Error = SamlError;
 
-    fn try_from(value: BrowserInput<Message>) -> Result<Self, Self::Error> {
-        match value {
-            BrowserInput::Redirect { raw_query, .. } => {
-                let raw_query = raw_query.trim_start_matches('?').to_string();
-                let octet_string = redirect_octet_from_raw_query(&raw_query)?;
-                let query = parse_form_pairs(&raw_query);
-                Ok(HttpRequest {
-                    query,
-                    octet_string,
-                    ..Default::default()
-                })
+    fn try_from(value: BrowserInput<AuthnRequest>) -> Result<Self, Self::Error> {
+        http_request_from_input(value, true)
+    }
+}
+
+impl TryFrom<BrowserInput<SsoResponse>> for HttpRequest {
+    type Error = SamlError;
+
+    fn try_from(value: BrowserInput<SsoResponse>) -> Result<Self, Self::Error> {
+        http_request_from_input(value, false)
+    }
+}
+
+impl TryFrom<BrowserInput<LogoutRequest>> for HttpRequest {
+    type Error = SamlError;
+
+    fn try_from(value: BrowserInput<LogoutRequest>) -> Result<Self, Self::Error> {
+        http_request_from_input(value, true)
+    }
+}
+
+impl TryFrom<BrowserInput<LogoutResponse>> for HttpRequest {
+    type Error = SamlError;
+
+    fn try_from(value: BrowserInput<LogoutResponse>) -> Result<Self, Self::Error> {
+        http_request_from_input(value, true)
+    }
+}
+
+fn redirect_input<Message>(raw_query: impl Into<String>) -> BrowserInput<Message> {
+    BrowserInput::Redirect {
+        raw_query: raw_query.into(),
+        _message: PhantomData,
+    }
+}
+
+fn post_input<Message>(fields: Vec<FormField>) -> BrowserInput<Message> {
+    BrowserInput::Post {
+        fields,
+        _message: PhantomData,
+    }
+}
+
+fn simple_sign_input<Message>(fields: Vec<FormField>) -> BrowserInput<Message> {
+    BrowserInput::SimpleSignPost {
+        raw_body: String::new(),
+        fields,
+        _message: PhantomData,
+    }
+}
+
+fn simple_sign_body_input<Message>(raw_body: impl Into<String>) -> BrowserInput<Message> {
+    let raw_body = raw_body.into();
+    let fields = parse_form_fields(&raw_body);
+    BrowserInput::SimpleSignPost {
+        raw_body,
+        fields,
+        _message: PhantomData,
+    }
+}
+
+fn http_request_from_input<Message>(
+    value: BrowserInput<Message>,
+    allow_redirect: bool,
+) -> Result<HttpRequest, SamlError> {
+    match value {
+        BrowserInput::Redirect { raw_query, .. } => {
+            if !allow_redirect {
+                return Err(SamlError::UndefinedBinding);
             }
-            BrowserInput::Post { fields, .. } => Ok(HttpRequest::post(fields_to_pairs(fields))),
-            BrowserInput::SimpleSignPost {
-                raw_body,
-                mut fields,
-                ..
-            } => {
-                if fields.is_empty() {
-                    fields = parse_form_fields(&raw_body);
-                }
-                let octet_string = simplesign_octet_from_fields(&fields)?;
-                let mut request = HttpRequest::post(fields_to_pairs(fields));
-                request.octet_string = Some(octet_string);
-                Ok(request)
+            let raw_query = raw_query.trim_start_matches('?').to_string();
+            let octet_string = redirect_octet_from_raw_query(&raw_query)?;
+            let query = parse_form_pairs(&raw_query);
+            Ok(HttpRequest {
+                query,
+                octet_string,
+                ..Default::default()
+            })
+        }
+        BrowserInput::Post { fields, .. } => Ok(HttpRequest::post(fields_to_pairs(fields))),
+        BrowserInput::SimpleSignPost {
+            raw_body,
+            mut fields,
+            ..
+        } => {
+            if fields.is_empty() {
+                fields = parse_form_fields(&raw_body);
             }
+            let octet_string = simplesign_octet_from_fields(&fields)?;
+            let mut request = HttpRequest::post(fields_to_pairs(fields));
+            request.octet_string = Some(octet_string);
+            Ok(request)
         }
     }
 }

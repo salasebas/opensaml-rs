@@ -31,16 +31,56 @@ impl NameId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameIdPolicy {
     format: Option<NameIdFormat>,
-    allow_create: Option<bool>,
+    creation_request: NameIdCreationRequest,
+}
+
+/// AuthnRequest NameID creation request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameIdCreationRequest {
+    /// The request did not specify whether the IdP may create a new identifier.
+    Unspecified,
+    /// The IdP may create a new identifier.
+    AllowCreate,
+    /// The IdP must not create a new identifier.
+    DoNotAllowCreate,
 }
 
 impl NameIdPolicy {
     /// Create a NameIDPolicy model.
-    pub fn new(format: Option<NameIdFormat>, allow_create: Option<bool>) -> Self {
+    pub fn new(format: Option<NameIdFormat>, creation_request: NameIdCreationRequest) -> Self {
         Self {
             format,
-            allow_create,
+            creation_request,
         }
+    }
+
+    /// Create a NameIDPolicy without an AllowCreate preference.
+    pub fn unspecified(format: Option<NameIdFormat>) -> Self {
+        Self::new(format, NameIdCreationRequest::Unspecified)
+    }
+
+    /// Create a NameIDPolicy allowing the IdP to create a new identifier.
+    pub fn allow_creation(format: Option<NameIdFormat>) -> Self {
+        Self::new(format, NameIdCreationRequest::AllowCreate)
+    }
+
+    /// Create a NameIDPolicy forbidding the IdP from creating a new identifier.
+    pub fn disallow_creation(format: Option<NameIdFormat>) -> Self {
+        Self::new(format, NameIdCreationRequest::DoNotAllowCreate)
+    }
+
+    pub(crate) fn from_parsed(
+        format: Option<NameIdFormat>,
+        allow_create: Option<bool>,
+    ) -> Option<Self> {
+        if format.is_none() && allow_create.is_none() {
+            return None;
+        }
+        Some(match allow_create {
+            Some(true) => Self::allow_creation(format),
+            Some(false) => Self::disallow_creation(format),
+            None => Self::unspecified(format),
+        })
     }
 
     /// Requested NameID format.
@@ -48,9 +88,18 @@ impl NameIdPolicy {
         self.format.as_ref()
     }
 
+    /// NameID creation request.
+    pub fn creation_request(&self) -> NameIdCreationRequest {
+        self.creation_request
+    }
+
     /// Whether the IdP may create a new identifier.
     pub fn allow_create(&self) -> Option<bool> {
-        self.allow_create
+        match self.creation_request {
+            NameIdCreationRequest::Unspecified => None,
+            NameIdCreationRequest::AllowCreate => Some(true),
+            NameIdCreationRequest::DoNotAllowCreate => Some(false),
+        }
     }
 }
 

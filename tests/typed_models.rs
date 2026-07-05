@@ -7,9 +7,10 @@ use saml_rs::util::Value;
 use saml_rs::xml::XmlLimits;
 use saml_rs::{raw::LoginResponseOptions, raw::User};
 use saml_rs::{
-    AuthnRequest, BrowserInput, EndpointUrl, EntitySetting, FormField, IdentityProvider,
-    LogoutRequest, LogoutResponse, MessageId, Outbound, Pending, RelayState, RelayStateParam,
-    SamlError, SamlInstant, ServiceProvider, SsoRequestBinding, SsoResponseBinding, SsoSession,
+    AcsEndpoint, AuthnRequest, BrowserInput, EndpointUrl, EntitySetting, FormField,
+    IdentityProvider, LogoutRequest, LogoutResponse, MessageId, NameIdCreationRequest,
+    NameIdPolicy, Outbound, PendingAuthnRequest, RelayState, RelayStateParam, SamlError,
+    SamlInstant, ServiceProvider, SsoRequestBinding, SsoResponse, SsoResponseBinding, SsoSession,
 };
 
 const IDP_PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
@@ -44,19 +45,23 @@ fn typed_models_endpoint_url_rejects_relative_urls() {
 
 #[test]
 fn typed_models_relay_state_preserves_tri_state() -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(RelayStateParam::absent(), RelayStateParam::Absent);
     assert_eq!(
-        RelayStateParam::from_option(Option::<String>::None),
-        RelayStateParam::Absent
-    );
-    assert_eq!(
-        RelayStateParam::from_option(Some(String::new())),
+        RelayStateParam::present_empty(),
         RelayStateParam::PresentEmpty
     );
     assert_eq!(
-        RelayStateParam::from_option(Some("state".to_string())),
+        RelayStateParam::try_from_option(Some("state".to_string()))?,
         RelayStateParam::PresentValue(RelayState::try_new("state")?)
     );
     Ok(())
+}
+
+#[test]
+fn typed_models_relay_state_try_from_option_rejects_overlong_values() {
+    let result = RelayStateParam::try_from_option(Some("a".repeat(81)));
+
+    assert!(matches!(result, Err(SamlError::Invalid(_))));
 }
 
 fn binding_context(binding: Binding) -> BindingContext {
@@ -74,6 +79,13 @@ fn binding_context(binding: Binding) -> BindingContext {
         signature: None,
         sig_alg: None,
     }
+}
+
+fn signed_binding_context(binding: Binding) -> BindingContext {
+    let mut context = binding_context(binding);
+    context.sig_alg = Some("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256".to_string());
+    context.signature = Some("signature-value".to_string());
+    context
 }
 
 #[test]
@@ -161,6 +173,48 @@ fn typed_models_artifact_outbound_is_rejected() {
 }
 
 #[test]
+fn typed_models_sso_response_outbound_rejects_redirect() {
+    let result = Outbound::<SsoResponse>::try_from(binding_context(Binding::Redirect));
+
+    assert!(matches!(result, Err(SamlError::UndefinedBinding)));
+}
+
+#[test]
+fn typed_models_authn_request_outbound_accepts_browser_dispatch_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let redirect = Outbound::<AuthnRequest>::try_from(binding_context(Binding::Redirect))?;
+    let post = Outbound::<AuthnRequest>::try_from(binding_context(Binding::Post))?;
+    let simple_sign =
+        Outbound::<AuthnRequest>::try_from(signed_binding_context(Binding::SimpleSign))?;
+
+    assert!(redirect.redirect_url().is_ok());
+    assert!(post.post_form().is_ok());
+    assert!(simple_sign.post_form().is_ok());
+    Ok(())
+}
+
+#[test]
+fn typed_models_slo_outbound_accepts_logout_bindings() -> Result<(), Box<dyn std::error::Error>> {
+    for binding in [Binding::Redirect, Binding::Post, Binding::SimpleSign] {
+        let request_context = match binding {
+            Binding::SimpleSign => signed_binding_context(binding),
+            Binding::Redirect | Binding::Post | Binding::Artifact => binding_context(binding),
+        };
+        let response_context = match binding {
+            Binding::SimpleSign => signed_binding_context(binding),
+            Binding::Redirect | Binding::Post | Binding::Artifact => binding_context(binding),
+        };
+
+        let request = Outbound::<LogoutRequest>::try_from(request_context)?;
+        let response = Outbound::<LogoutResponse>::try_from(response_context)?;
+
+        assert_eq!(request.raw_context().binding, binding);
+        assert_eq!(response.raw_context().binding, binding);
+    }
+    Ok(())
+}
+
+#[test]
 fn typed_models_redirect_browser_input_converts_to_http_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let input = BrowserInput::<AuthnRequest>::redirect(
@@ -183,6 +237,18 @@ fn typed_models_redirect_browser_input_converts_to_http_request(
         Some("SAMLRequest=abc&RelayState=relay&SigAlg=alg")
     );
     Ok(())
+}
+
+#[test]
+fn typed_models_sso_response_browser_input_rejects_redirect() {
+    let input = BrowserInput::<SsoResponse>::Redirect {
+        raw_query: "?SAMLResponse=abc&SigAlg=alg&Signature=sig".to_string(),
+        _message: std::marker::PhantomData,
+    };
+
+    let result = saml_rs::raw::HttpRequest::try_from(input);
+
+    assert!(matches!(result, Err(SamlError::UndefinedBinding)));
 }
 
 #[test]
@@ -306,6 +372,33 @@ fn typed_models_simplesign_browser_input_accepts_raw_body_only(
 }
 
 #[test]
+fn typed_models_logout_browser_input_preserves_detached_signature_octets(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let redirect = BrowserInput::<LogoutRequest>::redirect(
+        "?SAMLRequest=abc&RelayState=relay&SigAlg=alg&Signature=sig",
+    );
+    let simple_sign = BrowserInput::<LogoutResponse>::simple_sign(vec![
+        FormField::new("SAMLResponse", "PHNhbWxwOkF1dGhuUmVxdWVzdC8+"),
+        FormField::new("RelayState", "relay"),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]);
+
+    let redirect_request = saml_rs::raw::HttpRequest::try_from(redirect)?;
+    let simple_sign_request = saml_rs::raw::HttpRequest::try_from(simple_sign)?;
+
+    assert_eq!(
+        redirect_request.octet_string.as_deref(),
+        Some("SAMLRequest=abc&RelayState=relay&SigAlg=alg")
+    );
+    assert_eq!(
+        simple_sign_request.octet_string.as_deref(),
+        Some("SAMLResponse=<samlp:AuthnRequest/>&RelayState=relay&SigAlg=alg")
+    );
+    Ok(())
+}
+
+#[test]
 fn typed_models_simplesign_browser_input_bounds_decoded_xml() {
     let too_large = vec![b'a'; XmlLimits::default().max_bytes + 1];
     let input = BrowserInput::<AuthnRequest>::simple_sign(vec![
@@ -388,6 +481,26 @@ fn typed_models_authn_request_from_flow_result_exposes_typed_fields(
 }
 
 #[test]
+fn typed_models_name_id_policy_constructors_use_typed_creation_request() {
+    let unspecified = NameIdPolicy::unspecified(None);
+    let allow = NameIdPolicy::allow_creation(None);
+    let disallow = NameIdPolicy::disallow_creation(None);
+
+    assert_eq!(
+        unspecified.creation_request(),
+        NameIdCreationRequest::Unspecified
+    );
+    assert_eq!(unspecified.allow_create(), None);
+    assert_eq!(allow.creation_request(), NameIdCreationRequest::AllowCreate);
+    assert_eq!(allow.allow_create(), Some(true));
+    assert_eq!(
+        disallow.creation_request(),
+        NameIdCreationRequest::DoNotAllowCreate
+    );
+    assert_eq!(disallow.allow_create(), Some(false));
+}
+
+#[test]
 fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let flow = FlowResult {
@@ -400,6 +513,10 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
                     ("id", value_str("_response123")),
                     ("inResponseTo", value_str("_request123")),
                 ]),
+            ),
+            (
+                "assertion",
+                value_object(vec![("id", value_str("_assertion123"))]),
             ),
             ("issuer", value_str("https://idp.example.com/metadata")),
             ("nameID", value_str("alice@example.com")),
@@ -440,6 +557,14 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
         .ok_or("missing affiliation")?;
 
     assert_eq!(session.response_id().as_str(), "_response123");
+    assert_eq!(
+        session.assertion_id().map(saml_rs::AssertionId::as_str),
+        Some("_assertion123")
+    );
+    assert_eq!(
+        session.assertion().id().map(saml_rs::AssertionId::as_str),
+        Some("_assertion123")
+    );
     assert_eq!(session.name_id().value(), "alice@example.com");
     assert_eq!(
         affiliation
@@ -457,6 +582,28 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
         Some("_session123")
     );
     assert_eq!(session.sig_alg(), Some("sig-alg"));
+    Ok(())
+}
+
+#[test]
+fn typed_models_sso_session_without_assertion_id_keeps_none(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let flow = FlowResult {
+        saml_content: "<samlp:Response/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "response",
+                value_object(vec![("id", value_str("_response123"))]),
+            ),
+            ("issuer", value_str("https://idp.example.com/metadata")),
+            ("nameID", value_str("alice@example.com")),
+        ]),
+    };
+
+    let session = SsoSession::try_from(flow)?;
+
+    assert_eq!(session.assertion_id(), None);
     Ok(())
 }
 
@@ -648,6 +795,7 @@ fn typed_models_existing_login_response_flow_converts_to_typed_session(
         session.in_response_to().map(MessageId::as_str),
         Some("_request123")
     );
+    assert!(session.assertion_id().is_some());
     Ok(())
 }
 
@@ -713,19 +861,20 @@ fn typed_models_existing_login_response_flow_preserves_multi_value_attributes(
 #[test]
 fn typed_models_pending_snapshot_round_trips_without_raw_state(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let pending = Pending::<AuthnRequest>::try_new(
+    let pending = PendingAuthnRequest::try_new(
         MessageId::try_new("_request123")?,
-        RelayStateParam::from_option(Some("relay".to_string())),
-        Some(SsoRequestBinding::Redirect),
-        Some(SsoResponseBinding::Post),
+        RelayStateParam::try_from_option(Some("relay".to_string()))?,
+        AcsEndpoint::post("https://sp.example.com/acs")?.with_index(3),
+        SsoResponseBinding::Post,
         saml_rs::EntityId::try_new("https://idp.example.com/metadata")?,
     )?
+    .with_request_binding(SsoRequestBinding::Redirect)
     .with_issue_instant(SamlInstant::try_new("2026-07-04T12:00:00Z")?)
     .with_expiration(SamlInstant::try_new("2026-07-04T12:05:00Z")?);
 
     let snapshot = pending.snapshot();
     let snapshot_debug = format!("{snapshot:?}");
-    let restored = Pending::<AuthnRequest>::from_snapshot(snapshot)?;
+    let restored = PendingAuthnRequest::from_snapshot(snapshot)?;
 
     assert_eq!(restored.id().as_str(), "_request123");
     assert_eq!(
@@ -736,7 +885,8 @@ fn typed_models_pending_snapshot_round_trips_without_raw_state(
         restored.request_binding(),
         Some(SsoRequestBinding::Redirect)
     );
-    assert_eq!(restored.response_binding(), Some(SsoResponseBinding::Post));
+    assert_eq!(restored.response_binding(), SsoResponseBinding::Post);
+    assert_eq!(restored.acs().index(), Some(3));
     assert_eq!(
         restored.peer_entity_id().as_str(),
         "https://idp.example.com/metadata"
@@ -757,18 +907,18 @@ fn typed_models_pending_snapshot_round_trips_without_raw_state(
 #[test]
 fn typed_models_pending_snapshot_validates_expiration_requires_issue_instant(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let pending = Pending::<AuthnRequest>::try_new(
+    let pending = PendingAuthnRequest::try_new(
         MessageId::try_new("_request123")?,
         RelayStateParam::Absent,
-        Some(SsoRequestBinding::Redirect),
-        Some(SsoResponseBinding::Post),
+        AcsEndpoint::post("https://sp.example.com/acs")?,
+        SsoResponseBinding::Post,
         saml_rs::EntityId::try_new("https://idp.example.com/metadata")?,
     )?;
     let mut snapshot = pending.snapshot();
     snapshot.expires_at = Some(SamlInstant::try_new("2026-07-04T12:05:00Z")?);
 
     assert!(matches!(
-        Pending::<AuthnRequest>::from_snapshot(snapshot),
+        PendingAuthnRequest::from_snapshot(snapshot),
         Err(SamlError::Invalid(_))
     ));
     Ok(())

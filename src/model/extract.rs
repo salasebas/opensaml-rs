@@ -42,7 +42,7 @@ pub(super) fn name_id_policy_from_extract(extract: &Value) -> Option<NameIdPolic
     let allow_create = extract
         .get_str("nameIDPolicy.allowCreate")
         .and_then(parse_bool);
-    (format.is_some() || allow_create.is_some()).then(|| NameIdPolicy::new(format, allow_create))
+    NameIdPolicy::from_parsed(format, allow_create)
 }
 
 fn parse_bool(value: &str) -> Option<bool> {

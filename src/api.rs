@@ -8,9 +8,8 @@
 //! Artifact binding is not part of the planned high-level browser SSO request
 //! binding contract.
 //!
-//! ```ignore
-//! # // TODO(plan 013): change this to `compile_fail` once `SsoRequestBinding` exists.
-//! use saml_rs::{Binding, SsoRequestBinding};
+//! ```compile_fail
+//! use saml_rs::{raw::Binding, SsoRequestBinding};
 //!
 //! let binding: SsoRequestBinding = Binding::Artifact;
 //! ```
