@@ -1,5 +1,5 @@
 use saml_rs::config::{
-    AcsEndpoint, AuthnRequest, LogoutBinding, PendingAuthnRequest, PendingSnapshot,
+    AcsEndpoint, AuthnRequest, LogoutBinding, PendingAuthnRequest, PendingSnapshot, RelayState,
     RelayStateState, RequestId, SamlInstant, SloEndpoint, SsoEndpoint, SsoRequestBinding,
     SsoResponseBinding,
 };
@@ -198,7 +198,7 @@ fn typed_bindings_relay_state_preserves_absent_empty_and_present_values() {
     );
     assert_eq!(
         RelayStateState::from_option(Some("state-123".to_string())),
-        RelayStateState::PresentValue("state-123".to_string())
+        RelayStateState::PresentValue(RelayState::new("state-123"))
     );
 }
 
@@ -225,7 +225,7 @@ fn typed_bindings_pending_authn_request_snapshot_round_trips_without_raw_state(
     assert_eq!(restored.request_id().as_str(), "_request123");
     assert_eq!(
         restored.relay_state(),
-        &RelayStateState::PresentValue("relay".to_string())
+        &RelayStateState::PresentValue(RelayState::new("relay"))
     );
     assert_eq!(restored.acs().binding(), SsoResponseBinding::Post);
     assert_eq!(restored.acs().url().as_str(), "https://sp.example.com/acs");
@@ -291,7 +291,7 @@ fn typed_bindings_pending_snapshot_validates_request_id() {
 #[test]
 fn typed_bindings_pending_snapshot_validates_relay_state() {
     let mut snapshot = valid_authn_snapshot();
-    snapshot.relay_state = RelayStateState::PresentValue(String::new());
+    snapshot.relay_state = RelayStateState::PresentValue(RelayState::new(String::new()));
 
     assert!(matches!(
         PendingAuthnRequest::from_snapshot(snapshot),

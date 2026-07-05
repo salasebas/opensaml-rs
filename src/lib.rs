@@ -23,6 +23,7 @@
 
 pub mod api;
 pub mod binding;
+pub mod browser;
 pub mod config;
 pub mod constants;
 pub mod context;
@@ -33,6 +34,7 @@ pub mod flow;
 pub mod idp;
 pub mod logout;
 pub mod metadata;
+pub mod model;
 pub mod raw;
 pub mod sp;
 pub mod template;
@@ -41,21 +43,29 @@ pub mod validator;
 pub mod xml;
 
 pub use api::{Idp, Saml, SamlError, Sp, Unknown};
+pub use browser::{
+    AcsEndpoint, BrowserInput, EndpointUrl, FormField, LogoutBinding, Outbound, Pending,
+    PendingAuthnRequest, PendingSnapshot, PostForm, SloEndpoint, SsoEndpoint, SsoRequestBinding,
+    SsoResponseBinding, Started,
+};
 pub use config::{
-    AcsEndpoint, AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy,
-    AudienceValidationPolicy, AuthnRequest, AuthnRequestSignaturePolicy, CertificatePem,
-    Credentials, DataEncryptionAlgorithm, DigestAlgorithm, EndpointUrl, EntityId, IdpConfig,
-    IdpDescriptor, IdpMetadataConfigTyped, IdpValidationPolicy, KeyEncryptionAlgorithm,
-    LogoutBinding, LogoutPolicy, LogoutSignaturePolicy, MessageSignaturePolicy,
-    MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase, PendingAuthnRequest,
-    PendingSnapshot, PrivateKeyPem, RelayStateState, RequestId, SamlInstant, SignatureAlgorithm,
-    SloEndpoint, SpConfig, SpDescriptor, SpMetadataConfigTyped, SpValidationPolicy, SsoEndpoint,
-    SsoRequestBinding, SsoResponseBinding, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy,
-    XmlPolicy,
+    AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
+    AuthnRequestSignaturePolicy, CertificatePem, Credentials, DataEncryptionAlgorithm,
+    DigestAlgorithm, EntityId, IdpConfig, IdpDescriptor, IdpMetadataConfigTyped,
+    IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy, LogoutSignaturePolicy,
+    MessageSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase,
+    PrivateKeyPem, SignatureAlgorithm, SpConfig, SpDescriptor, SpMetadataConfigTyped,
+    SpValidationPolicy, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
 };
 #[doc = "Compatibility export. Prefer `raw::EntitySetting` for low-level APIs."]
 pub use entity::EntitySetting;
 #[doc = "Compatibility export. Prefer `raw::IdentityProvider` for low-level APIs."]
 pub use idp::IdentityProvider;
+pub use model::{
+    Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
+    LogoutCompleted, LogoutRequest, LogoutResponse, NameId, NameIdPolicy, Received, RelayState,
+    RelayStateState, RequestId, SamlInstant, SessionIndex, SsoResponse, SsoSession, Subject,
+    SubjectConfirmation,
+};
 #[doc = "Compatibility export. Prefer `raw::ServiceProvider` for low-level APIs."]
 pub use sp::ServiceProvider;
