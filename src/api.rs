@@ -1,12 +1,7 @@
 //! Typed high-level API contract for `saml-rs`.
 //!
-//! This module contains the public facade names that future typed SSO/SLO
-//! flows will build on. The role-specific operations are planned for later
-//! milestones; advanced callers can continue to use [`crate::raw`] for the
-//! current low-level protocol API.
-//!
-//! Artifact binding is not part of the planned high-level browser SSO request
-//! binding contract.
+//! Artifact binding is not part of the high-level browser SSO request binding
+//! contract.
 //!
 //! ```compile_fail
 //! use saml_rs::SsoRequestBinding;
@@ -14,25 +9,605 @@
 //! let binding = SsoRequestBinding::Artifact;
 //! ```
 
-use std::marker::PhantomData;
+use crate::browser::{
+    AcsEndpoint, BrowserInput, Outbound, Pending, PendingAuthnRequest, SsoRequestBinding,
+    SsoResponseBinding, Started,
+};
+use crate::config::{
+    AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, CertificatePem, EntityId, IdpConfig,
+    IdpDescriptor, NameIdFormat, SpConfig, SpDescriptor,
+};
+use crate::constants::Binding;
+use crate::entity::EntitySetting;
+use crate::error::SamlError as Error;
+use crate::flow::HttpRequest;
+use crate::idp::{IdentityProvider, LoginResponseOptions};
+use crate::metadata::{
+    IdpMetadataConfig as RawIdpMetadataConfig, SpMetadataConfig as RawSpMetadataConfig,
+};
+use crate::model::{
+    AuthnRequest, Received, RelayStateParam, SamlValidationContext, SsoResponse, SsoSession,
+    Subject,
+};
+use crate::sp::{LoginRequestOptions, ServiceProvider};
 
 /// Typed SAML facade for high-level browser SSO/SLO flows.
-///
-/// The `Role` parameter identifies whether this facade represents a Service
-/// Provider or Identity Provider. Use [`Sp`] and [`Idp`] through the crate root
-/// re-exports when naming role-specific handles.
-pub struct Saml<Role = Unknown> {
-    _role: PhantomData<Role>,
-}
+pub struct Saml<Role = Unknown>(Role);
 
 /// Marker role used before a facade has been configured as an SP or IdP.
 pub enum Unknown {}
 
 /// Marker role for a Service Provider facade.
-pub enum Sp {}
+pub struct Sp {
+    service_provider: ServiceProvider,
+}
 
 /// Marker role for an Identity Provider facade.
-pub enum Idp {}
+pub struct Idp {
+    identity_provider: IdentityProvider,
+}
 
 /// Error type returned by the typed SAML API.
-pub type SamlError = crate::error::SamlError;
+pub type SamlError = Error;
+
+/// Options for starting SP-initiated Web SSO.
+#[derive(Debug, Clone)]
+pub struct StartSso {
+    binding: SsoRequestBinding,
+    response_binding: SsoResponseBinding,
+    relay_state: RelayStateParam,
+    force_authn: Option<bool>,
+    acs_index: Option<u16>,
+}
+
+impl StartSso {
+    /// Start SSO with HTTP-Redirect AuthnRequest dispatch.
+    pub fn redirect() -> Self {
+        Self::new(SsoRequestBinding::Redirect)
+    }
+
+    /// Start SSO with HTTP-POST AuthnRequest dispatch.
+    pub fn post() -> Self {
+        Self::new(SsoRequestBinding::Post)
+    }
+
+    /// Start SSO with HTTP-POST-SimpleSign AuthnRequest dispatch.
+    pub fn simple_sign() -> Self {
+        Self::new(SsoRequestBinding::SimpleSign)
+    }
+
+    fn new(binding: SsoRequestBinding) -> Self {
+        Self {
+            binding,
+            response_binding: SsoResponseBinding::Post,
+            relay_state: RelayStateParam::absent(),
+            force_authn: None,
+            acs_index: None,
+        }
+    }
+
+    /// Set the expected SAML Response binding.
+    pub fn response_binding(mut self, binding: SsoResponseBinding) -> Self {
+        self.response_binding = binding;
+        self
+    }
+
+    /// Set exact RelayState state for the outbound request.
+    pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
+        self.relay_state = relay_state;
+        self
+    }
+
+    /// Set ForceAuthn.
+    pub fn force_authn(mut self, force_authn: bool) -> Self {
+        self.force_authn = Some(force_authn);
+        self
+    }
+
+    /// Select an AssertionConsumerServiceIndex.
+    pub fn acs_index(mut self, acs_index: u16) -> Self {
+        self.acs_index = Some(acs_index);
+        self
+    }
+}
+
+/// Options for issuing SAML Responses from an IdP.
+#[derive(Debug, Clone)]
+pub struct RespondSso {
+    binding: SsoResponseBinding,
+    relay_state: RelayStateParam,
+    encrypt_then_sign: bool,
+}
+
+impl RespondSso {
+    /// Respond with HTTP-POST.
+    pub fn post() -> Self {
+        Self::new(SsoResponseBinding::Post)
+    }
+
+    /// Respond with HTTP-POST-SimpleSign.
+    pub fn simple_sign() -> Self {
+        Self::new(SsoResponseBinding::SimpleSign)
+    }
+
+    fn new(binding: SsoResponseBinding) -> Self {
+        Self {
+            binding,
+            relay_state: RelayStateParam::absent(),
+            encrypt_then_sign: false,
+        }
+    }
+
+    /// Set exact RelayState state for the response.
+    pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
+        self.relay_state = relay_state;
+        self
+    }
+
+    /// Use encrypt-then-sign for encrypted responses.
+    pub fn encrypt_then_sign(mut self) -> Self {
+        self.encrypt_then_sign = true;
+        self
+    }
+}
+
+impl Saml {
+    /// Build a typed Service Provider facade.
+    pub fn sp(config: SpConfig) -> Result<Saml<Sp>, SamlError> {
+        let setting = EntitySetting::try_from(&config)?;
+        let raw_config = raw_sp_metadata_config(&config);
+        let service_provider = ServiceProvider::from_config(&raw_config, setting)?;
+        Ok(Saml(Sp { service_provider }))
+    }
+
+    /// Build a typed Identity Provider facade.
+    pub fn idp(config: IdpConfig) -> Result<Saml<Idp>, SamlError> {
+        let setting = EntitySetting::try_from(&config)?;
+        let raw_config = raw_idp_metadata_config(&config);
+        let identity_provider = IdentityProvider::from_config(&raw_config, setting)?;
+        Ok(Saml(Idp { identity_provider }))
+    }
+}
+
+impl Saml<Sp> {
+    /// Local SP metadata XML.
+    pub fn metadata_xml(&self) -> &str {
+        self.raw_service_provider().metadata_xml()
+    }
+
+    /// Raw compatibility Service Provider.
+    pub fn raw_service_provider(&self) -> &ServiceProvider {
+        &self.0.service_provider
+    }
+
+    /// Start SP-initiated Web SSO.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use saml_rs::{
+    ///     AcsEndpoint, EntityId, IdpConfig, IdpDescriptor, IdpValidationPolicy,
+    ///     MetadataTrustPolicy, RelayStateParam, Saml, SpConfig, SpValidationPolicy,
+    ///     SsoEndpoint, StartSso,
+    /// };
+    ///
+    /// # fn main() -> Result<(), saml_rs::SamlError> {
+    /// let sp_config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+    ///     .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+    ///     .validation(SpValidationPolicy::compatibility())
+    ///     .build()?;
+    /// let idp_config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+    ///     .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
+    ///     .validation(IdpValidationPolicy::compatibility())
+    ///     .build()?;
+    ///
+    /// let sp = Saml::sp(sp_config)?;
+    /// let idp = Saml::idp(idp_config)?;
+    /// let idp = IdpDescriptor::from_metadata_xml(
+    ///     idp.metadata_xml(),
+    ///     MetadataTrustPolicy::UnsignedForCompatibility,
+    /// )?;
+    /// let relay_state = RelayStateParam::try_from_option(Some("state".to_string()))?;
+    /// let started = sp.start_sso(&idp, StartSso::redirect().relay_state(relay_state))?;
+    ///
+    /// let redirect_url = started.outbound.redirect_url()?;
+    /// # let _ = redirect_url;
+    /// # Ok(()) }
+    /// ```
+    pub fn start_sso(
+        &self,
+        idp: &IdpDescriptor,
+        options: StartSso,
+    ) -> Result<Started<AuthnRequest>, SamlError> {
+        options.relay_state.validate()?;
+        let raw_idp = raw_idp_descriptor(idp)?;
+        let raw_options = LoginRequestOptions {
+            relay_state: options.relay_state.as_deref(),
+            force_authn: options.force_authn,
+            assertion_consumer_service_index: options.acs_index,
+            response_binding: Some(options.response_binding.as_binding()),
+            ..Default::default()
+        };
+        let context = self
+            .raw_service_provider()
+            .create_login_request_with_options(
+                &raw_idp,
+                options.binding.as_binding(),
+                &raw_options,
+            )?;
+        let outbound = Outbound::<AuthnRequest>::try_from(context)?;
+        let acs = selected_acs(
+            self.raw_service_provider(),
+            options.response_binding,
+            options.acs_index,
+        )?;
+        let pending = Pending::<AuthnRequest>::try_new(
+            outbound.id().clone(),
+            options.relay_state,
+            acs,
+            options.response_binding,
+            idp.entity_id().clone(),
+        )?
+        .with_request_binding(options.binding);
+        Ok(Started { pending, outbound })
+    }
+
+    /// Finish SP-initiated SSO using stored pending AuthnRequest state.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{
+    ///     BrowserInput, FormField, IdpDescriptor, PendingAuthnRequest, ReplayPolicy, Saml,
+    ///     SamlValidationContext, SsoResponse,
+    /// };
+    /// use time::OffsetDateTime;
+    ///
+    /// # fn finish(
+    /// #     sp: &Saml<saml_rs::Sp>,
+    /// #     idp: &IdpDescriptor,
+    /// #     pending: &PendingAuthnRequest,
+    /// #     fields: Vec<FormField>,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let validation = SamlValidationContext::new(
+    ///     OffsetDateTime::now_utc(),
+    ///     ReplayPolicy::DisabledForCompatibility,
+    /// );
+    /// let input = BrowserInput::<SsoResponse>::post(fields);
+    /// let session = sp.finish_sso(idp, pending, input, validation)?;
+    ///
+    /// let name_id = session.name_id().value();
+    /// # let _ = name_id;
+    /// # Ok(()) }
+    /// ```
+    pub fn finish_sso(
+        &self,
+        idp: &IdpDescriptor,
+        pending: &PendingAuthnRequest,
+        input: BrowserInput<SsoResponse>,
+        mut validation: SamlValidationContext<'_>,
+    ) -> Result<SsoSession, SamlError> {
+        ensure_entity_id(pending.idp_entity_id(), idp.entity_id())?;
+        ensure_sso_response_binding(input_binding(&input), pending.response_binding())?;
+        ensure_relay_state(pending.relay_state(), &relay_state_from_input(&input)?)?;
+        let raw_idp = raw_idp_descriptor(idp)?;
+        let request = HttpRequest::try_from(input)?;
+        let flow = self
+            .raw_service_provider()
+            .parse_login_response_with_request_id_at(
+                &raw_idp,
+                pending.response_binding().as_binding(),
+                &request,
+                pending.request_id().as_str(),
+                validation.now(),
+                validation.clock_skew().as_millis(),
+            )?;
+        let session = SsoSession::try_from(flow)?;
+        session.check_and_store_replay(&mut validation)?;
+        Ok(session)
+    }
+
+    /// Accept an IdP-initiated SSO response explicitly.
+    pub fn accept_unsolicited_sso(
+        &self,
+        idp: &IdpDescriptor,
+        input: BrowserInput<SsoResponse>,
+        mut validation: SamlValidationContext<'_>,
+    ) -> Result<SsoSession, SamlError> {
+        let binding = SsoResponseBinding::try_from(input_binding(&input))?;
+        let raw_idp = raw_idp_descriptor(idp)?;
+        let request = HttpRequest::try_from(input)?;
+        let flow = self
+            .raw_service_provider()
+            .parse_unsolicited_login_response_at(
+                &raw_idp,
+                binding.as_binding(),
+                &request,
+                validation.now(),
+                validation.clock_skew().as_millis(),
+            )?;
+        let session = SsoSession::try_from(flow)?;
+        session.check_and_store_replay(&mut validation)?;
+        Ok(session)
+    }
+}
+
+impl Saml<Idp> {
+    /// Local IdP metadata XML.
+    pub fn metadata_xml(&self) -> &str {
+        self.raw_identity_provider().metadata_xml()
+    }
+
+    /// Raw compatibility Identity Provider.
+    pub fn raw_identity_provider(&self) -> &IdentityProvider {
+        &self.0.identity_provider
+    }
+
+    /// Receive an SP AuthnRequest.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{
+    ///     AuthnRequest, BrowserInput, FormField, ReplayPolicy, RespondSso, Saml,
+    ///     SamlValidationContext, SpDescriptor, Subject,
+    /// };
+    /// use time::OffsetDateTime;
+    ///
+    /// # fn respond(
+    /// #     idp: &Saml<saml_rs::Idp>,
+    /// #     sp: &SpDescriptor,
+    /// #     fields: Vec<FormField>,
+    /// #     subject: Subject,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let validation = SamlValidationContext::new(
+    ///     OffsetDateTime::now_utc(),
+    ///     ReplayPolicy::DisabledForCompatibility,
+    /// );
+    /// let input = BrowserInput::<AuthnRequest>::post(fields);
+    /// let request = idp.receive_sso(sp, input, validation)?;
+    /// let response = idp.respond_sso(sp, &request, subject, RespondSso::post())?;
+    ///
+    /// let form = response.post_form()?;
+    /// # let _ = form;
+    /// # Ok(()) }
+    /// ```
+    pub fn receive_sso(
+        &self,
+        sp: &SpDescriptor,
+        input: BrowserInput<AuthnRequest>,
+        validation: SamlValidationContext<'_>,
+    ) -> Result<Received<AuthnRequest>, SamlError> {
+        let binding = SsoRequestBinding::try_from(input_binding(&input))?;
+        let raw_sp = raw_sp_descriptor(sp)?;
+        let request = HttpRequest::try_from(input)?;
+        let flow = self.raw_identity_provider().parse_login_request_at(
+            &raw_sp,
+            binding.as_binding(),
+            &request,
+            validation.now(),
+            validation.clock_skew().as_millis(),
+        )?;
+        let authn = AuthnRequest::try_from(flow)?;
+        if let Some(destination) = authn.destination() {
+            let expected = self
+                .raw_identity_provider()
+                .metadata
+                .get_single_sign_on_service(binding.as_binding())
+                .ok_or_else(|| Error::MissingMetadata("SingleSignOnService".into()))?;
+            if destination.as_str() != expected {
+                return Err(Error::destination_mismatch(
+                    &expected,
+                    Some(destination.as_str()),
+                ));
+            }
+        }
+        Ok(Received::new(authn))
+    }
+
+    /// Respond to a received SP AuthnRequest.
+    pub fn respond_sso(
+        &self,
+        sp: &SpDescriptor,
+        request: &Received<AuthnRequest>,
+        subject: Subject,
+        options: RespondSso,
+    ) -> Result<Outbound<SsoResponse>, SamlError> {
+        self.issue_sso(sp, Some(request.message().id().as_str()), subject, options)
+    }
+
+    /// Initiate IdP-initiated SSO.
+    pub fn initiate_sso(
+        &self,
+        sp: &SpDescriptor,
+        subject: Subject,
+        options: RespondSso,
+    ) -> Result<Outbound<SsoResponse>, SamlError> {
+        self.issue_sso(sp, None, subject, options)
+    }
+
+    fn issue_sso(
+        &self,
+        sp: &SpDescriptor,
+        in_response_to: Option<&str>,
+        subject: Subject,
+        options: RespondSso,
+    ) -> Result<Outbound<SsoResponse>, SamlError> {
+        options.relay_state.validate()?;
+        let raw_sp = raw_sp_descriptor(sp)?;
+        let user = user_from_subject(subject);
+        let raw_options = LoginResponseOptions {
+            in_response_to,
+            relay_state: options.relay_state.as_deref(),
+            encrypt_then_sign: options.encrypt_then_sign,
+            custom: None,
+        };
+        let context = self.raw_identity_provider().create_login_response(
+            &raw_sp,
+            options.binding.as_binding(),
+            &user,
+            &raw_options,
+        )?;
+        Outbound::<SsoResponse>::try_from(context)
+    }
+}
+
+fn raw_sp_metadata_config(config: &SpConfig) -> RawSpMetadataConfig {
+    RawSpMetadataConfig {
+        entity_id: config.entity_id.as_str().to_string(),
+        signing_certs: certificates(&config.credentials.signing_certificate),
+        encrypt_certs: certificates(&config.credentials.encryption_certificate),
+        authn_requests_signed: matches!(
+            config.validation.authn_requests,
+            AuthnRequestSigningPolicy::Sign
+        ),
+        want_assertions_signed: matches!(
+            config.validation.assertions,
+            crate::config::AssertionSignaturePolicy::RequireSigned
+        ),
+        name_id_format: name_id_format_uris(&config.metadata.name_id_format),
+        single_logout_service: config
+            .metadata
+            .single_logout_service
+            .iter()
+            .map(|endpoint| endpoint.to_raw())
+            .collect(),
+        assertion_consumer_service: config
+            .metadata
+            .assertion_consumer_service
+            .iter()
+            .map(|endpoint| endpoint.to_raw())
+            .collect(),
+        elements_order: config.metadata.elements_order.clone(),
+    }
+}
+
+fn raw_idp_metadata_config(config: &IdpConfig) -> RawIdpMetadataConfig {
+    RawIdpMetadataConfig {
+        entity_id: config.entity_id.as_str().to_string(),
+        signing_certs: certificates(&config.credentials.signing_certificate),
+        encrypt_certs: certificates(&config.credentials.encryption_certificate),
+        want_authn_requests_signed: matches!(
+            config.validation.authn_requests,
+            AuthnRequestValidationPolicy::RequireSigned
+        ),
+        name_id_format: name_id_format_uris(&config.metadata.name_id_format),
+        single_sign_on_service: config
+            .metadata
+            .single_sign_on_service
+            .iter()
+            .map(|endpoint| endpoint.to_raw())
+            .collect(),
+        single_logout_service: config
+            .metadata
+            .single_logout_service
+            .iter()
+            .map(|endpoint| endpoint.to_raw())
+            .collect(),
+        elements_order: config.metadata.elements_order.clone(),
+    }
+}
+
+fn certificates(certificate: &Option<CertificatePem>) -> Vec<String> {
+    certificate
+        .as_ref()
+        .map(|certificate| vec![certificate.as_str().to_string()])
+        .unwrap_or_default()
+}
+
+fn name_id_format_uris(formats: &[NameIdFormat]) -> Vec<String> {
+    formats
+        .iter()
+        .map(|format| format.as_uri().to_string())
+        .collect()
+}
+
+fn raw_idp_descriptor(idp: &IdpDescriptor) -> Result<IdentityProvider, SamlError> {
+    IdentityProvider::from_metadata(idp.metadata_xml(), EntitySetting::default())
+}
+
+fn raw_sp_descriptor(sp: &SpDescriptor) -> Result<ServiceProvider, SamlError> {
+    ServiceProvider::from_metadata(sp.metadata_xml(), EntitySetting::default())
+}
+
+fn selected_acs(
+    sp: &ServiceProvider,
+    binding: SsoResponseBinding,
+    index: Option<u16>,
+) -> Result<AcsEndpoint, SamlError> {
+    let location = sp
+        .metadata
+        .get_assertion_consumer_service(binding.as_binding())
+        .ok_or_else(|| Error::MissingMetadata("AssertionConsumerService".into()))?;
+    let mut acs = AcsEndpoint::new(binding, crate::model::EndpointUrl::try_new(location)?);
+    if let Some(index) = index {
+        acs = acs.with_index(index);
+    }
+    Ok(acs)
+}
+
+fn input_binding<Message>(input: &BrowserInput<Message>) -> Binding {
+    match input {
+        BrowserInput::Redirect { .. } => Binding::Redirect,
+        BrowserInput::Post { .. } => Binding::Post,
+        BrowserInput::SimpleSignPost { .. } => Binding::SimpleSign,
+    }
+}
+
+fn relay_state_from_input<Message>(
+    input: &BrowserInput<Message>,
+) -> Result<RelayStateParam, SamlError> {
+    match input {
+        BrowserInput::Redirect { raw_query, .. } => {
+            let value = url::form_urlencoded::parse(raw_query.trim_start_matches('?').as_bytes())
+                .find(|(name, _)| name == "RelayState")
+                .map(|(_, value)| value.into_owned());
+            RelayStateParam::try_from_option(value)
+        }
+        BrowserInput::Post { fields, .. } | BrowserInput::SimpleSignPost { fields, .. } => {
+            let value = fields
+                .iter()
+                .find(|field| field.name() == "RelayState")
+                .map(|field| field.value().to_string());
+            RelayStateParam::try_from_option(value)
+        }
+    }
+}
+
+fn ensure_relay_state(
+    expected: &RelayStateParam,
+    actual: &RelayStateParam,
+) -> Result<(), SamlError> {
+    if expected == actual {
+        return Ok(());
+    }
+    Err(Error::RelayStateMismatch {
+        expected: expected.clone(),
+        actual: actual.clone(),
+    })
+}
+
+fn ensure_entity_id(expected: &EntityId, actual: &EntityId) -> Result<(), SamlError> {
+    if expected == actual {
+        return Ok(());
+    }
+    Err(Error::issuer_mismatch(
+        expected.as_str(),
+        Some(actual.as_str()),
+    ))
+}
+
+fn ensure_sso_response_binding(
+    actual: Binding,
+    expected: SsoResponseBinding,
+) -> Result<(), SamlError> {
+    if actual == expected.as_binding() {
+        return Ok(());
+    }
+    Err(Error::UnsupportedBinding { binding: actual })
+}
+
+fn user_from_subject(subject: Subject) -> crate::entity::User {
+    let name_id = subject.name_id().value().to_string();
+    crate::entity::User::new(name_id)
+}

@@ -13,6 +13,7 @@ use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
 use crate::util::Value;
 use crate::xml::write::XmlWriter;
 use crate::xml::{extract_with_limits, ExtractorField, XmlLimits};
+use time::OffsetDateTime;
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
@@ -37,6 +38,8 @@ pub struct LoginRequestOptions<'a> {
     /// Optional `AssertionConsumerServiceIndex`; when present, ACS URL and
     /// `ProtocolBinding` are omitted.
     pub assertion_consumer_service_index: Option<u16>,
+    /// Expected SAML Response binding. Defaults to HTTP-POST.
+    pub response_binding: Option<Binding>,
 }
 
 struct AuthnRequestXml<'a> {
@@ -222,12 +225,14 @@ impl ServiceProvider {
             (Some(f), _) => f(template),
             (None, _) => {
                 let uses_acs_index = options.assertion_consumer_service_index.is_some();
+                let response_binding = options.response_binding.unwrap_or(Binding::Post);
                 let acs_url = (!uses_acs_index).then(|| {
                     self.metadata
-                        .get_assertion_consumer_service(Binding::Post)
+                        .get_assertion_consumer_service(response_binding)
                         .unwrap_or_default()
                 });
-                let protocol_binding = (!uses_acs_index).then(|| Binding::Post.urn().to_string());
+                let protocol_binding =
+                    (!uses_acs_index).then(|| response_binding.urn().to_string());
                 let acs_index = options
                     .assertion_consumer_service_index
                     .map(|index| index.to_string());
@@ -442,6 +447,26 @@ impl ServiceProvider {
             binding,
             request,
             LoginResponseCorrelation::Unsolicited,
+            None,
+            self.setting.clock_drifts,
+        )
+    }
+
+    pub(crate) fn parse_unsolicited_login_response_at(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        request: &HttpRequest,
+        now: OffsetDateTime,
+        clock_drifts: (i64, i64),
+    ) -> Result<FlowResult, SamlError> {
+        self.parse_login_response_inner(
+            idp,
+            binding,
+            request,
+            LoginResponseCorrelation::Unsolicited,
+            Some(now),
+            clock_drifts,
         )
     }
 
@@ -466,6 +491,30 @@ impl ServiceProvider {
             binding,
             request,
             LoginResponseCorrelation::MessageId(request_id),
+            None,
+            self.setting.clock_drifts,
+        )
+    }
+
+    pub(crate) fn parse_login_response_with_request_id_at(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        request: &HttpRequest,
+        request_id: &str,
+        now: OffsetDateTime,
+        clock_drifts: (i64, i64),
+    ) -> Result<FlowResult, SamlError> {
+        if request_id.is_empty() {
+            return Err(SamlError::InvalidInResponseTo);
+        }
+        self.parse_login_response_inner(
+            idp,
+            binding,
+            request,
+            LoginResponseCorrelation::MessageId(request_id),
+            Some(now),
+            clock_drifts,
         )
     }
 
@@ -475,6 +524,8 @@ impl ServiceProvider {
         binding: Binding,
         request: &HttpRequest,
         correlation: LoginResponseCorrelation<'_>,
+        now: Option<OffsetDateTime>,
+        clock_drifts: (i64, i64),
     ) -> Result<FlowResult, SamlError> {
         let signing_certs = idp.metadata.x509_certificates(CertUse::Signing);
         let decrypt_key = if self.setting.is_assertion_encrypted {
@@ -503,8 +554,8 @@ impl ServiceProvider {
                 allow_insecure_software_rsa_key_transport_decryption: self
                     .setting
                     .allow_insecure_software_rsa_key_transport_decryption,
-                clock_drifts: self.setting.clock_drifts,
-                now: None,
+                clock_drifts,
+                now,
                 redirect_inflate_max_bytes: self.setting.redirect_inflate_max_bytes,
                 xml_limits: self.setting.xml_limits,
                 expected_audience: self.setting.validate_audience.then_some(audience.as_str()),

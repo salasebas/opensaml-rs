@@ -17,6 +17,7 @@ use crate::template::{
 mod login_response;
 
 use login_response::{render_default_login_response, LoginResponseXml};
+use time::OffsetDateTime;
 
 /// Optional inputs for [`IdentityProvider::create_login_response`].
 #[derive(Default)]
@@ -404,6 +405,28 @@ impl IdentityProvider {
         binding: Binding,
         request: &HttpRequest,
     ) -> Result<FlowResult, SamlError> {
+        self.parse_login_request_at_inner(sp, binding, request, None, self.setting.clock_drifts)
+    }
+
+    pub(crate) fn parse_login_request_at(
+        &self,
+        sp: &ServiceProvider,
+        binding: Binding,
+        request: &HttpRequest,
+        now: OffsetDateTime,
+        clock_drifts: (i64, i64),
+    ) -> Result<FlowResult, SamlError> {
+        self.parse_login_request_at_inner(sp, binding, request, Some(now), clock_drifts)
+    }
+
+    fn parse_login_request_at_inner(
+        &self,
+        sp: &ServiceProvider,
+        binding: Binding,
+        request: &HttpRequest,
+        now: Option<OffsetDateTime>,
+        clock_drifts: (i64, i64),
+    ) -> Result<FlowResult, SamlError> {
         let signing_certs = sp
             .metadata
             .x509_certificates(crate::constants::CertUse::Signing);
@@ -417,8 +440,8 @@ impl IdentityProvider {
                 decrypt_key: None,
                 decrypt_key_pass: None,
                 allow_insecure_software_rsa_key_transport_decryption: false,
-                clock_drifts: self.setting.clock_drifts,
-                now: None,
+                clock_drifts,
+                now,
                 redirect_inflate_max_bytes: self.setting.redirect_inflate_max_bytes,
                 xml_limits: self.setting.xml_limits,
                 expected_audience: None,

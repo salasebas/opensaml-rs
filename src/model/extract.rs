@@ -18,7 +18,11 @@ pub(super) fn optional_request_id(
     extract: &Value,
     path: &str,
 ) -> Result<Option<MessageId>, SamlError> {
-    extract.get_str(path).map(MessageId::try_new).transpose()
+    extract
+        .get_str(path)
+        .filter(|value| !value.is_empty())
+        .map(MessageId::try_new)
+        .transpose()
 }
 
 pub(super) fn optional_endpoint(
