@@ -11,12 +11,14 @@ use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_encode};
 use saml_rs::constants::signature_algorithm::RSA_SHA256;
 use saml_rs::constants::Binding;
 use saml_rs::entity::{iso8601_offset, BindingContext, EntitySetting, User};
+use saml_rs::error::SignatureVerificationReason;
 use saml_rs::flow::{FlowResult, HttpRequest};
 use saml_rs::idp::LoginResponseOptions;
 use saml_rs::logout::{
     create_logout_request, create_logout_response, parse_logout_request, parse_logout_response,
 };
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
+use saml_rs::sp::LoginRequestOptions;
 use saml_rs::template::{replace_tags_by_value, LoginResponseAttribute, LoginResponseTemplate};
 use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
@@ -257,7 +259,9 @@ fn assert_failed_message_signature(
     result: Result<saml_rs::flow::FlowResult, SamlError>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match result {
-        Err(SamlError::FailedMessageSignatureVerification) => Ok(()),
+        Err(SamlError::SignatureVerification {
+            reason: SignatureVerificationReason::DetachedMessageSignature,
+        }) => Ok(()),
         other => {
             Err(format!("expected detached signature verification failure, got {other:?}").into())
         }
@@ -280,15 +284,15 @@ fn login_request_round_trip(binding: Binding) -> Result<(), Box<dyn std::error::
 }
 
 #[test]
-fn login_request_redirect_default() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_login_request_redirect_default() -> Result<(), Box<dyn std::error::Error>> {
     login_request_round_trip(Binding::Redirect)
 }
 #[test]
-fn login_request_simplesign_default() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_login_request_simplesign_default() -> Result<(), Box<dyn std::error::Error>> {
     login_request_round_trip(Binding::SimpleSign)
 }
 #[test]
-fn login_request_post_default() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_login_request_post_default() -> Result<(), Box<dyn std::error::Error>> {
     login_request_round_trip(Binding::Post)
 }
 
@@ -305,15 +309,15 @@ fn mismatch(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn mismatch_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_mismatch_post() -> Result<(), Box<dyn std::error::Error>> {
     mismatch(Binding::Post)
 }
 #[test]
-fn mismatch_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_mismatch_redirect() -> Result<(), Box<dyn std::error::Error>> {
     mismatch(Binding::Redirect)
 }
 #[test]
-fn mismatch_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_mismatch_simplesign() -> Result<(), Box<dyn std::error::Error>> {
     mismatch(Binding::SimpleSign)
 }
 
@@ -338,15 +342,15 @@ fn login_request_custom(binding: Binding) -> Result<(), Box<dyn std::error::Erro
 }
 
 #[test]
-fn login_request_redirect_custom() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_login_request_redirect_custom() -> Result<(), Box<dyn std::error::Error>> {
     login_request_custom(Binding::Redirect)
 }
 #[test]
-fn login_request_post_custom() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_login_request_post_custom() -> Result<(), Box<dyn std::error::Error>> {
     login_request_custom(Binding::Post)
 }
 #[test]
-fn login_request_simplesign_custom() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_login_request_simplesign_custom() -> Result<(), Box<dyn std::error::Error>> {
     login_request_custom(Binding::SimpleSign)
 }
 
@@ -393,15 +397,46 @@ fn detached_signature_rejects_mismatched_login_request(
 }
 
 #[test]
-fn redirect_signature_rejects_mismatched_consumed_request() -> Result<(), Box<dyn std::error::Error>>
-{
+fn flow_conformance_redirect_signature_rejects_mismatched_consumed_request(
+) -> Result<(), Box<dyn std::error::Error>> {
     detached_signature_rejects_mismatched_login_request(Binding::Redirect)
 }
 
 #[test]
-fn simplesign_signature_rejects_mismatched_consumed_request(
+fn flow_conformance_simplesign_signature_rejects_mismatched_consumed_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     detached_signature_rejects_mismatched_login_request(Binding::SimpleSign)
+}
+
+#[test]
+fn flow_conformance_redirect_signature_rejects_mismatched_relay_state(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = ServiceProvider::from_config(&sp_config(true, false, false), signing())?;
+    let idp = idp(true);
+    let ctx = sp.create_login_request_with_options(
+        &idp,
+        Binding::Redirect,
+        &LoginRequestOptions {
+            relay_state: Some("relay-expected"),
+            ..Default::default()
+        },
+    )?;
+    let mut request = redirect_request(&ctx.context)?;
+    let (_, relay_state) = request
+        .query
+        .iter_mut()
+        .find(|(key, _)| key == "RelayState")
+        .ok_or("missing RelayState")?;
+    *relay_state = "relay-actual".to_string();
+
+    match idp.parse_login_request(&sp, Binding::Redirect, &request) {
+        Err(SamlError::RelayStateMismatch { expected, actual }) => {
+            assert_eq!(expected.as_deref(), Some("relay-expected"));
+            assert_eq!(actual.as_deref(), Some("relay-actual"));
+            Ok(())
+        }
+        other => Err(format!("expected RelayStateMismatch, got {other:?}").into()),
+    }
 }
 
 // ----- create login request signed with PKCS#8 keys (8,9) -----
@@ -423,14 +458,16 @@ fn signed_request_with_key(
 }
 
 #[test]
-fn login_request_redirect_signed_unencrypted_pkcs8() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_login_request_redirect_signed_unencrypted_pkcs8(
+) -> Result<(), Box<dyn std::error::Error>> {
     signed_request_with_key(
         include_str!("fixtures/key/sp/privkey.unencrypted.pkcs8.pem"),
         None,
     )
 }
 #[test]
-fn login_request_redirect_signed_encrypted_pkcs8() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_login_request_redirect_signed_encrypted_pkcs8(
+) -> Result<(), Box<dyn std::error::Error>> {
     signed_request_with_key(
         include_str!("fixtures/key/sp/privkey.encrypted.pkcs8.pem"),
         Some("VHOSp5RUiBcrsjrcAuXFwU1NKCkGA8px"),
@@ -440,12 +477,15 @@ fn login_request_redirect_signed_encrypted_pkcs8() -> Result<(), Box<dyn std::er
 // ----- create login response (12-15) -----
 
 #[test]
-fn login_response_undefined_binding() {
+fn flow_conformance_login_response_undefined_binding() -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(true, false);
-    assert!(idp
-        .create_login_response(&sp, Binding::Artifact, &User::new("a@e.com"), &opts("_r"))
-        .is_err());
+    match idp.create_login_response(&sp, Binding::Artifact, &User::new("a@e.com"), &opts("_r")) {
+        Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        }) => Ok(()),
+        other => Err(format!("expected UnsupportedBinding(Artifact), got {other:?}").into()),
+    }
 }
 
 fn create_login_response(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
@@ -457,20 +497,20 @@ fn create_login_response(binding: Binding) -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
-fn create_redirect_login_response() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_create_redirect_login_response() -> Result<(), Box<dyn std::error::Error>> {
     create_login_response(Binding::Redirect)
 }
 #[test]
-fn create_simplesign_login_response() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_create_simplesign_login_response() -> Result<(), Box<dyn std::error::Error>> {
     create_login_response(Binding::SimpleSign)
 }
 #[test]
-fn create_post_login_response() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_create_post_login_response() -> Result<(), Box<dyn std::error::Error>> {
     create_login_response(Binding::Post)
 }
 
 #[test]
-fn simplesign_login_response_post_form_round_trips_to_parser(
+fn flow_conformance_simplesign_login_response_post_form_round_trips_to_parser(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(false, false);
@@ -521,15 +561,15 @@ fn logout_request(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn logout_request_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_logout_request_redirect() -> Result<(), Box<dyn std::error::Error>> {
     logout_request(Binding::Redirect)
 }
 #[test]
-fn logout_request_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_logout_request_post() -> Result<(), Box<dyn std::error::Error>> {
     logout_request(Binding::Post)
 }
 #[test]
-fn logout_request_one_binding() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_logout_request_one_binding() -> Result<(), Box<dyn std::error::Error>> {
     // IdP target exposes a single SLO binding.
     let idp = idp(false);
     let sp = ServiceProvider::from_config(
@@ -557,10 +597,10 @@ fn logout_request_one_binding() -> Result<(), Box<dyn std::error::Error>> {
 // ----- create logout response (19-21) -----
 
 #[test]
-fn logout_response_undefined_binding() {
+fn flow_conformance_logout_response_undefined_binding() -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(false, false);
-    assert!(create_logout_response(
+    match create_logout_response(
         &idp.setting,
         &idp.metadata,
         &sp.metadata,
@@ -568,8 +608,12 @@ fn logout_response_undefined_binding() {
         Some("_r"),
         None,
         false,
-    )
-    .is_err());
+    ) {
+        Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        }) => Ok(()),
+        other => Err(format!("expected UnsupportedBinding(Artifact), got {other:?}").into()),
+    }
 }
 
 fn logout_response(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
@@ -589,11 +633,11 @@ fn logout_response(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn logout_response_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_logout_response_redirect() -> Result<(), Box<dyn std::error::Error>> {
     logout_response(Binding::Redirect)
 }
 #[test]
-fn logout_response_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_logout_response_post() -> Result<(), Box<dyn std::error::Error>> {
     logout_response(Binding::Post)
 }
 
@@ -609,15 +653,15 @@ fn send_signed_assertion(binding: Binding) -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
-fn send_signed_assertion_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_assertion_post() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_assertion(Binding::Post)
 }
 #[test]
-fn send_signed_assertion_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_assertion_redirect() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_assertion(Binding::Redirect)
 }
 #[test]
-fn send_signed_assertion_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_assertion_simplesign() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_assertion(Binding::SimpleSign)
 }
 
@@ -640,15 +684,18 @@ fn send_signed_assertion_custom_transforms(
 }
 
 #[test]
-fn send_signed_assertion_custom_transforms_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_assertion_custom_transforms_post(
+) -> Result<(), Box<dyn std::error::Error>> {
     send_signed_assertion_custom_transforms(Binding::Post)
 }
 #[test]
-fn send_signed_assertion_custom_transforms_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_assertion_custom_transforms_redirect(
+) -> Result<(), Box<dyn std::error::Error>> {
     send_signed_assertion_custom_transforms(Binding::Redirect)
 }
 #[test]
-fn send_signed_assertion_custom_transforms_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_assertion_custom_transforms_simplesign(
+) -> Result<(), Box<dyn std::error::Error>> {
     send_signed_assertion_custom_transforms(Binding::SimpleSign)
 }
 
@@ -679,15 +726,17 @@ fn send_custom_signed_assertion(binding: Binding) -> Result<(), Box<dyn std::err
 }
 
 #[test]
-fn send_custom_signed_assertion_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_signed_assertion_post() -> Result<(), Box<dyn std::error::Error>> {
     send_custom_signed_assertion(Binding::Post)
 }
 #[test]
-fn send_custom_signed_assertion_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_signed_assertion_redirect() -> Result<(), Box<dyn std::error::Error>>
+{
     send_custom_signed_assertion(Binding::Redirect)
 }
 #[test]
-fn send_custom_signed_assertion_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_signed_assertion_simplesign(
+) -> Result<(), Box<dyn std::error::Error>> {
     send_custom_signed_assertion(Binding::SimpleSign)
 }
 
@@ -703,15 +752,15 @@ fn send_signed_message(binding: Binding) -> Result<(), Box<dyn std::error::Error
 }
 
 #[test]
-fn send_signed_message_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_message_post() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_message(Binding::Post)
 }
 #[test]
-fn send_signed_message_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_message_redirect() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_message(Binding::Redirect)
 }
 #[test]
-fn send_signed_message_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_signed_message_simplesign() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_message(Binding::SimpleSign)
 }
 
@@ -743,15 +792,17 @@ fn send_custom_signed_message(binding: Binding) -> Result<(), Box<dyn std::error
 }
 
 #[test]
-fn send_custom_signed_message_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_signed_message_post() -> Result<(), Box<dyn std::error::Error>> {
     send_custom_signed_message(Binding::Post)
 }
 #[test]
-fn send_custom_signed_message_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_signed_message_redirect() -> Result<(), Box<dyn std::error::Error>>
+{
     send_custom_signed_message(Binding::Redirect)
 }
 #[test]
-fn send_custom_signed_message_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_signed_message_simplesign() -> Result<(), Box<dyn std::error::Error>>
+{
     send_custom_signed_message(Binding::SimpleSign)
 }
 
@@ -769,15 +820,17 @@ fn send_assertion_and_message(binding: Binding) -> Result<(), Box<dyn std::error
 }
 
 #[test]
-fn send_assertion_and_message_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_assertion_and_message_post() -> Result<(), Box<dyn std::error::Error>> {
     send_assertion_and_message(Binding::Post)
 }
 #[test]
-fn send_assertion_and_message_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_assertion_and_message_redirect() -> Result<(), Box<dyn std::error::Error>>
+{
     send_assertion_and_message(Binding::Redirect)
 }
 #[test]
-fn send_assertion_and_message_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_assertion_and_message_simplesign() -> Result<(), Box<dyn std::error::Error>>
+{
     send_assertion_and_message(Binding::SimpleSign)
 }
 
@@ -811,22 +864,25 @@ fn send_custom_assertion_and_message(binding: Binding) -> Result<(), Box<dyn std
 }
 
 #[test]
-fn send_custom_assertion_and_message_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_assertion_and_message_post(
+) -> Result<(), Box<dyn std::error::Error>> {
     send_custom_assertion_and_message(Binding::Post)
 }
 #[test]
-fn send_custom_assertion_and_message_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_assertion_and_message_redirect(
+) -> Result<(), Box<dyn std::error::Error>> {
     send_custom_assertion_and_message(Binding::Redirect)
 }
 #[test]
-fn send_custom_assertion_and_message_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_send_custom_assertion_and_message_simplesign(
+) -> Result<(), Box<dyn std::error::Error>> {
     send_custom_assertion_and_message(Binding::SimpleSign)
 }
 
 // ----- encrypted assertion variants (43-47, 54) -----
 
 #[test]
-fn encrypted_nonsigned_assertion() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_nonsigned_assertion() -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_setting = signing();
     idp_setting.is_assertion_encrypted = true;
     let idp = IdentityProvider::from_config(&idp_config(false), idp_setting)?;
@@ -885,24 +941,27 @@ fn encrypted_signed(custom: bool, with_message: bool) -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn encrypted_signed_assertion() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_signed_assertion() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(false, false)
 }
 #[test]
-fn encrypted_custom_signed_assertion() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_custom_signed_assertion() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(true, false)
 }
 #[test]
-fn encrypted_signed_assertion_and_message() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_signed_assertion_and_message(
+) -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(false, true)
 }
 #[test]
-fn encrypted_custom_signed_assertion_and_message() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_custom_signed_assertion_and_message(
+) -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(true, true)
 }
 
 #[test]
-fn encrypted_assertion_rejects_default_software_rsa() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_assertion_rejects_default_software_rsa(
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_setting = signing();
     idp_setting.is_assertion_encrypted = true;
     let idp = IdentityProvider::from_config(&idp_config(false), idp_setting)?;
@@ -928,7 +987,8 @@ fn encrypted_assertion_rejects_default_software_rsa() -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn encrypted_nonsigned_assertion_encrypt_then_sign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_nonsigned_assertion_encrypt_then_sign(
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_setting = signing();
     idp_setting.is_assertion_encrypted = true;
     let idp = IdentityProvider::from_config(&idp_config(false), idp_setting)?;
@@ -1035,24 +1095,25 @@ fn tamper_body_message(
 }
 
 #[test]
-fn idp_redirect_logout_request_unsigned() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_idp_redirect_logout_request_unsigned() -> Result<(), Box<dyn std::error::Error>>
+{
     logout_request_flow(Binding::Redirect, false)
 }
 #[test]
-fn idp_redirect_logout_request_signed() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_idp_redirect_logout_request_signed() -> Result<(), Box<dyn std::error::Error>> {
     logout_request_flow(Binding::Redirect, true)
 }
 #[test]
-fn idp_post_logout_request_unsigned() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_idp_post_logout_request_unsigned() -> Result<(), Box<dyn std::error::Error>> {
     logout_request_flow(Binding::Post, false)
 }
 #[test]
-fn idp_post_logout_request_signed() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_idp_post_logout_request_signed() -> Result<(), Box<dyn std::error::Error>> {
     logout_request_flow(Binding::Post, true)
 }
 
 #[test]
-fn signed_simplesign_logout_request_returns_detached_signature_fields(
+fn flow_conformance_signed_simplesign_logout_request_returns_detached_signature_fields(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(false, false);
@@ -1073,8 +1134,8 @@ fn signed_simplesign_logout_request_returns_detached_signature_fields(
 }
 
 #[test]
-fn signed_simplesign_logout_request_parses_when_required() -> Result<(), Box<dyn std::error::Error>>
-{
+fn flow_conformance_signed_simplesign_logout_request_parses_when_required(
+) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let mut sp = sp(false, false);
     sp.setting.want_logout_request_signed = true;
@@ -1097,7 +1158,7 @@ fn signed_simplesign_logout_request_parses_when_required() -> Result<(), Box<dyn
 }
 
 #[test]
-fn tampered_simplesign_logout_request_body_fails_signature_verification(
+fn flow_conformance_tampered_simplesign_logout_request_body_fails_signature_verification(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let mut sp = sp(false, false);
@@ -1127,7 +1188,7 @@ fn tampered_simplesign_logout_request_body_fails_signature_verification(
 }
 
 #[test]
-fn signed_simplesign_logout_request_with_relay_state_includes_body_and_octet(
+fn flow_conformance_signed_simplesign_logout_request_with_relay_state_includes_body_and_octet(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(false, false);
@@ -1183,16 +1244,16 @@ fn logout_response_flow(signed: bool) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 #[test]
-fn sp_post_logout_response_unsigned() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_sp_post_logout_response_unsigned() -> Result<(), Box<dyn std::error::Error>> {
     logout_response_flow(false)
 }
 #[test]
-fn sp_post_logout_response_signed() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_sp_post_logout_response_signed() -> Result<(), Box<dyn std::error::Error>> {
     logout_response_flow(true)
 }
 
 #[test]
-fn signed_simplesign_logout_response_returns_detached_signature_fields(
+fn flow_conformance_signed_simplesign_logout_response_returns_detached_signature_fields(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(false, false);
@@ -1213,8 +1274,8 @@ fn signed_simplesign_logout_response_returns_detached_signature_fields(
 }
 
 #[test]
-fn signed_simplesign_logout_response_parses_when_required() -> Result<(), Box<dyn std::error::Error>>
-{
+fn flow_conformance_signed_simplesign_logout_response_parses_when_required(
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_recv = idp(false);
     idp_recv.setting.want_logout_response_signed = true;
     let sp = sp(false, false);
@@ -1243,7 +1304,7 @@ fn signed_simplesign_logout_response_parses_when_required() -> Result<(), Box<dy
 }
 
 #[test]
-fn tampered_simplesign_logout_response_body_fails_signature_verification(
+fn flow_conformance_tampered_simplesign_logout_response_body_fails_signature_verification(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_recv = idp(false);
     idp_recv.setting.want_logout_response_signed = true;
@@ -1274,7 +1335,7 @@ fn tampered_simplesign_logout_response_body_fails_signature_verification(
 }
 
 #[test]
-fn signed_simplesign_logout_response_with_relay_state_includes_body_and_octet(
+fn flow_conformance_signed_simplesign_logout_response_with_relay_state_includes_body_and_octet(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let sp = sp(false, false);
@@ -1301,7 +1362,8 @@ fn signed_simplesign_logout_response_with_relay_state_includes_body_and_octet(
 }
 
 #[test]
-fn signed_logout_response_wrong_request_id_rejected() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_signed_logout_response_wrong_request_id_rejected(
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_recv = idp(false);
     idp_recv.setting.want_logout_response_signed = true;
     let sp = sp(false, false);
@@ -1324,7 +1386,7 @@ fn signed_logout_response_wrong_request_id_rejected() -> Result<(), Box<dyn std:
             &request,
             "_r"
         ),
-        Err(SamlError::InvalidInResponseTo)
+        Err(SamlError::InResponseToMismatch { .. })
     ));
     Ok(())
 }
@@ -1349,11 +1411,11 @@ fn encrypted_prefix(prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn encrypted_prefix_saml2() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_prefix_saml2() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_prefix("saml2")
 }
 #[test]
-fn encrypted_prefix_default_saml() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_encrypted_prefix_default_saml() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_prefix("saml")
 }
 
@@ -1373,15 +1435,15 @@ fn malformed(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn malformed_response_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_malformed_response_post() -> Result<(), Box<dyn std::error::Error>> {
     malformed(Binding::Post)
 }
 #[test]
-fn malformed_response_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_malformed_response_redirect() -> Result<(), Box<dyn std::error::Error>> {
     malformed(Binding::Redirect)
 }
 #[test]
-fn malformed_response_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_malformed_response_simplesign() -> Result<(), Box<dyn std::error::Error>> {
     malformed(Binding::SimpleSign)
 }
 
@@ -1390,7 +1452,8 @@ fn malformed_response_simplesign() -> Result<(), Box<dyn std::error::Error>> {
 const ATTACK: &str = include_str!("fixtures/misc/attack_response_signed.xml");
 
 #[test]
-fn reject_signature_wrapped_response_case_1() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_reject_signature_wrapped_response_case_1(
+) -> Result<(), Box<dyn std::error::Error>> {
     use saml_rs::binding::base64_encode;
     let idp = idp(false);
     let sp = sp(true, false);
@@ -1405,7 +1468,8 @@ fn reject_signature_wrapped_response_case_1() -> Result<(), Box<dyn std::error::
 }
 
 #[test]
-fn use_signed_contents_in_wrapped_response_case_2() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_use_signed_contents_in_wrapped_response_case_2(
+) -> Result<(), Box<dyn std::error::Error>> {
     // A correctly signed response yields only the cryptographically signed
     // assertion contents (no wrapping injection survives).
     let idp = idp(false);
@@ -1439,20 +1503,20 @@ fn two_tier_status(binding: Binding) -> Result<(), Box<dyn std::error::Error>> {
         )]),
     };
     match sp.parse_login_response(&idp, binding, &request) {
-        Err(SamlError::FailedStatus { .. }) => Ok(()),
-        other => Err(format!("expected FailedStatus, got {other:?}").into()),
+        Err(SamlError::StatusNotSuccess { .. }) => Ok(()),
+        other => Err(format!("expected StatusNotSuccess, got {other:?}").into()),
     }
 }
 
 #[test]
-fn two_tier_status_post() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_two_tier_status_post() -> Result<(), Box<dyn std::error::Error>> {
     two_tier_status(Binding::Post)
 }
 #[test]
-fn two_tier_status_redirect() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_two_tier_status_redirect() -> Result<(), Box<dyn std::error::Error>> {
     two_tier_status(Binding::Redirect)
 }
 #[test]
-fn two_tier_status_simplesign() -> Result<(), Box<dyn std::error::Error>> {
+fn flow_conformance_two_tier_status_simplesign() -> Result<(), Box<dyn std::error::Error>> {
     two_tier_status(Binding::SimpleSign)
 }

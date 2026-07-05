@@ -119,7 +119,9 @@ fn sign_logout(
     };
 
     if matches!(binding, Binding::Artifact) {
-        return Err(SamlError::UndefinedBinding);
+        return Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        });
     }
 
     let sig_alg = &setting.request_signature_algorithm;
@@ -164,7 +166,9 @@ fn sign_logout(
                 Some(sig_alg.clone()),
             ))
         }
-        Binding::Artifact => Err(SamlError::UndefinedBinding),
+        Binding::Artifact => Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        }),
     }
 }
 
@@ -192,7 +196,9 @@ fn unsigned_context(
     match binding {
         Binding::Redirect => build_redirect_url(destination, parser_type, xml, relay),
         Binding::Post | Binding::SimpleSign => Ok(base64_encode(xml.as_bytes())),
-        Binding::Artifact => Err(SamlError::UndefinedBinding),
+        Binding::Artifact => Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        }),
     }
 }
 
@@ -344,6 +350,11 @@ pub fn create_logout_response_with_id(
     want_signed: bool,
     message_id: Option<&str>,
 ) -> Result<BindingContext, SamlError> {
+    if matches!(binding, Binding::Artifact) {
+        return Err(SamlError::UnsupportedBinding {
+            binding: Binding::Artifact,
+        });
+    }
     let destination = target_meta
         .get_single_logout_service(binding)
         .ok_or_else(|| SamlError::MissingMetadata("SingleLogoutService".into()))?;
@@ -479,6 +490,10 @@ fn parse_logout_response_inner(
 /// Single Logout responses are state-machine messages. The caller must pass the
 /// ID of the `LogoutRequest` it issued so stale or unrelated responses cannot be
 /// accepted as completion for the current logout transaction.
+///
+/// An empty caller-provided `request_id` is rejected as
+/// [`SamlError::InvalidInResponseTo`]. A non-empty `request_id` that does not
+/// match the SAML response returns [`SamlError::InResponseToMismatch`].
 pub fn parse_logout_response(
     self_setting: &EntitySetting,
     from_meta: &Metadata,
@@ -622,7 +637,7 @@ mod tests {
         let result =
             parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
 
-        assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
+        assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
         Ok(())
     }
 
@@ -679,7 +694,7 @@ mod tests {
             let result =
                 parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
 
-            assert!(matches!(result, Err(SamlError::UnmatchIssuer)));
+            assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
             Ok(())
         }
     }
@@ -756,7 +771,7 @@ mod tests {
                 &request,
                 "_other"
             ),
-            Err(SamlError::InvalidInResponseTo)
+            Err(SamlError::InResponseToMismatch { .. })
         ));
         Ok(())
     }
@@ -780,7 +795,7 @@ mod tests {
             parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, "_req1");
 
         #[cfg(feature = "crypto-bergshamra")]
-        assert!(matches!(result, Err(SamlError::FailedToVerifySignature)));
+        assert!(matches!(result, Err(SamlError::SignatureMissing)));
 
         #[cfg(not(feature = "crypto-bergshamra"))]
         assert!(matches!(result, Err(SamlError::Unsupported(_))));

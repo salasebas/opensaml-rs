@@ -11,7 +11,7 @@
 //! - Only content covered by a verified reference is returned for extraction.
 
 use super::keys::load_certificate;
-use crate::error::SamlError;
+use crate::error::{ReferenceResolutionReason, SamlError, SignatureVerificationReason};
 use crate::util::normalize_cert_string;
 use crate::xml::dom::{self, Node, XmlLimits};
 use bergshamra::{verify, DsigContext, KeysManager, VerifiedReference, VerifyResult};
@@ -71,6 +71,10 @@ enum VerifiedTarget {
     Id(String),
 }
 
+fn reference_resolution(reason: ReferenceResolutionReason) -> SamlError {
+    SamlError::ReferenceResolution { reason }
+}
+
 fn verified_target_from_uri(uri: &str) -> Result<VerifiedTarget, SamlError> {
     if uri.is_empty() || uri == "#xpointer(/)" {
         return Ok(VerifiedTarget::WholeDocument);
@@ -78,41 +82,55 @@ fn verified_target_from_uri(uri: &str) -> Result<VerifiedTarget, SamlError> {
 
     let fragment = uri
         .strip_prefix('#')
-        .ok_or_else(|| SamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()))?;
+        .ok_or_else(|| reference_resolution(ReferenceResolutionReason::ExternalReference))?;
     if fragment.is_empty() {
-        return Err(SamlError::Crypto("ERR_UNSUPPORTED_REFERENCE_URI".into()));
+        return Err(reference_resolution(
+            ReferenceResolutionReason::UnsupportedReferenceUri,
+        ));
     }
     if let Some(id) = fragment
         .strip_prefix("xpointer(id('")
         .and_then(|rest| rest.strip_suffix("'))"))
     {
         if id.is_empty() {
-            return Err(SamlError::Crypto("ERR_UNSUPPORTED_REFERENCE_URI".into()));
+            return Err(reference_resolution(
+                ReferenceResolutionReason::UnsupportedReferenceUri,
+            ));
         }
         return Ok(VerifiedTarget::Id(id.to_string()));
     }
     if fragment.starts_with("xpointer(") {
-        return Err(SamlError::Crypto("ERR_UNSUPPORTED_REFERENCE_URI".into()));
+        return Err(reference_resolution(
+            ReferenceResolutionReason::UnsupportedReferenceUri,
+        ));
     }
     Ok(VerifiedTarget::Id(fragment.to_string()))
 }
 
 fn verified_targets(references: &[VerifiedReference]) -> Result<Vec<VerifiedTarget>, SamlError> {
     if references.is_empty() {
-        return Err(SamlError::Crypto("NO_SIGNATURE_REFERENCES".into()));
+        return Err(reference_resolution(
+            ReferenceResolutionReason::MissingSignatureReference,
+        ));
     }
 
     let mut targets = Vec::with_capacity(references.len());
     for reference in references {
         if is_external_reference(&reference.uri) {
-            return Err(SamlError::Crypto("ERR_EXTERNAL_REFERENCE".into()));
+            return Err(reference_resolution(
+                ReferenceResolutionReason::ExternalReference,
+            ));
         }
         if !reference.digest_verified {
-            return Err(SamlError::Crypto("ERR_UNVERIFIED_REFERENCE_DIGEST".into()));
+            return Err(SamlError::SignatureVerification {
+                reason: SignatureVerificationReason::ReferenceDigest,
+            });
         }
         let target = verified_target_from_uri(&reference.uri)?;
         if matches!(target, VerifiedTarget::Id(_)) && reference.resolved_node.is_none() {
-            return Err(SamlError::Crypto("ERR_UNRESOLVED_REFERENCE".into()));
+            return Err(reference_resolution(
+                ReferenceResolutionReason::UnresolvedReference,
+            ));
         }
         targets.push(target);
     }
@@ -142,7 +160,7 @@ fn response_is_covered(targets: &[VerifiedTarget], root: &Node) -> bool {
 }
 
 fn verified_content_not_covered() -> SamlError {
-    SamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
+    SamlError::SignedReferenceMismatch
 }
 
 fn verified_root_content(
@@ -208,6 +226,21 @@ fn is_external_reference(uri: &str) -> bool {
     !uri.is_empty() && !uri.starts_with('#')
 }
 
+fn has_saml_xml_signature(root: &Node) -> bool {
+    has_child(root, "Signature")
+        || children_named(root, "Assertion")
+            .iter()
+            .any(|assertion| has_child(assertion, "Signature"))
+}
+
+pub(crate) fn has_xml_signature_with_limits(
+    xml: &str,
+    limits: XmlLimits,
+) -> Result<bool, SamlError> {
+    let doc = dom::parse_with_limits(xml, limits)?;
+    Ok(has_saml_xml_signature(&doc.root))
+}
+
 /// First `<X509Certificate>` text found inside a `<Signature>` (the cert the
 /// sender embedded in the message), if any.
 fn inline_signature_cert(node: &Node, in_signature: bool) -> Option<String> {
@@ -252,11 +285,7 @@ pub fn verify_signature_with_limits(
     }
 
     // Candidate signatures: message-level (root > Signature) or assertion-level.
-    let message_sig = has_child(root, "Signature");
-    let assertion_sig = children_named(root, "Assertion")
-        .iter()
-        .any(|a| has_child(a, "Signature"));
-    if !message_sig && !assertion_sig {
+    if !has_saml_xml_signature(root) {
         return Ok((false, None));
     }
 
@@ -270,7 +299,7 @@ pub fn verify_signature_with_limits(
                 .iter()
                 .any(|c| normalize_cert_string(c) == inline)
         {
-            return Err(SamlError::UnmatchCertificate);
+            return Err(SamlError::CertificateMismatch);
         }
     }
 
@@ -323,7 +352,7 @@ pub fn verify_signature_with_limits(
         }
     }
     if !have_key {
-        return Err(SamlError::Crypto("NO_SELECTED_CERTIFICATE".into()));
+        return Err(SamlError::NoTrustedCertificate);
     }
     // A clean "invalid" (key mismatch / tampered) is a non-error false; only
     // surface a structural error when no certificate produced a verdict.
@@ -395,13 +424,15 @@ mod tests {
     fn unsupported_reference_target_parsing_fails() {
         assert!(matches!(
             verified_target_from_uri("#"),
-            Err(SamlError::Crypto(message))
-                if message == "ERR_UNSUPPORTED_REFERENCE_URI"
+            Err(SamlError::ReferenceResolution {
+                reason: ReferenceResolutionReason::UnsupportedReferenceUri
+            })
         ));
         assert!(matches!(
             verified_target_from_uri("#xpointer(//saml:Assertion)"),
-            Err(SamlError::Crypto(message))
-                if message == "ERR_UNSUPPORTED_REFERENCE_URI"
+            Err(SamlError::ReferenceResolution {
+                reason: ReferenceResolutionReason::UnsupportedReferenceUri
+            })
         ));
     }
 
@@ -484,13 +515,13 @@ mod tests {
         Ok(sign(&ctx, &template)?)
     }
 
-    fn assert_crypto_message(
+    fn assert_reference_resolution(
         result: Result<(bool, Option<String>), SamlError>,
-        expected: &str,
+        expected: ReferenceResolutionReason,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match result {
-            Err(SamlError::Crypto(message)) if message == expected => Ok(()),
-            other => Err(format!("expected crypto error {expected}, got {other:?}").into()),
+            Err(SamlError::ReferenceResolution { reason }) if reason == expected => Ok(()),
+            other => Err(format!("expected reference resolution {expected}, got {other:?}").into()),
         }
     }
 
@@ -546,7 +577,7 @@ mod tests {
     fn inline_certificate_is_not_used_without_metadata_pin(
     ) -> Result<(), Box<dyn std::error::Error>> {
         match verify_signature(RESPONSE_SIGNED, &[]) {
-            Err(SamlError::Crypto(message)) if message == "NO_SELECTED_CERTIFICATE" => Ok(()),
+            Err(SamlError::NoTrustedCertificate) => Ok(()),
             other => Err(format!("expected missing pinned certificate, got {other:?}").into()),
         }
     }
@@ -565,20 +596,16 @@ mod tests {
     #[test]
     fn signed_cid_reference_is_rejected_before_content_extraction(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        assert_crypto_message(
+        assert_reference_resolution(
             verify_signature(&cid_reference_response()?, &[SP_SIGNING_CERT.to_string()]),
-            "ERR_EXTERNAL_REFERENCE",
+            ReferenceResolutionReason::ExternalReference,
         )
     }
 
     #[test]
     fn rejects_signed_request_without_root_coverage() -> Result<(), Box<dyn std::error::Error>> {
         match verify_signature(SIGNED_REQUEST, &[SP_CERT.to_string()]) {
-            Err(SamlError::Crypto(message))
-                if message == "ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT" =>
-            {
-                Ok(())
-            }
+            Err(SamlError::SignedReferenceMismatch) => Ok(()),
             other => {
                 Err(format!("expected uncovered AuthnRequest rejection, got {other:?}").into())
             }
@@ -590,8 +617,8 @@ mod tests {
         // RESPONSE_SIGNED embeds the IdP cert; verifying against the SP cert
         // trips the inline-vs-metadata mismatch guard.
         match verify_signature(RESPONSE_SIGNED, &[SP_CERT.to_string()]) {
-            Err(SamlError::UnmatchCertificate) => Ok(()),
-            other => Err(format!("expected UnmatchCertificate, got {other:?}").into()),
+            Err(SamlError::CertificateMismatch) => Ok(()),
+            other => Err(format!("expected CertificateMismatch, got {other:?}").into()),
         }
     }
 

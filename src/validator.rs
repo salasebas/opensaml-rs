@@ -64,9 +64,12 @@ pub fn check_status_with_limits(
     let result = extract_with_limits(content, &fields, limits)?;
     match result.get_str("top") {
         Some(code) if code == status_code::SUCCESS => Ok(()),
-        Some(code) if !code.is_empty() => Err(SamlError::FailedStatus {
+        Some(code) if !code.is_empty() => Err(SamlError::StatusNotSuccess {
             top: code.to_string(),
-            second: result.get_str("second").unwrap_or_default().to_string(),
+            second: result
+                .get_str("second")
+                .filter(|second| !second.is_empty())
+                .map(str::to_string),
         }),
         _ => Err(SamlError::UndefinedStatus),
     }
@@ -118,11 +121,11 @@ mod tests {
         check_status(RESPONSE, ParserType::SamlRequest)?;
 
         match check_status(FAILED, ParserType::SamlResponse) {
-            Err(SamlError::FailedStatus { top, second }) => {
+            Err(SamlError::StatusNotSuccess { top, second }) => {
                 assert_eq!(top, status_code::REQUESTER);
-                assert_eq!(second, status_code::INVALID_NAME_ID_POLICY);
+                assert_eq!(second.as_deref(), Some(status_code::INVALID_NAME_ID_POLICY));
             }
-            other => return Err(format!("expected FailedStatus, got {other:?}").into()),
+            other => return Err(format!("expected StatusNotSuccess, got {other:?}").into()),
         }
         Ok(())
     }

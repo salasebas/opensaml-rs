@@ -6,7 +6,11 @@ use crate::binding::{
 };
 use crate::constants::{Binding, ParserType};
 use crate::context::is_valid_xml_with_limits;
-use crate::error::SamlError;
+#[cfg(feature = "crypto-bergshamra")]
+use crate::error::SignatureVerificationReason;
+use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
+#[cfg(feature = "crypto-bergshamra")]
+use crate::model::RelayStateParam;
 use crate::util::Value;
 use crate::validator::{check_status_with_limits, verify_time};
 use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
@@ -63,6 +67,14 @@ fn single_param<'a>(
         return Err(SamlError::Invalid("ERR_AMBIGUOUS_FLOW_INPUT".into()));
     }
     Ok(first)
+}
+
+fn missing_binding_parameter(name: &'static str) -> SamlError {
+    SamlError::MissingBindingParameter { name }
+}
+
+fn unsupported_binding(binding: Binding) -> SamlError {
+    SamlError::UnsupportedBinding { binding }
 }
 
 /// Inputs controlling a flow run.
@@ -160,7 +172,7 @@ fn decode_message(
         Binding::Redirect => {
             let content = request
                 .query_get(direction)?
-                .ok_or_else(|| SamlError::Invalid("ERR_REDIRECT_FLOW_BAD_ARGS".into()))?;
+                .ok_or_else(|| missing_binding_parameter(direction))?;
             let redirect_max_bytes = redirect_inflate_max_bytes.min(xml_limits.max_bytes);
             let compressed = base64_decode_with_limit(content, redirect_max_bytes)?;
             deflate_raw_decode_with_limit(&compressed, redirect_max_bytes)?
@@ -168,10 +180,10 @@ fn decode_message(
         Binding::Post | Binding::SimpleSign => {
             let content = request
                 .body_get(direction)?
-                .ok_or_else(|| SamlError::Invalid("ERR_FLOW_BAD_ARGS".into()))?;
+                .ok_or_else(|| missing_binding_parameter(direction))?;
             base64_decode_with_limit(content, xml_limits.max_bytes)?
         }
-        Binding::Artifact => return Err(SamlError::UndefinedBinding),
+        Binding::Artifact => return Err(unsupported_binding(binding)),
     };
     xml_limits.check_input_bytes(bytes.len())?;
     String::from_utf8(bytes).map_err(|e| SamlError::Xml(e.to_string()))
@@ -188,7 +200,7 @@ fn assertion_shortcut(xml: &str, limits: XmlLimits) -> Result<Option<String>, Sa
 
 #[cfg(feature = "crypto-bergshamra")]
 fn verified_content_not_covered() -> SamlError {
-    SamlError::Crypto("ERR_VERIFIED_REFERENCE_DOES_NOT_COVER_CONTENT".into())
+    SamlError::SignedReferenceMismatch
 }
 
 #[cfg(feature = "crypto-bergshamra")]
@@ -199,8 +211,25 @@ fn decoded_octet_params(octet: &str) -> Vec<(String, String)> {
 }
 
 #[cfg(feature = "crypto-bergshamra")]
-fn detached_mismatch() -> SamlError {
-    SamlError::FailedMessageSignatureVerification
+fn detached_signature_verification() -> SamlError {
+    SamlError::SignatureVerification {
+        reason: SignatureVerificationReason::DetachedMessageSignature,
+    }
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn relay_state_param(value: Option<&str>) -> Option<RelayStateParam> {
+    RelayStateParam::try_from_option(value.map(str::to_string)).ok()
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn detached_relay_state_mismatch(expected: Option<&str>, actual: Option<&str>) -> SamlError {
+    match (relay_state_param(expected), relay_state_param(actual)) {
+        (Some(expected), Some(actual)) => SamlError::RelayStateMismatch { expected, actual },
+        _ => SamlError::SignatureVerification {
+            reason: SignatureVerificationReason::RelayStateCorrelation,
+        },
+    }
 }
 
 #[cfg(feature = "crypto-bergshamra")]
@@ -213,26 +242,31 @@ fn ensure_redirect_octet_matches_consumed_fields(
     let direction = parser_type.query_param();
     let signed = decoded_octet_params(octet);
     if single_param(&signed, "Signature")?.is_some() {
-        return Err(detached_mismatch());
+        return Err(detached_signature_verification());
     }
 
-    let signed_message = single_param(&signed, direction)?.ok_or_else(detached_mismatch)?;
+    let signed_message =
+        single_param(&signed, direction)?.ok_or_else(|| missing_binding_parameter(direction))?;
     let consumed_message = request
         .query_get(direction)?
-        .ok_or_else(detached_mismatch)?;
+        .ok_or_else(|| missing_binding_parameter(direction))?;
     if signed_message != consumed_message {
-        return Err(detached_mismatch());
+        return Err(detached_signature_verification());
     }
 
-    let signed_sig_alg = single_param(&signed, "SigAlg")?.ok_or_else(detached_mismatch)?;
+    let signed_sig_alg =
+        single_param(&signed, "SigAlg")?.ok_or_else(|| missing_binding_parameter("SigAlg"))?;
     if signed_sig_alg != sig_alg {
-        return Err(detached_mismatch());
+        return Err(detached_signature_verification());
     }
 
     let signed_relay_state = single_param(&signed, "RelayState")?;
     let consumed_relay_state = request.query_get("RelayState")?;
     if signed_relay_state != consumed_relay_state {
-        return Err(detached_mismatch());
+        return Err(detached_relay_state_mismatch(
+            signed_relay_state,
+            consumed_relay_state,
+        ));
     }
 
     Ok(())
@@ -247,7 +281,9 @@ fn ensure_simplesign_octet_matches_consumed_fields(
     octet: &str,
 ) -> Result<(), SamlError> {
     let direction = parser_type.query_param();
-    request.body_get(direction)?.ok_or_else(detached_mismatch)?;
+    request
+        .body_get(direction)?
+        .ok_or_else(|| missing_binding_parameter(direction))?;
 
     let message_and_sig_alg = format!("{direction}={xml}&SigAlg={sig_alg}");
     let message_empty_relay_and_sig_alg = format!("{direction}={xml}&RelayState=&SigAlg={sig_alg}");
@@ -265,7 +301,7 @@ fn ensure_simplesign_octet_matches_consumed_fields(
     if matches {
         Ok(())
     } else {
-        Err(detached_mismatch())
+        Err(detached_signature_verification())
     }
 }
 
@@ -293,6 +329,17 @@ fn ensure_detached_octet_matches_consumed_fields(
     }
 }
 
+#[cfg(feature = "crypto-bergshamra")]
+fn required_xml_signature_failed(signature_present: bool) -> SamlError {
+    if signature_present {
+        SamlError::SignatureVerification {
+            reason: SignatureVerificationReason::XmlSignature,
+        }
+    } else {
+        SamlError::SignatureMissing
+    }
+}
+
 /// Verify and optionally decrypt the message, returning the authenticated
 /// `(saml_content, assertion)`. Requires `crypto-bergshamra`.
 #[cfg(feature = "crypto-bergshamra")]
@@ -305,9 +352,11 @@ fn verify_and_prepare(
         decrypt_assertion_with_limits,
         enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
         keys::load_private_key,
+        verify::has_xml_signature_with_limits,
         verify_signature_with_limits,
     };
 
+    let signature_present = has_xml_signature_with_limits(xml, opts.xml_limits)?;
     let (verified, verified_node) =
         verify_signature_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
     let decrypt_required = opts.decrypt_key.is_some();
@@ -337,12 +386,13 @@ fn verify_and_prepare(
         // encrypted-then-signed: decrypt first, then verify the result.
         let (content, _) =
             decrypt_assertion_with_limits(xml, &load_key()?, decrypt_options, opts.xml_limits)?;
+        let signature_present = has_xml_signature_with_limits(&content, opts.xml_limits)?;
         let (re_verified, re_node) =
             verify_signature_with_limits(&content, opts.signing_certs, opts.xml_limits)?;
         return if re_verified {
             Ok((content, re_node))
         } else {
-            Err(SamlError::FailedToVerifySignature)
+            Err(required_xml_signature_failed(signature_present))
         };
     }
     if verified {
@@ -355,7 +405,7 @@ fn verify_and_prepare(
         }
         return Ok((xml.to_string(), verified_node));
     }
-    Err(SamlError::FailedToVerifySignature)
+    Err(required_xml_signature_failed(signature_present))
 }
 
 #[cfg(not(feature = "crypto-bergshamra"))]
@@ -385,12 +435,12 @@ fn verify_detached(
             _ => request.body_get(k),
         }
     };
-    let signature = get("Signature")?.ok_or(SamlError::MissingSigAlg)?;
-    let sig_alg = get("SigAlg")?.ok_or(SamlError::MissingSigAlg)?;
+    let signature = get("Signature")?.ok_or(SamlError::SignatureMissing)?;
+    let sig_alg = get("SigAlg")?.ok_or_else(|| missing_binding_parameter("SigAlg"))?;
     let octet = request
         .octet_string
         .as_deref()
-        .ok_or(SamlError::MissingSigAlg)?;
+        .ok_or_else(|| missing_binding_parameter("octet_string"))?;
     ensure_detached_octet_matches_consumed_fields(
         binding,
         parser_type,
@@ -405,7 +455,7 @@ fn verify_detached(
     if verified {
         Ok(sig_alg.to_string())
     } else {
-        Err(SamlError::FailedMessageSignatureVerification)
+        Err(detached_signature_verification())
     }
 }
 
@@ -438,11 +488,17 @@ fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
     }
 }
 
-fn is_valid_bearer_subject_confirmation(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubjectConfirmationCheck {
+    Valid,
+    Invalid(SubjectConfirmationReason),
+}
+
+fn check_bearer_subject_confirmation(
     xml: &str,
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
-) -> Result<bool, SamlError> {
+) -> Result<SubjectConfirmationCheck, SamlError> {
     let fields = [
         ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
         ExtractorField::new(
@@ -454,29 +510,39 @@ fn is_valid_bearer_subject_confirmation(
     let extracted = extract_with_limits(xml, &fields, opts.xml_limits)?;
 
     if extracted.get_str("subjectConfirmation") != Some(BEARER_SUBJECT_CONFIRMATION_METHOD) {
-        return Ok(false);
+        return Ok(SubjectConfirmationCheck::Invalid(
+            SubjectConfirmationReason::InvalidMethod,
+        ));
     }
 
     let Some(not_on_or_after) = extracted.get_str("subjectConfirmationData.notOnOrAfter") else {
-        return Ok(false);
+        return Ok(SubjectConfirmationCheck::Invalid(
+            SubjectConfirmationReason::MissingNotOnOrAfter,
+        ));
     };
     if !verify_time(None, Some(not_on_or_after), opts.clock_drifts) {
-        return Ok(false);
+        return Ok(SubjectConfirmationCheck::Invalid(
+            SubjectConfirmationReason::TimeWindowInvalid,
+        ));
     }
 
     if let Some(expected) = expected_recipient {
         if extracted.get_str("subjectConfirmationData.recipient") != Some(expected) {
-            return Ok(false);
+            return Ok(SubjectConfirmationCheck::Invalid(
+                SubjectConfirmationReason::RecipientMismatch,
+            ));
         }
     }
 
     if let Some(expected) = opts.expected_in_response_to {
         if extracted.get_str("subjectConfirmationData.inResponseTo") != Some(expected) {
-            return Ok(false);
+            return Ok(SubjectConfirmationCheck::Invalid(
+                SubjectConfirmationReason::InResponseToMismatch,
+            ));
         }
     }
 
-    Ok(true)
+    Ok(SubjectConfirmationCheck::Valid)
 }
 
 fn validate_subject_confirmation(
@@ -484,12 +550,16 @@ fn validate_subject_confirmation(
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
 ) -> Result<(), SamlError> {
+    let mut reason = None;
     for xml in subject_confirmation_xmls(extracted) {
-        if is_valid_bearer_subject_confirmation(xml, opts, expected_recipient)? {
-            return Ok(());
+        match check_bearer_subject_confirmation(xml, opts, expected_recipient)? {
+            SubjectConfirmationCheck::Valid => return Ok(()),
+            SubjectConfirmationCheck::Invalid(current) => reason = Some(current),
         }
     }
-    Err(SamlError::SubjectUnconfirmed)
+    Err(SamlError::SubjectConfirmationInvalid {
+        reason: reason.unwrap_or(SubjectConfirmationReason::MissingBearerConfirmation),
+    })
 }
 
 fn validate_response_destination(
@@ -501,7 +571,7 @@ fn validate_response_destination(
     };
     if let Some(destination) = extracted.get_str("response.destination") {
         if destination != expected {
-            return Err(SamlError::UnmatchDestination);
+            return Err(SamlError::destination_mismatch(expected, Some(destination)));
         }
     }
     Ok(())
@@ -522,8 +592,9 @@ fn validate_context(
     );
     if should_validate_issuer {
         if let Some(expected) = opts.from_issuer {
-            if extracted.get_str("issuer") != Some(expected) {
-                return Err(SamlError::UnmatchIssuer);
+            let actual = extracted.get_str("issuer");
+            if actual != Some(expected) {
+                return Err(SamlError::issuer_mismatch(expected, actual));
             }
         }
     }
@@ -533,8 +604,9 @@ fn validate_context(
     );
     if is_response {
         if let Some(expected) = opts.expected_in_response_to {
-            if extracted.get_str("response.inResponseTo") != Some(expected) {
-                return Err(SamlError::InvalidInResponseTo);
+            let actual = extracted.get_str("response.inResponseTo");
+            if actual != Some(expected) {
+                return Err(SamlError::in_response_to_mismatch(Some(expected), actual));
             }
         }
     }
@@ -543,20 +615,26 @@ fn validate_context(
         validate_subject_confirmation(extracted, opts, expected_recipient)?;
         if let Some(expected) = opts.expected_audience {
             if !audience_contains(extracted, expected) {
-                return Err(SamlError::UnmatchAudience);
+                return Err(SamlError::AudienceMismatch {
+                    expected: expected.to_string(),
+                });
             }
         }
         if let Some(session_not_on_or_after) = extracted.get_str("sessionIndex.sessionNotOnOrAfter")
         {
             if !verify_time(None, Some(session_not_on_or_after), opts.clock_drifts) {
-                return Err(SamlError::ExpiredSession);
+                return Err(SamlError::TimeWindowInvalid {
+                    field: TimeWindowField::SessionNotOnOrAfter,
+                });
             }
         }
         if let Some(conditions) = extracted.get("conditions") {
             let not_before = conditions.get_str("notBefore");
             let not_on_or_after = conditions.get_str("notOnOrAfter");
             if !verify_time(not_before, not_on_or_after, opts.clock_drifts) {
-                return Err(SamlError::SubjectUnconfirmed);
+                return Err(SamlError::TimeWindowInvalid {
+                    field: TimeWindowField::Conditions,
+                });
             }
         }
     }
@@ -568,7 +646,9 @@ fn flow_inner(
     request: &HttpRequest,
     expected_recipient: Option<&str>,
 ) -> Result<FlowResult, SamlError> {
-    let binding = opts.binding.ok_or(SamlError::UndefinedBinding)?;
+    let binding = opts
+        .binding
+        .ok_or_else(|| missing_binding_parameter("binding"))?;
     let parser_type = opts
         .parser_type
         .ok_or_else(|| SamlError::Invalid("ERR_UNDEFINED_PARSERTYPE".into()))?;
