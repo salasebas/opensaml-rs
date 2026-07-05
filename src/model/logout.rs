@@ -5,8 +5,41 @@ use super::identifiers::{MessageId, SessionIndex};
 use super::subject::NameId;
 use super::EndpointUrl;
 use crate::config::EntityId;
+use crate::constants::status_code;
 use crate::error::SamlError;
 use crate::raw::FlowResult;
+
+/// Subject data used to issue a front-channel Single Logout request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogoutSubject {
+    name_id: NameId,
+    session_indexes: Vec<SessionIndex>,
+}
+
+impl LogoutSubject {
+    /// Create logout subject data from a NameID and optional SessionIndex values.
+    pub fn new(name_id: NameId, session_indexes: Vec<SessionIndex>) -> Self {
+        Self {
+            name_id,
+            session_indexes,
+        }
+    }
+
+    /// Create logout subject data with no SessionIndex values.
+    pub fn from_name_id(name_id: NameId) -> Self {
+        Self::new(name_id, Vec::new())
+    }
+
+    /// Subject NameID.
+    pub fn name_id(&self) -> &NameId {
+        &self.name_id
+    }
+
+    /// SessionIndex values to include in the logout request.
+    pub fn session_indexes(&self) -> &[SessionIndex] {
+        &self.session_indexes
+    }
+}
 
 /// Parsed LogoutRequest result.
 #[derive(Debug, Clone)]
@@ -130,19 +163,46 @@ impl TryFrom<FlowResult> for LogoutResponse {
 }
 
 /// Marker result for completed logout flows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct LogoutCompleted {
     peer_entity_id: EntityId,
+    response: Option<LogoutResponse>,
 }
 
 impl LogoutCompleted {
     /// Create a completed logout marker.
     pub fn new(peer_entity_id: EntityId) -> Self {
-        Self { peer_entity_id }
+        Self {
+            peer_entity_id,
+            response: None,
+        }
+    }
+
+    /// Create a completed logout marker from a validated LogoutResponse.
+    pub fn from_response(peer_entity_id: EntityId, response: LogoutResponse) -> Self {
+        Self {
+            peer_entity_id,
+            response: Some(response),
+        }
     }
 
     /// Peer entity ID involved in the completed logout.
     pub fn peer_entity_id(&self) -> &EntityId {
         &self.peer_entity_id
+    }
+
+    /// Validated LogoutResponse, when this completion came from a front-channel response.
+    pub fn response(&self) -> Option<&LogoutResponse> {
+        self.response.as_ref()
+    }
+
+    /// Successful SAML status for the completed logout response.
+    pub fn status(&self) -> Option<&str> {
+        self.response.as_ref().map(|_| status_code::SUCCESS)
+    }
+
+    /// Raw validated flow result for the LogoutResponse.
+    pub fn raw_flow(&self) -> Option<&FlowResult> {
+        self.response.as_ref().map(LogoutResponse::raw_flow)
     }
 }

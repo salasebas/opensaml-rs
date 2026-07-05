@@ -42,7 +42,9 @@ pub mod util;
 pub mod validator;
 pub mod xml;
 
-pub use api::{Idp, RespondSso, Saml, SamlError, Sp, StartSso, Unknown};
+pub use api::{
+    Idp, LogoutSigning, RespondSlo, RespondSso, Saml, SamlError, Sp, StartSlo, StartSso, Unknown,
+};
 pub use browser::{
     AcsEndpoint, BrowserInput, EndpointUrl, FormField, LogoutBinding, Outbound, Pending,
     PendingAuthnRequest, PendingLogoutRequest, PendingSnapshot, PostForm, SloEndpoint, SsoEndpoint,
@@ -64,7 +66,7 @@ pub use entity::EntitySetting;
 pub use idp::IdentityProvider;
 pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
-    ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, MessageId, NameId,
+    ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, MessageId, NameId,
     NameIdCreationRequest, NameIdPolicy, Received, RelayState, RelayStateParam, ReplayCache,
     ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex, SsoResponse,
     SsoSession, Subject, SubjectConfirmation, MAX_RELAY_STATE_BYTES,
