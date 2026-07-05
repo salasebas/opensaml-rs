@@ -17,6 +17,9 @@ Entries before the rebrand use the package names that were current at the time.
 - Renamed `OpenSamlError` to `SamlError`.
 - Retired alias crates from active publication; do not yank existing healthy
   alias versions.
+- Added typed config builders and direction-specific AuthnRequest policy names;
+  builders use strict defaults while constructors/default policy values preserve
+  compatibility, and final config validation now covers policy requirements.
 
 ## [0.1.4] - 2026-06-21
 

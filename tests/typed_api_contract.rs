@@ -25,6 +25,8 @@ fn typed_api_contract_reexports_raw_flow_types() {
 fn typed_api_contract_reexports_config_builders() {
     let _ = std::any::type_name::<saml_rs::SpConfigBuilder>();
     let _ = std::any::type_name::<saml_rs::IdpConfigBuilder>();
+    let _ = std::any::type_name::<saml_rs::AuthnRequestSigningPolicy>();
+    let _ = std::any::type_name::<saml_rs::AuthnRequestValidationPolicy>();
 }
 
 #[test]

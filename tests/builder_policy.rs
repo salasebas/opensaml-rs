@@ -2,12 +2,12 @@ use std::str::FromStr;
 
 use saml_rs::{
     AcsEndpoint, AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy,
-    AudienceValidationPolicy, AuthnRequestSignaturePolicy, CertificatePem, Credentials,
-    DataEncryptionAlgorithm, DigestAlgorithm, EntityId, EntitySetting, IdpConfig,
-    IdpMetadataConfig, IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy,
-    LogoutSignaturePolicy, MessageSignaturePolicy, NameIdCreationPolicy, PrivateKeyPem, SamlError,
-    SignatureAlgorithm, SloEndpoint, SpConfig, SpMetadataConfig, SpValidationPolicy, SsoEndpoint,
-    TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
+    AudienceValidationPolicy, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
+    CertificatePem, Credentials, DataEncryptionAlgorithm, DigestAlgorithm, EntityId, EntitySetting,
+    IdpConfig, IdpMetadataConfig, IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy,
+    LogoutSignaturePolicy, MessageSignaturePolicy, NameIdCreationPolicy, Passphrase, PrivateKeyPem,
+    SamlError, SignatureAlgorithm, SloEndpoint, SpConfig, SpMetadataConfig, SpValidationPolicy,
+    SsoEndpoint, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
 };
 
 fn signing_credentials() -> Credentials {
@@ -130,7 +130,7 @@ fn builders_default_to_strict_validation() -> Result<(), Box<dyn std::error::Err
     );
     assert_eq!(
         sp.validation.authn_requests,
-        AuthnRequestSignaturePolicy::RequireSigned
+        AuthnRequestSigningPolicy::Sign
     );
     assert_eq!(sp.validation.audience, AudienceValidationPolicy::Validate);
     assert_eq!(
@@ -156,18 +156,62 @@ fn compatibility_policy_names_unsigned_choices_explicitly() {
     );
     assert_eq!(
         sp.authn_requests,
-        AuthnRequestSignaturePolicy::AllowUnsignedForCompatibility
+        AuthnRequestSigningPolicy::DoNotSignForCompatibility
     );
     assert_eq!(sp.audience, AudienceValidationPolicy::SkipForCompatibility);
     assert_eq!(sp.logout, LogoutPolicy::compatibility());
     assert_eq!(
         idp.authn_requests,
-        AuthnRequestSignaturePolicy::AllowUnsignedForCompatibility
+        AuthnRequestValidationPolicy::AllowUnsignedForCompatibility
     );
     assert_eq!(
         idp.logout.requests,
         LogoutSignaturePolicy::AllowUnsignedForCompatibility
     );
+}
+
+#[test]
+fn public_validation_defaults_remain_compatibility() {
+    assert_eq!(
+        SpValidationPolicy::default(),
+        SpValidationPolicy::compatibility()
+    );
+    assert_eq!(
+        IdpValidationPolicy::default(),
+        IdpValidationPolicy::compatibility()
+    );
+    assert_eq!(
+        AssertionSignaturePolicy::default(),
+        AssertionSignaturePolicy::AllowUnsignedForCompatibility
+    );
+    assert_eq!(
+        MessageSignaturePolicy::default(),
+        MessageSignaturePolicy::AllowUnsignedForCompatibility
+    );
+    assert_eq!(
+        AuthnRequestSigningPolicy::default(),
+        AuthnRequestSigningPolicy::DoNotSignForCompatibility
+    );
+    assert_eq!(
+        AuthnRequestValidationPolicy::default(),
+        AuthnRequestValidationPolicy::AllowUnsignedForCompatibility
+    );
+}
+
+#[test]
+fn constructors_use_compatibility_defaults() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = SpConfig::try_new(
+        EntityId::try_new("https://sp.example.com/metadata")?,
+        SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
+    )?;
+    let idp = IdpConfig::try_new(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        IdpMetadataConfig::new(vec![SsoEndpoint::redirect("https://idp.example.com/sso")?]),
+    )?;
+
+    assert_eq!(sp.validation, SpValidationPolicy::compatibility());
+    assert_eq!(idp.validation, IdpValidationPolicy::compatibility());
+    Ok(())
 }
 
 #[test]
@@ -197,6 +241,85 @@ fn custom_algorithm_variants_keep_simple_names() {
     assert!(variants
         .iter()
         .all(|variant| !variant.contains("Compatibility")));
+}
+
+#[test]
+fn sp_builder_sets_policy_setters() -> Result<(), Box<dyn std::error::Error>> {
+    let elements_order = vec!["AssertionConsumerService".to_string()];
+    let algorithms = AlgorithmPolicy {
+        signature: SignatureAlgorithm::RsaSha512,
+        data_encryption: DataEncryptionAlgorithm::Aes128,
+        key_encryption: KeyEncryptionAlgorithm::RsaOaepMgf1p,
+        signed_reference_transforms: vec![TransformAlgorithm::ExclusiveCanonicalization],
+        ..AlgorithmPolicy::default()
+    };
+    let xml = XmlPolicy {
+        clock_drifts: (-1000, 2000),
+        ..XmlPolicy::default()
+    };
+    let templates = TemplatePolicy {
+        relay_state: "relay-state".to_string(),
+        tag_prefix_protocol: "p".to_string(),
+        ..TemplatePolicy::default()
+    };
+
+    let config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+        .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .credentials(signing_credentials())
+        .elements_order(elements_order.clone())
+        .algorithms(algorithms.clone())
+        .xml(xml)
+        .templates(templates.clone())
+        .build()?;
+
+    assert_eq!(config.metadata.elements_order, Some(elements_order));
+    assert_eq!(config.algorithms, algorithms);
+    assert_eq!(config.xml, xml);
+    assert_eq!(config.templates.relay_state, templates.relay_state);
+    assert_eq!(
+        config.templates.tag_prefix_protocol,
+        templates.tag_prefix_protocol
+    );
+    Ok(())
+}
+
+#[test]
+fn idp_builder_sets_policy_setters() -> Result<(), Box<dyn std::error::Error>> {
+    let elements_order = vec!["SingleSignOnService".to_string()];
+    let algorithms = AlgorithmPolicy {
+        signature: SignatureAlgorithm::RsaSha384,
+        data_encryption: DataEncryptionAlgorithm::Aes256,
+        key_encryption: KeyEncryptionAlgorithm::RsaOaepMgf1p,
+        signed_reference_transforms: vec![TransformAlgorithm::EnvelopedSignature],
+        ..AlgorithmPolicy::default()
+    };
+    let xml = XmlPolicy {
+        clock_drifts: (-2000, 3000),
+        ..XmlPolicy::default()
+    };
+    let templates = TemplatePolicy {
+        relay_state: "idp-relay".to_string(),
+        tag_prefix_assertion: "a".to_string(),
+        ..TemplatePolicy::default()
+    };
+
+    let config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+        .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
+        .elements_order(elements_order.clone())
+        .algorithms(algorithms.clone())
+        .xml(xml)
+        .templates(templates.clone())
+        .build()?;
+
+    assert_eq!(config.metadata.elements_order, Some(elements_order));
+    assert_eq!(config.algorithms, algorithms);
+    assert_eq!(config.xml, xml);
+    assert_eq!(config.templates.relay_state, templates.relay_state);
+    assert_eq!(
+        config.templates.tag_prefix_assertion,
+        templates.tag_prefix_assertion
+    );
+    Ok(())
 }
 
 #[test]
@@ -232,6 +355,58 @@ fn struct_literal_conversion_rejects_empty_entity_id() -> Result<(), Box<dyn std
 }
 
 #[test]
+fn follow_peer_metadata_logout_policy_validates_until_raw_conversion(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = SpConfig::new(
+        EntityId::try_new("https://sp.example.com/metadata")?,
+        SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
+    );
+    config.validation.logout.requests = LogoutSignaturePolicy::FollowPeerMetadata;
+
+    config.validate()?;
+    let result = EntitySetting::try_from(&config);
+
+    assert!(matches!(result, Err(SamlError::Unsupported(_))));
+    Ok(())
+}
+
+#[test]
+fn sp_builder_rejects_signing_passphrase_without_signing_key(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let credentials = Credentials {
+        signing_key_passphrase: Some(Passphrase::new("test passphrase")),
+        ..Credentials::default()
+    };
+
+    let result = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+        .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .validation(SpValidationPolicy::compatibility())
+        .credentials(credentials)
+        .build();
+
+    assert_missing_key(result, "signing_key");
+    Ok(())
+}
+
+#[test]
+fn sp_builder_rejects_decryption_passphrase_without_decryption_key(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let credentials = Credentials {
+        decryption_key_passphrase: Some(Passphrase::new("test passphrase")),
+        ..Credentials::default()
+    };
+
+    let result = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+        .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .validation(SpValidationPolicy::compatibility())
+        .credentials(credentials)
+        .build();
+
+    assert_missing_key(result, "decryption_key");
+    Ok(())
+}
+
+#[test]
 fn sp_builder_rejects_missing_acs() -> Result<(), Box<dyn std::error::Error>> {
     let result = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
         .credentials(signing_credentials())
@@ -257,6 +432,22 @@ fn sp_builder_requires_signing_credentials_when_authn_requests_are_signed(
         .build();
 
     assert_missing_key(result, "signing_key");
+    Ok(())
+}
+
+#[test]
+fn sp_builder_requires_signing_certificate_when_authn_requests_are_signed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let credentials = Credentials {
+        signing_key: Some(PrivateKeyPem::new("test signing key")),
+        ..Credentials::default()
+    };
+    let result = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+        .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .credentials(credentials)
+        .build();
+
+    assert_missing_key(result, "signing_certificate");
     Ok(())
 }
 
