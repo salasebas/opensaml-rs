@@ -12,6 +12,28 @@ use crate::model::{AuthnRequest, LogoutRequest, LogoutResponse, SsoResponse};
 use crate::raw::HttpRequest;
 use crate::xml::XmlLimits;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageField {
+    Request,
+    Response,
+}
+
+impl MessageField {
+    fn param_name(self) -> &'static str {
+        match self {
+            Self::Request => url_params::SAML_REQUEST,
+            Self::Response => url_params::SAML_RESPONSE,
+        }
+    }
+
+    fn opposite_param_name(self) -> &'static str {
+        match self {
+            Self::Request => url_params::SAML_RESPONSE,
+            Self::Response => url_params::SAML_REQUEST,
+        }
+    }
+}
+
 /// Typed browser input for inbound SAML messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrowserInput<Message> {
@@ -127,7 +149,7 @@ impl TryFrom<BrowserInput<AuthnRequest>> for HttpRequest {
     type Error = SamlError;
 
     fn try_from(value: BrowserInput<AuthnRequest>) -> Result<Self, Self::Error> {
-        http_request_from_input(value, true)
+        http_request_from_input(value, true, MessageField::Request)
     }
 }
 
@@ -135,7 +157,7 @@ impl TryFrom<BrowserInput<SsoResponse>> for HttpRequest {
     type Error = SamlError;
 
     fn try_from(value: BrowserInput<SsoResponse>) -> Result<Self, Self::Error> {
-        http_request_from_input(value, false)
+        http_request_from_input(value, false, MessageField::Response)
     }
 }
 
@@ -143,7 +165,7 @@ impl TryFrom<BrowserInput<LogoutRequest>> for HttpRequest {
     type Error = SamlError;
 
     fn try_from(value: BrowserInput<LogoutRequest>) -> Result<Self, Self::Error> {
-        http_request_from_input(value, true)
+        http_request_from_input(value, true, MessageField::Request)
     }
 }
 
@@ -151,7 +173,7 @@ impl TryFrom<BrowserInput<LogoutResponse>> for HttpRequest {
     type Error = SamlError;
 
     fn try_from(value: BrowserInput<LogoutResponse>) -> Result<Self, Self::Error> {
-        http_request_from_input(value, true)
+        http_request_from_input(value, true, MessageField::Response)
     }
 }
 
@@ -190,6 +212,7 @@ fn simple_sign_body_input<Message>(raw_body: impl Into<String>) -> BrowserInput<
 fn http_request_from_input<Message>(
     value: BrowserInput<Message>,
     allow_redirect: bool,
+    expected_message: MessageField,
 ) -> Result<HttpRequest, SamlError> {
     match value {
         BrowserInput::Redirect { raw_query, .. } => {
@@ -197,7 +220,7 @@ fn http_request_from_input<Message>(
                 return Err(SamlError::UndefinedBinding);
             }
             let raw_query = raw_query.trim_start_matches('?').to_string();
-            let octet_string = redirect_octet_from_raw_query(&raw_query)?;
+            let octet_string = redirect_octet_from_raw_query(&raw_query, expected_message)?;
             let query = parse_form_pairs(&raw_query);
             Ok(HttpRequest {
                 query,
@@ -205,7 +228,10 @@ fn http_request_from_input<Message>(
                 ..Default::default()
             })
         }
-        BrowserInput::Post { fields, .. } => Ok(HttpRequest::post(fields_to_pairs(fields))),
+        BrowserInput::Post { fields, .. } => {
+            validate_form_message_kind(&fields, expected_message)?;
+            Ok(HttpRequest::post(fields_to_pairs(fields)))
+        }
         BrowserInput::SimpleSignPost {
             raw_body,
             mut fields,
@@ -214,7 +240,7 @@ fn http_request_from_input<Message>(
             if fields.is_empty() {
                 fields = parse_form_fields(&raw_body);
             }
-            let octet_string = simplesign_octet_from_fields(&fields)?;
+            let octet_string = simplesign_octet_from_fields(&fields, expected_message)?;
             let mut request = HttpRequest::post(fields_to_pairs(fields));
             request.octet_string = Some(octet_string);
             Ok(request)
@@ -260,20 +286,32 @@ fn unique_encoded_query_value<'a>(
     Ok(first)
 }
 
-fn redirect_octet_from_raw_query(raw_query: &str) -> Result<Option<String>, SamlError> {
+fn validate_query_message_kind<'a>(
+    params: &'a [RawQueryParam<'a>],
+    expected_message: MessageField,
+) -> Result<&'a str, SamlError> {
+    let expected_name = expected_message.param_name();
+    let opposite_name = expected_message.opposite_param_name();
+    let expected = unique_encoded_query_value(params, expected_name)?;
+    let opposite = unique_encoded_query_value(params, opposite_name)?;
+    match (expected, opposite) {
+        (Some(value), None) => Ok(value),
+        (None, None) => Err(SamlError::Invalid(format!(
+            "missing Redirect field {expected_name}"
+        ))),
+        (None, Some(_)) | (Some(_), Some(_)) => Err(SamlError::Invalid(format!(
+            "expected Redirect field {expected_name}, found {opposite_name}"
+        ))),
+    }
+}
+
+fn redirect_octet_from_raw_query(
+    raw_query: &str,
+    expected_message: MessageField,
+) -> Result<Option<String>, SamlError> {
     let params: Vec<_> = raw_query_params(raw_query).collect();
-    let request = unique_encoded_query_value(&params, url_params::SAML_REQUEST)?;
-    let response = unique_encoded_query_value(&params, url_params::SAML_RESPONSE)?;
-    let (message_name, message_value) = match (request, response) {
-        (Some(request), None) => (url_params::SAML_REQUEST, request),
-        (None, Some(response)) => (url_params::SAML_RESPONSE, response),
-        (None, None) => return Ok(None),
-        (Some(_), Some(_)) => {
-            return Err(SamlError::Invalid(
-                "expected exactly one Redirect SAML message field".into(),
-            ))
-        }
-    };
+    let message_name = expected_message.param_name();
+    let message_value = validate_query_message_kind(&params, expected_message)?;
     let relay_state = unique_encoded_query_value(&params, url_params::RELAY_STATE)?;
     let sig_alg = unique_encoded_query_value(&params, url_params::SIG_ALG)?;
     let signature = unique_encoded_query_value(&params, url_params::SIGNATURE)?;
@@ -325,19 +363,31 @@ fn field_value<'a>(fields: &'a [FormField], name: &str) -> Result<Option<&'a str
     Ok(first)
 }
 
-fn simplesign_octet_from_fields(fields: &[FormField]) -> Result<String, SamlError> {
-    let (message_name, encoded) = match (
-        field_value(fields, url_params::SAML_REQUEST)?,
-        field_value(fields, url_params::SAML_RESPONSE)?,
-    ) {
-        (Some(request), None) => (url_params::SAML_REQUEST, request),
-        (None, Some(response)) => (url_params::SAML_RESPONSE, response),
-        _ => {
-            return Err(SamlError::Invalid(
-                "expected exactly one SAML message field".into(),
-            ))
-        }
-    };
+fn validate_form_message_kind(
+    fields: &[FormField],
+    expected_message: MessageField,
+) -> Result<&str, SamlError> {
+    let expected_name = expected_message.param_name();
+    let opposite_name = expected_message.opposite_param_name();
+    let expected = field_value(fields, expected_name)?;
+    let opposite = field_value(fields, opposite_name)?;
+    match (expected, opposite) {
+        (Some(value), None) => Ok(value),
+        (None, None) => Err(SamlError::Invalid(format!(
+            "missing form field {expected_name}"
+        ))),
+        (None, Some(_)) | (Some(_), Some(_)) => Err(SamlError::Invalid(format!(
+            "expected form field {expected_name}, found {opposite_name}"
+        ))),
+    }
+}
+
+fn simplesign_octet_from_fields(
+    fields: &[FormField],
+    expected_message: MessageField,
+) -> Result<String, SamlError> {
+    let message_name = expected_message.param_name();
+    let encoded = validate_form_message_kind(fields, expected_message)?;
     let raw_xml = String::from_utf8(base64_decode_with_limit(
         encoded,
         XmlLimits::default().max_bytes,

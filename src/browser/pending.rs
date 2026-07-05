@@ -10,9 +10,13 @@ use crate::model::{
     AuthnRequest, EndpointUrl, LogoutRequest, MessageId, RelayStateParam, SamlInstant,
 };
 
+mod sealed {
+    pub trait Sealed {}
+}
+
 /// Message marker support for typed pending state.
 #[doc(hidden)]
-pub trait PendingMessage {
+pub trait PendingMessage: sealed::Sealed {
     /// Private storage for protocol-specific pending fields.
     type Details: Clone + core::fmt::Debug + PartialEq + Eq;
     /// Binding type used for outbound request dispatch.
@@ -37,11 +41,15 @@ pub struct LogoutPendingDetails {
     binding: LogoutBinding,
 }
 
+impl sealed::Sealed for AuthnRequest {}
+
 impl PendingMessage for AuthnRequest {
     type Details = AuthnPendingDetails;
     type RequestBinding = SsoRequestBinding;
     type ResponseBinding = SsoResponseBinding;
 }
+
+impl sealed::Sealed for LogoutRequest {}
 
 impl PendingMessage for LogoutRequest {
     type Details = LogoutPendingDetails;
@@ -62,13 +70,25 @@ pub struct PendingSnapshot<Message: PendingMessage> {
     pub expected_binding: String,
     /// Selected request binding keyword, if tracked.
     pub request_binding: Option<String>,
-    /// Selected ACS URL.
+    /// Selected ACS URL for AuthnRequest snapshots.
+    ///
+    /// LogoutRequest snapshots leave this empty and [`PendingLogoutRequest::from_snapshot`]
+    /// ignores it.
     pub acs_url: String,
-    /// Selected ACS binding keyword.
+    /// Selected ACS binding keyword for AuthnRequest snapshots.
+    ///
+    /// LogoutRequest snapshots leave this empty and [`PendingLogoutRequest::from_snapshot`]
+    /// ignores it.
     pub acs_binding: String,
-    /// Selected ACS index, if any.
+    /// Selected ACS index for AuthnRequest snapshots, if any.
+    ///
+    /// LogoutRequest snapshots leave this unset and [`PendingLogoutRequest::from_snapshot`]
+    /// ignores it.
     pub acs_index: Option<u16>,
-    /// Whether the selected ACS was default.
+    /// Whether the selected AuthnRequest ACS was default.
+    ///
+    /// LogoutRequest snapshots leave this false and [`PendingLogoutRequest::from_snapshot`]
+    /// ignores it.
     pub acs_is_default: bool,
     /// Issue instant, if recorded.
     pub issued_at: Option<SamlInstant>,
@@ -106,6 +126,8 @@ impl PendingSnapshot<AuthnRequest> {
 
 impl PendingSnapshot<LogoutRequest> {
     /// Build a LogoutRequest snapshot from persistence fields.
+    ///
+    /// ACS fields are AuthnRequest-only and are intentionally left empty.
     pub fn logout_request(
         id: impl Into<String>,
         relay_state: RelayStateParam,
@@ -358,6 +380,8 @@ impl Pending<LogoutRequest> {
     }
 
     /// Reconstruct pending LogoutRequest state from a snapshot.
+    ///
+    /// AuthnRequest-only ACS snapshot fields are ignored.
     ///
     /// # Errors
     ///

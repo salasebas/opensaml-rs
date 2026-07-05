@@ -338,6 +338,15 @@ fn valid_authn_snapshot() -> PendingSnapshot<AuthnRequest> {
     )
 }
 
+fn valid_logout_snapshot() -> PendingSnapshot<saml_rs::LogoutRequest> {
+    PendingSnapshot::logout_request(
+        "_logout123",
+        RelayStateParam::Absent,
+        "https://idp.example.com/metadata",
+        LogoutBinding::Post,
+    )
+}
+
 #[test]
 fn typed_bindings_pending_snapshot_validates_request_id() {
     let mut snapshot = valid_authn_snapshot();
@@ -439,4 +448,31 @@ fn typed_bindings_pending_snapshot_validates_expiration_requires_issue_instant(
         Err(SamlError::Invalid(_))
     ));
     Ok(())
+}
+
+#[test]
+fn typed_bindings_pending_logout_snapshot_ignores_authn_only_acs_fields(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut snapshot = valid_logout_snapshot();
+    snapshot.acs_url = "https://evil.example.com/acs".to_string();
+    snapshot.acs_binding = Binding::Redirect.short_name().to_string();
+    snapshot.acs_index = Some(99);
+    snapshot.acs_is_default = true;
+
+    let pending = PendingLogoutRequest::from_snapshot(snapshot)?;
+
+    assert_eq!(pending.request_binding(), LogoutBinding::Post);
+    assert_eq!(pending.response_binding(), LogoutBinding::Post);
+    Ok(())
+}
+
+#[test]
+fn typed_bindings_pending_logout_snapshot_rejects_mismatched_request_binding() {
+    let mut snapshot = valid_logout_snapshot();
+    snapshot.request_binding = Some(Binding::Redirect.short_name().to_string());
+
+    assert!(matches!(
+        PendingLogoutRequest::from_snapshot(snapshot),
+        Err(SamlError::Invalid(_))
+    ));
 }

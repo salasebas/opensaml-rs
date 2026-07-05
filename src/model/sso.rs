@@ -95,7 +95,7 @@ impl Assertion {
 #[derive(Debug, Clone)]
 pub struct SsoSession {
     response_id: MessageId,
-    assertion_id: Option<AssertionId>,
+    assertion_id: AssertionId,
     issuer: EntityId,
     in_response_to: Option<MessageId>,
     subject: Subject,
@@ -114,9 +114,9 @@ impl SsoSession {
         &self.response_id
     }
 
-    /// Assertion ID, when extracted.
-    pub fn assertion_id(&self) -> Option<&AssertionId> {
-        self.assertion_id.as_ref()
+    /// Assertion ID.
+    pub fn assertion_id(&self) -> &AssertionId {
+        &self.assertion_id
     }
 
     /// Assertion issuer.
@@ -172,7 +172,7 @@ impl SsoSession {
     /// Assertion view.
     pub fn assertion(&self) -> Assertion {
         Assertion::new(
-            self.assertion_id.clone(),
+            Some(self.assertion_id.clone()),
             self.issuer.clone(),
             self.subject.clone(),
         )
@@ -189,11 +189,7 @@ impl TryFrom<FlowResult> for SsoSession {
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
         let response_id = MessageId::try_new(required_str(&raw_flow.extract, "response.id")?)?;
-        let assertion_id = raw_flow
-            .extract
-            .get_str("assertion.id")
-            .map(AssertionId::try_new)
-            .transpose()?;
+        let assertion_id = AssertionId::try_new(required_str(&raw_flow.extract, "assertion.id")?)?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let in_response_to = optional_request_id(&raw_flow.extract, "response.inResponseTo")?;
         let name_id = NameId::new(required_str(&raw_flow.extract, "nameID")?, None);

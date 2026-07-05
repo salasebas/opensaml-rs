@@ -9,9 +9,9 @@
 //! binding contract.
 //!
 //! ```compile_fail
-//! use saml_rs::{raw::Binding, SsoRequestBinding};
+//! use saml_rs::SsoRequestBinding;
 //!
-//! let binding: SsoRequestBinding = Binding::Artifact;
+//! let binding = SsoRequestBinding::Artifact;
 //! ```
 
 use std::marker::PhantomData;

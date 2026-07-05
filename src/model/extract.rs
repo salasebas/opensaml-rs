@@ -35,21 +35,26 @@ pub(super) fn optional_instant(
     extract.get_str(path).map(SamlInstant::try_new).transpose()
 }
 
-pub(super) fn name_id_policy_from_extract(extract: &Value) -> Option<NameIdPolicy> {
+pub(super) fn name_id_policy_from_extract(
+    extract: &Value,
+) -> Result<Option<NameIdPolicy>, SamlError> {
     let format = extract
         .get_str("nameIDPolicy.format")
         .map(name_id_format_from_uri);
     let allow_create = extract
         .get_str("nameIDPolicy.allowCreate")
-        .and_then(parse_bool);
-    NameIdPolicy::from_parsed(format, allow_create)
+        .map(parse_bool)
+        .transpose()?;
+    Ok(NameIdPolicy::from_parsed(format, allow_create))
 }
 
-fn parse_bool(value: &str) -> Option<bool> {
+fn parse_bool(value: &str) -> Result<bool, SamlError> {
     match value {
-        "true" | "1" => Some(true),
-        "false" | "0" => Some(false),
-        _ => None,
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        _ => Err(SamlError::Invalid(
+            "NameIDPolicy AllowCreate must be a boolean".into(),
+        )),
     }
 }
 

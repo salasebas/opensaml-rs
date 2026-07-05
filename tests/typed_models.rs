@@ -81,11 +81,44 @@ fn binding_context(binding: Binding) -> BindingContext {
     }
 }
 
+fn response_binding_context(binding: Binding) -> BindingContext {
+    BindingContext {
+        id: "_response123".to_string(),
+        context: match binding {
+            Binding::Redirect => "https://sp.example.com/acs?SAMLResponse=abc".to_string(),
+            Binding::Post | Binding::SimpleSign => "PHNhbWxwOlJlc3BvbnNlLz4=".to_string(),
+            Binding::Artifact => "artifact".to_string(),
+        },
+        relay_state: Some("relay".to_string()),
+        entity_endpoint: "https://sp.example.com/acs".to_string(),
+        binding,
+        request_type: "SAMLResponse",
+        signature: None,
+        sig_alg: None,
+    }
+}
+
 fn signed_binding_context(binding: Binding) -> BindingContext {
     let mut context = binding_context(binding);
     context.sig_alg = Some("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256".to_string());
     context.signature = Some("signature-value".to_string());
     context
+}
+
+fn signed_response_binding_context(binding: Binding) -> BindingContext {
+    let mut context = response_binding_context(binding);
+    context.sig_alg = Some("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256".to_string());
+    context.signature = Some("signature-value".to_string());
+    context
+}
+
+fn assert_browser_input_invalid<Message>(input: BrowserInput<Message>)
+where
+    saml_rs::raw::HttpRequest: TryFrom<BrowserInput<Message>, Error = SamlError>,
+{
+    let result = saml_rs::raw::HttpRequest::try_from(input);
+
+    assert!(matches!(result, Err(SamlError::Invalid(_))));
 }
 
 #[test]
@@ -174,9 +207,84 @@ fn typed_models_artifact_outbound_is_rejected() {
 
 #[test]
 fn typed_models_sso_response_outbound_rejects_redirect() {
-    let result = Outbound::<SsoResponse>::try_from(binding_context(Binding::Redirect));
+    let result = Outbound::<SsoResponse>::try_from(response_binding_context(Binding::Redirect));
 
     assert!(matches!(result, Err(SamlError::UndefinedBinding)));
+}
+
+#[test]
+fn typed_models_sso_response_outbound_accepts_post_and_simplesign(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let post = Outbound::<SsoResponse>::try_from(response_binding_context(Binding::Post))?;
+    let simple_sign =
+        Outbound::<SsoResponse>::try_from(signed_response_binding_context(Binding::SimpleSign))?;
+
+    assert_eq!(
+        post.post_form()?.value("SAMLResponse"),
+        Some("PHNhbWxwOlJlc3BvbnNlLz4=")
+    );
+    assert_eq!(
+        simple_sign.post_form()?.value("SAMLResponse"),
+        Some("PHNhbWxwOlJlc3BvbnNlLz4=")
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_models_outbound_rejects_marker_message_field_mismatch() {
+    let mut authn_context = binding_context(Binding::Post);
+    authn_context.request_type = "SAMLResponse";
+    let mut logout_request_context = binding_context(Binding::Post);
+    logout_request_context.request_type = "SAMLResponse";
+    let mut sso_response_context = response_binding_context(Binding::Post);
+    sso_response_context.request_type = "SAMLRequest";
+    let mut logout_response_context = response_binding_context(Binding::Post);
+    logout_response_context.request_type = "SAMLRequest";
+
+    assert!(matches!(
+        Outbound::<AuthnRequest>::try_from(authn_context),
+        Err(SamlError::Invalid(_))
+    ));
+    assert!(matches!(
+        Outbound::<LogoutRequest>::try_from(logout_request_context),
+        Err(SamlError::Invalid(_))
+    ));
+    assert!(matches!(
+        Outbound::<SsoResponse>::try_from(sso_response_context),
+        Err(SamlError::Invalid(_))
+    ));
+    assert!(matches!(
+        Outbound::<LogoutResponse>::try_from(logout_response_context),
+        Err(SamlError::Invalid(_))
+    ));
+}
+
+#[test]
+fn typed_models_outbound_redirect_rejects_marker_url_field_mismatch() {
+    let mut logout_response_context = response_binding_context(Binding::Redirect);
+    logout_response_context.context = "https://sp.example.com/acs?SAMLRequest=abc".to_string();
+    let mut logout_request_context = binding_context(Binding::Redirect);
+    logout_request_context.context = "https://idp.example.com/slo?SAMLResponse=abc".to_string();
+
+    assert!(matches!(
+        Outbound::<LogoutResponse>::try_from(logout_response_context),
+        Err(SamlError::Invalid(_))
+    ));
+    assert!(matches!(
+        Outbound::<LogoutRequest>::try_from(logout_request_context),
+        Err(SamlError::Invalid(_))
+    ));
+}
+
+#[test]
+fn typed_models_outbound_redirect_rejects_duplicate_message_field() {
+    let mut context = binding_context(Binding::Redirect);
+    context.context = "https://idp.example.com/sso?SAMLRequest=abc&SAMLRequest=def".to_string();
+
+    assert!(matches!(
+        Outbound::<LogoutRequest>::try_from(context),
+        Err(SamlError::Invalid(_))
+    ));
 }
 
 #[test]
@@ -201,8 +309,10 @@ fn typed_models_slo_outbound_accepts_logout_bindings() -> Result<(), Box<dyn std
             Binding::Redirect | Binding::Post | Binding::Artifact => binding_context(binding),
         };
         let response_context = match binding {
-            Binding::SimpleSign => signed_binding_context(binding),
-            Binding::Redirect | Binding::Post | Binding::Artifact => binding_context(binding),
+            Binding::SimpleSign => signed_response_binding_context(binding),
+            Binding::Redirect | Binding::Post | Binding::Artifact => {
+                response_binding_context(binding)
+            }
         };
 
         let request = Outbound::<LogoutRequest>::try_from(request_context)?;
@@ -212,6 +322,13 @@ fn typed_models_slo_outbound_accepts_logout_bindings() -> Result<(), Box<dyn std
         assert_eq!(response.raw_context().binding, binding);
     }
     Ok(())
+}
+
+#[test]
+fn typed_models_logout_response_outbound_rejects_saml_request_context() {
+    let result = Outbound::<LogoutResponse>::try_from(binding_context(Binding::Post));
+
+    assert!(matches!(result, Err(SamlError::Invalid(_))));
 }
 
 #[test]
@@ -249,6 +366,12 @@ fn typed_models_sso_response_browser_input_rejects_redirect() {
     let result = saml_rs::raw::HttpRequest::try_from(input);
 
     assert!(matches!(result, Err(SamlError::UndefinedBinding)));
+}
+
+#[test]
+fn typed_models_redirect_browser_input_rejects_marker_field_mismatch() {
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::redirect("SAMLResponse=abc"));
+    assert_browser_input_invalid(BrowserInput::<LogoutResponse>::redirect("SAMLRequest=abc"));
 }
 
 #[test]
@@ -305,6 +428,16 @@ fn typed_models_redirect_browser_input_rejects_duplicate_signed_fields() {
 }
 
 #[test]
+fn typed_models_redirect_browser_input_rejects_missing_or_both_message_fields() {
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::redirect(
+        "RelayState=relay&SigAlg=alg&Signature=sig",
+    ));
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::redirect(
+        "SAMLRequest=abc&SAMLResponse=def&SigAlg=alg&Signature=sig",
+    ));
+}
+
+#[test]
 fn typed_models_post_browser_input_preserves_fields() -> Result<(), Box<dyn std::error::Error>> {
     let input = BrowserInput::<AuthnRequest>::post(vec![
         FormField::new("SAMLRequest", "abc"),
@@ -325,6 +458,68 @@ fn typed_models_post_browser_input_preserves_fields() -> Result<(), Box<dyn std:
 }
 
 #[test]
+fn typed_models_post_browser_input_accepts_response_markers(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sso = BrowserInput::<SsoResponse>::post(vec![
+        FormField::new("SAMLResponse", "abc"),
+        FormField::new("RelayState", "relay"),
+    ]);
+    let logout = BrowserInput::<LogoutResponse>::post(vec![FormField::new("SAMLResponse", "def")]);
+
+    let sso_request = saml_rs::raw::HttpRequest::try_from(sso)?;
+    let logout_request = saml_rs::raw::HttpRequest::try_from(logout)?;
+
+    assert_eq!(
+        sso_request.body,
+        vec![
+            ("SAMLResponse".to_string(), "abc".to_string()),
+            ("RelayState".to_string(), "relay".to_string()),
+        ]
+    );
+    assert_eq!(
+        logout_request.body,
+        vec![("SAMLResponse".to_string(), "def".to_string())]
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_models_post_browser_input_rejects_marker_field_mismatch() {
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::post(vec![FormField::new(
+        "SAMLResponse",
+        "abc",
+    )]));
+    assert_browser_input_invalid(BrowserInput::<LogoutRequest>::post(vec![FormField::new(
+        "SAMLResponse",
+        "abc",
+    )]));
+    assert_browser_input_invalid(BrowserInput::<SsoResponse>::post(vec![FormField::new(
+        "SAMLRequest",
+        "abc",
+    )]));
+    assert_browser_input_invalid(BrowserInput::<LogoutResponse>::post(vec![FormField::new(
+        "SAMLRequest",
+        "abc",
+    )]));
+}
+
+#[test]
+fn typed_models_post_browser_input_rejects_missing_duplicate_or_both_message_fields() {
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::post(vec![FormField::new(
+        "RelayState",
+        "relay",
+    )]));
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::post(vec![
+        FormField::new("SAMLRequest", "abc"),
+        FormField::new("SAMLRequest", "def"),
+    ]));
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::post(vec![
+        FormField::new("SAMLRequest", "abc"),
+        FormField::new("SAMLResponse", "def"),
+    ]));
+}
+
+#[test]
 fn typed_models_simplesign_browser_input_derives_signed_octets(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let input = BrowserInput::<AuthnRequest>::simple_sign(vec![
@@ -341,6 +536,81 @@ fn typed_models_simplesign_browser_input_derives_signed_octets(
         Some("SAMLRequest=<samlp:AuthnRequest/>&RelayState=relay&SigAlg=alg")
     );
     Ok(())
+}
+
+#[test]
+fn typed_models_simplesign_browser_input_accepts_response_markers(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sso_xml = "<samlp:Response/>";
+    let logout_xml = "<samlp:LogoutResponse/>";
+    let sso = BrowserInput::<SsoResponse>::simple_sign(vec![
+        FormField::new("SAMLResponse", base64_encode(sso_xml.as_bytes())),
+        FormField::new("RelayState", "relay"),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]);
+    let logout = BrowserInput::<LogoutResponse>::simple_sign(vec![
+        FormField::new("SAMLResponse", base64_encode(logout_xml.as_bytes())),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]);
+
+    let sso_request = saml_rs::raw::HttpRequest::try_from(sso)?;
+    let logout_request = saml_rs::raw::HttpRequest::try_from(logout)?;
+
+    assert_eq!(
+        sso_request.octet_string.as_deref(),
+        Some("SAMLResponse=<samlp:Response/>&RelayState=relay&SigAlg=alg")
+    );
+    assert_eq!(
+        logout_request.octet_string.as_deref(),
+        Some("SAMLResponse=<samlp:LogoutResponse/>&SigAlg=alg")
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_models_simplesign_browser_input_rejects_marker_field_mismatch() {
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::simple_sign(vec![
+        FormField::new("SAMLResponse", base64_encode(b"<samlp:Response/>")),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]));
+    assert_browser_input_invalid(BrowserInput::<LogoutRequest>::simple_sign(vec![
+        FormField::new("SAMLResponse", base64_encode(b"<samlp:LogoutResponse/>")),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]));
+    assert_browser_input_invalid(BrowserInput::<SsoResponse>::simple_sign(vec![
+        FormField::new("SAMLRequest", base64_encode(b"<samlp:AuthnRequest/>")),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]));
+    assert_browser_input_invalid(BrowserInput::<LogoutResponse>::simple_sign(vec![
+        FormField::new("SAMLRequest", base64_encode(b"<samlp:LogoutRequest/>")),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]));
+}
+
+#[test]
+fn typed_models_simplesign_browser_input_rejects_missing_duplicate_or_both_message_fields() {
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::simple_sign(vec![
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]));
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::simple_sign(vec![
+        FormField::new("SAMLRequest", base64_encode(b"<samlp:AuthnRequest/>")),
+        FormField::new("SAMLRequest", base64_encode(b"<samlp:AuthnRequest/>")),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]));
+    assert_browser_input_invalid(BrowserInput::<AuthnRequest>::simple_sign(vec![
+        FormField::new("SAMLRequest", base64_encode(b"<samlp:AuthnRequest/>")),
+        FormField::new("SAMLResponse", base64_encode(b"<samlp:Response/>")),
+        FormField::new("SigAlg", "alg"),
+        FormField::new("Signature", "sig"),
+    ]));
 }
 
 #[test]
@@ -378,7 +648,7 @@ fn typed_models_logout_browser_input_preserves_detached_signature_octets(
         "?SAMLRequest=abc&RelayState=relay&SigAlg=alg&Signature=sig",
     );
     let simple_sign = BrowserInput::<LogoutResponse>::simple_sign(vec![
-        FormField::new("SAMLResponse", "PHNhbWxwOkF1dGhuUmVxdWVzdC8+"),
+        FormField::new("SAMLResponse", "PHNhbWxwOkxvZ291dFJlc3BvbnNlLz4="),
         FormField::new("RelayState", "relay"),
         FormField::new("SigAlg", "alg"),
         FormField::new("Signature", "sig"),
@@ -393,7 +663,7 @@ fn typed_models_logout_browser_input_preserves_detached_signature_octets(
     );
     assert_eq!(
         simple_sign_request.octet_string.as_deref(),
-        Some("SAMLResponse=<samlp:AuthnRequest/>&RelayState=relay&SigAlg=alg")
+        Some("SAMLResponse=<samlp:LogoutResponse/>&RelayState=relay&SigAlg=alg")
     );
     Ok(())
 }
@@ -481,6 +751,82 @@ fn typed_models_authn_request_from_flow_result_exposes_typed_fields(
 }
 
 #[test]
+fn typed_models_authn_request_rejects_invalid_name_id_policy_allow_create() {
+    let flow = FlowResult {
+        saml_content: "<samlp:AuthnRequest/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "request",
+                value_object(vec![("id", value_str("_request123"))]),
+            ),
+            ("issuer", value_str("https://sp.example.com/metadata")),
+            (
+                "nameIDPolicy",
+                value_object(vec![("allowCreate", value_str("maybe"))]),
+            ),
+        ]),
+    };
+
+    assert!(matches!(
+        AuthnRequest::try_from(flow),
+        Err(SamlError::Invalid(_))
+    ));
+}
+
+#[test]
+fn typed_models_authn_request_name_id_policy_without_allow_create_is_unspecified(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let flow = FlowResult {
+        saml_content: "<samlp:AuthnRequest/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "request",
+                value_object(vec![("id", value_str("_request123"))]),
+            ),
+            ("issuer", value_str("https://sp.example.com/metadata")),
+            (
+                "nameIDPolicy",
+                value_object(vec![(
+                    "format",
+                    value_str("urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"),
+                )]),
+            ),
+        ]),
+    };
+
+    let request = AuthnRequest::try_from(flow)?;
+
+    assert_eq!(
+        request.name_id_policy().map(NameIdPolicy::creation_request),
+        Some(NameIdCreationRequest::Unspecified)
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_models_authn_request_without_name_id_policy_stays_absent(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let flow = FlowResult {
+        saml_content: "<samlp:AuthnRequest/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "request",
+                value_object(vec![("id", value_str("_request123"))]),
+            ),
+            ("issuer", value_str("https://sp.example.com/metadata")),
+        ]),
+    };
+
+    let request = AuthnRequest::try_from(flow)?;
+
+    assert_eq!(request.name_id_policy(), None);
+    Ok(())
+}
+
+#[test]
 fn typed_models_name_id_policy_constructors_use_typed_creation_request() {
     let unspecified = NameIdPolicy::unspecified(None);
     let allow = NameIdPolicy::allow_creation(None);
@@ -557,10 +903,7 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
         .ok_or("missing affiliation")?;
 
     assert_eq!(session.response_id().as_str(), "_response123");
-    assert_eq!(
-        session.assertion_id().map(saml_rs::AssertionId::as_str),
-        Some("_assertion123")
-    );
+    assert_eq!(session.assertion_id().as_str(), "_assertion123");
     assert_eq!(
         session.assertion().id().map(saml_rs::AssertionId::as_str),
         Some("_assertion123")
@@ -586,8 +929,7 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
 }
 
 #[test]
-fn typed_models_sso_session_without_assertion_id_keeps_none(
-) -> Result<(), Box<dyn std::error::Error>> {
+fn typed_models_sso_session_without_assertion_id_fails_closed() {
     let flow = FlowResult {
         saml_content: "<samlp:Response/>".to_string(),
         sig_alg: None,
@@ -601,10 +943,32 @@ fn typed_models_sso_session_without_assertion_id_keeps_none(
         ]),
     };
 
-    let session = SsoSession::try_from(flow)?;
+    assert!(matches!(
+        SsoSession::try_from(flow),
+        Err(SamlError::Invalid(_))
+    ));
+}
 
-    assert_eq!(session.assertion_id(), None);
-    Ok(())
+#[test]
+fn typed_models_sso_session_rejects_malformed_assertion_id() {
+    let flow = FlowResult {
+        saml_content: "<samlp:Response/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "response",
+                value_object(vec![("id", value_str("_response123"))]),
+            ),
+            ("assertion", value_object(vec![("id", value_str("  "))])),
+            ("issuer", value_str("https://idp.example.com/metadata")),
+            ("nameID", value_str("alice@example.com")),
+        ]),
+    };
+
+    assert!(matches!(
+        SsoSession::try_from(flow),
+        Err(SamlError::Invalid(_))
+    ));
 }
 
 #[test]
@@ -788,6 +1152,11 @@ fn typed_models_existing_login_response_flow_converts_to_typed_session(
 
     let parsed =
         sp.parse_login_response_with_request_id(&idp, Binding::Post, &request, "_request123")?;
+    let raw_assertion_id = parsed
+        .extract
+        .get_str("assertion.id")
+        .ok_or("missing assertion ID")?
+        .to_string();
     let session = SsoSession::try_from(parsed)?;
 
     assert_eq!(session.name_id().value(), "alice@example.com");
@@ -795,7 +1164,7 @@ fn typed_models_existing_login_response_flow_converts_to_typed_session(
         session.in_response_to().map(MessageId::as_str),
         Some("_request123")
     );
-    assert!(session.assertion_id().is_some());
+    assert_eq!(session.assertion_id().as_str(), raw_assertion_id.as_str());
     Ok(())
 }
 
