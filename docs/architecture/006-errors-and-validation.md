@@ -51,8 +51,8 @@ pub enum SamlError {
         actual: Option<String>,
     },
     RelayStateMismatch {
-        expected: RelayStateState,
-        actual: RelayStateState,
+        expected: RelayStateParam,
+        actual: RelayStateParam,
     },
     StatusNotSuccess {
         top: String,
@@ -131,7 +131,7 @@ other inbound signed, timed, or replay-sensitive browser-message validation.
 RelayState comparison is exact tri-state:
 
 ```rust
-pub enum RelayStateState {
+pub enum RelayStateParam {
     Absent,
     PresentEmpty,
     PresentValue(RelayState),

@@ -154,24 +154,24 @@ pub enum LogoutBinding {
 
 pub struct SsoEndpoint {
     binding: SsoRequestBinding,
-    url: EndpointUrl,
+    location: EndpointUrl,
 }
 
 pub struct AcsEndpoint {
     binding: SsoResponseBinding,
-    url: EndpointUrl,
+    location: EndpointUrl,
     index: Option<u16>,
     is_default: bool,
 }
 
 pub struct SloEndpoint {
     binding: LogoutBinding,
-    url: EndpointUrl,
+    location: EndpointUrl,
 }
 
 pub struct PendingAuthnRequest {
-    request_id: RequestId,
-    relay_state: RelayStateState,
+    request_id: MessageId,
+    relay_state: RelayStateParam,
     acs: AcsEndpoint,
     response_binding: SsoResponseBinding,
     idp_entity_id: EntityId,
@@ -179,7 +179,7 @@ pub struct PendingAuthnRequest {
 
 pub struct PendingSnapshot<Message> {
     id: String,
-    relay_state: RelayStateState,
+    relay_state: RelayStateParam,
     peer_entity_id: String,
     expected_binding: String,
     issued_at: Option<SamlInstant>,
@@ -299,20 +299,20 @@ typed facade in plan 014 will convert narrowed types into raw calls.
 
 ## Done criteria
 
-- [ ] Typed browser request and response binding subsets exist.
-- [ ] ACS endpoints cannot be constructed with Redirect or Artifact in typed
+- [x] Typed browser request and response binding subsets exist.
+- [x] ACS endpoints cannot be constructed with Redirect or Artifact in typed
       API code.
-- [ ] SSO, ACS, and SLO endpoint wrappers do not share one public typed struct.
-- [ ] Pending AuthnRequest state carries selected IdP entity ID, ACS, response
+- [x] SSO, ACS, and SLO endpoint wrappers do not share one public typed struct.
+- [x] Pending AuthnRequest state carries selected IdP entity ID, ACS, response
       binding, and exact RelayState state.
-- [ ] `PendingSnapshot<AuthnRequest>` persists correlation state without keys or
+- [x] `PendingSnapshot<AuthnRequest>` persists correlation state without keys or
       raw metadata.
-- [ ] Raw compatibility types remain available.
-- [ ] `cargo fmt --all --check` exits 0.
-- [ ] `cargo clippy -p saml-rs --all-targets -- -D warnings` exits 0.
-- [ ] `cargo nextest run -p saml-rs` exits 0.
-- [ ] `cargo check -p saml-rs --no-default-features` exits 0.
-- [ ] `plans/README.md` status row updated.
+- [x] Raw compatibility types remain available.
+- [x] `cargo fmt --all --check` exits 0.
+- [x] `cargo clippy -p saml-rs --all-targets -- -D warnings` exits 0.
+- [x] `cargo nextest run -p saml-rs` exits 0.
+- [x] `cargo check -p saml-rs --no-default-features` exits 0.
+- [x] `plans/README.md` status row updated.
 
 ## STOP conditions
 

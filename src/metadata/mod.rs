@@ -188,18 +188,22 @@ impl Metadata {
     /// Verify this metadata document's enveloped signature against trusted
     /// certificate(s) (federation trust anchor). Requires `crypto-bergshamra`.
     #[cfg(feature = "crypto-bergshamra")]
-    pub fn verify_signature(&self, trusted_certs: &[String]) -> Result<bool, SamlError> {
-        self.verify_signature_with_limits(trusted_certs, XmlLimits::default())
+    pub fn verify_signature(&self, trusted_certificates: &[String]) -> Result<bool, SamlError> {
+        self.verify_signature_with_limits(trusted_certificates, XmlLimits::default())
     }
 
     /// Verify this metadata document's signature with explicit XML parser limits.
     #[cfg(feature = "crypto-bergshamra")]
     pub fn verify_signature_with_limits(
         &self,
-        trusted_certs: &[String],
+        trusted_certificates: &[String],
         limits: XmlLimits,
     ) -> Result<bool, SamlError> {
-        crate::crypto::verify_metadata_signature_with_limits(&self.xml, trusted_certs, limits)
+        crate::crypto::verify_metadata_signature_with_limits(
+            &self.xml,
+            trusted_certificates,
+            limits,
+        )
     }
 }
 

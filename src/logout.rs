@@ -151,10 +151,11 @@ fn sign_logout(
             Ok((base64_encode(signed.as_bytes()), None, None))
         }
         Binding::SimpleSign => {
-            let relay = relay.unwrap_or_default();
-            let octet = format!(
-                "{}={xml}&RelayState={relay}&SigAlg={sig_alg}",
-                parser_type.query_param()
+            let octet = crate::binding::build_simplesign_octet(
+                parser_type.query_param(),
+                xml,
+                relay,
+                sig_alg,
             );
             let sig = construct_message_signature(&octet, &key, sig_alg)?;
             Ok((

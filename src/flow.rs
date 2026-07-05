@@ -256,8 +256,9 @@ fn ensure_simplesign_octet_matches_consumed_fields(
             let expected = format!("{direction}={xml}&RelayState={relay_state}&SigAlg={sig_alg}");
             octet == expected
         }
-        // Existing outbound SimpleSign signs an empty RelayState field even
-        // when the form body omits RelayState.
+        // Older saml-rs outbound SimpleSign signed an empty RelayState field
+        // even when the form body omitted RelayState; keep accepting it for
+        // compatibility.
         None => octet == message_and_sig_alg || octet == message_empty_relay_and_sig_alg,
     };
 

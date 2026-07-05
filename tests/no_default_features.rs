@@ -8,7 +8,10 @@ use saml_rs::idp::LoginResponseOptions;
 use saml_rs::logout::{create_logout_request, create_logout_response};
 use saml_rs::metadata::{Endpoint, IdpMetadata, IdpMetadataConfig, SpMetadataConfig};
 use saml_rs::xml::{extract, ExtractorField};
-use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
+use saml_rs::{
+    EntityId, IdentityProvider, IdpDescriptor, MetadataTrustPolicy, SamlError, ServiceProvider,
+    SpDescriptor,
+};
 
 fn idp_config(want_authn_requests_signed: bool) -> IdpMetadataConfig {
     IdpMetadataConfig {
@@ -69,6 +72,33 @@ fn unsigned_metadata_parsing_and_xml_extraction_still_work(
         )],
     )?;
     assert_eq!(extracted.get_str("nameID"), Some("user@example.com"));
+    Ok(())
+}
+
+#[test]
+fn typed_metadata_descriptors_parse_unsigned_metadata_without_default_crypto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp_metadata_xml = idp(false)?.metadata_xml().to_string();
+    let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        &idp_metadata_xml,
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    assert_eq!(
+        idp_descriptor.entity_id().as_str(),
+        "https://idp.example.com/metadata"
+    );
+
+    let sp_metadata_xml = sp(false)?.metadata_xml().to_string();
+    let sp_descriptor = SpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://sp.example.com/metadata")?,
+        &sp_metadata_xml,
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    assert_eq!(
+        sp_descriptor.entity_id().as_str(),
+        "https://sp.example.com/metadata"
+    );
     Ok(())
 }
 

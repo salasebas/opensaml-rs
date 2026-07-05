@@ -1,15 +1,14 @@
 use saml_rs::constants::{
     data_encryption_algorithm, digest_algorithm, key_encryption_algorithm, name_id_format,
-    signature_algorithm, transform_algorithm, Binding,
+    signature_algorithm, transform_algorithm,
 };
-use saml_rs::metadata::Endpoint;
 use saml_rs::xml::XmlLimits;
 use saml_rs::{
-    AssertionSignaturePolicy, AuthnRequestSignaturePolicy, CertificatePem, Credentials,
-    DataEncryptionAlgorithm, DigestAlgorithm, EntityId, EntitySetting, IdpConfig, IdpDescriptor,
-    IdpMetadataConfigTyped, KeyEncryptionAlgorithm, MessageSignaturePolicy, MetadataTrustPolicy,
-    NameIdFormat, Passphrase, PrivateKeyPem, SamlError, SignatureAlgorithm, SpConfig, SpDescriptor,
-    SpMetadataConfigTyped, TransformAlgorithm, XmlEncryptionPolicy,
+    AcsEndpoint, AssertionSignaturePolicy, AuthnRequestSignaturePolicy, CertificatePem,
+    Credentials, DataEncryptionAlgorithm, DigestAlgorithm, EntityId, EntitySetting, IdpConfig,
+    IdpDescriptor, IdpMetadataConfig, KeyEncryptionAlgorithm, MessageSignaturePolicy,
+    MetadataTrustPolicy, NameIdFormat, Passphrase, PrivateKeyPem, SamlError, SignatureAlgorithm,
+    SpConfig, SpDescriptor, SpMetadataConfig, SsoEndpoint, TransformAlgorithm, XmlEncryptionPolicy,
 };
 
 const IDP_METADATA: &str = include_str!("fixtures/idpmeta.xml");
@@ -43,6 +42,28 @@ fn typed_config_certificate_debug_does_not_dump_pem() {
 
     assert!(!debug.contains("dummy-certificate-for-redaction-test"));
     assert!(debug.contains("CertificatePem"));
+}
+
+#[test]
+fn typed_config_entity_setting_debug_redacts_credential_material() {
+    let mut setting = EntitySetting::default();
+    setting.private_key = Some("dummy-private-key-for-entity-debug-test".to_string());
+    setting.private_key_pass = Some("dummy-private-key-pass-for-entity-debug-test".to_string());
+    setting.signing_cert = Some("dummy-signing-cert-for-entity-debug-test".to_string());
+    setting.encrypt_cert = Some("dummy-encrypt-cert-for-entity-debug-test".to_string());
+    setting.enc_private_key = Some("dummy-enc-private-key-for-entity-debug-test".to_string());
+    setting.enc_private_key_pass = Some("dummy-enc-pass-for-entity-debug-test".to_string());
+
+    let debug = format!("{setting:?}");
+
+    assert!(debug.contains("private_key"));
+    assert!(debug.contains("redacted"));
+    assert!(!debug.contains("dummy-private-key-for-entity-debug-test"));
+    assert!(!debug.contains("dummy-private-key-pass-for-entity-debug-test"));
+    assert!(!debug.contains("dummy-signing-cert-for-entity-debug-test"));
+    assert!(!debug.contains("dummy-encrypt-cert-for-entity-debug-test"));
+    assert!(!debug.contains("dummy-enc-private-key-for-entity-debug-test"));
+    assert!(!debug.contains("dummy-enc-pass-for-entity-debug-test"));
 }
 
 #[test]
@@ -110,10 +131,7 @@ fn typed_config_name_id_formats_return_existing_uri_constants() {
 fn typed_config_sp_config_converts_selected_settings() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = SpConfig::new(
         EntityId::new("https://sp.example.com/metadata"),
-        SpMetadataConfigTyped::new(vec![Endpoint::new(
-            Binding::Post,
-            "https://sp.example.com/acs",
-        )]),
+        SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
     );
     let limits = XmlLimits {
         max_bytes: 32_768,
@@ -187,10 +205,7 @@ fn typed_config_idp_config_converts_authn_request_policy() -> Result<(), Box<dyn
 {
     let mut config = IdpConfig::new(
         EntityId::new("https://idp.example.com/metadata"),
-        IdpMetadataConfigTyped::new(vec![Endpoint::new(
-            Binding::Redirect,
-            "https://idp.example.com/sso",
-        )]),
+        IdpMetadataConfig::new(vec![SsoEndpoint::redirect("https://idp.example.com/sso")?]),
     );
     config.metadata.name_id_format = vec![NameIdFormat::Transient];
     config.validation.authn_requests = AuthnRequestSignaturePolicy::RequireSigned;
@@ -214,10 +229,7 @@ fn typed_config_insecure_rsa_key_transport_requires_explicit_policy(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = SpConfig::new(
         EntityId::new("https://sp.example.com/metadata"),
-        SpMetadataConfigTyped::new(vec![Endpoint::new(
-            Binding::Post,
-            "https://sp.example.com/acs",
-        )]),
+        SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
     );
     let default_setting = EntitySetting::try_from(&config)?;
     let mut explicit_config = config.clone();
@@ -290,7 +302,9 @@ fn typed_config_pinned_certificate_trust_does_not_accept_unsigned_metadata() {
     let result = IdpDescriptor::from_metadata_xml_for(
         EntityId::new("https://idp.example.com/metadata"),
         IDP_METADATA,
-        MetadataTrustPolicy::RequireSignedByPinnedCertificates(&[]),
+        MetadataTrustPolicy::RequireSignature {
+            trusted_certificates: &[],
+        },
     );
 
     assert!(

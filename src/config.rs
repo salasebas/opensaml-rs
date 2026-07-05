@@ -4,13 +4,14 @@ use core::fmt;
 use core::ops::Deref;
 
 use crate::binding::MAX_DEFLATE_RAW_DECODE_BYTES;
+use crate::browser::{AcsEndpoint, SloEndpoint, SsoEndpoint};
 use crate::constants::{
     data_encryption_algorithm, digest_algorithm, key_encryption_algorithm, name_id_format,
     signature_algorithm, transform_algorithm, MessageSignatureOrder,
 };
 use crate::entity::{EntitySetting, SignatureConfig};
 use crate::error::SamlError;
-use crate::metadata::{Endpoint, IdpMetadata, Metadata, SpMetadata};
+use crate::metadata::{IdpMetadata, Metadata, SpMetadata};
 use crate::template::LoginResponseTemplate;
 use crate::xml::XmlLimits;
 
@@ -313,28 +314,22 @@ impl From<String> for EntityId {
     }
 }
 
-pub use crate::browser::{
-    AcsEndpoint, EndpointUrl, LogoutBinding, Pending, PendingAuthnRequest, PendingSnapshot,
-    SloEndpoint, SsoEndpoint, SsoRequestBinding, SsoResponseBinding, Started,
-};
-pub use crate::model::{AuthnRequest, RelayState, RelayStateState, RequestId, SamlInstant};
-
 /// Local SP metadata inputs used by typed configuration.
 #[derive(Debug, Clone)]
-pub struct SpMetadataConfigTyped {
+pub struct SpMetadataConfig {
     /// `<NameIDFormat>` values advertised by the SP.
     pub name_id_format: Vec<NameIdFormat>,
     /// `SingleLogoutService` endpoints.
-    pub single_logout_service: Vec<Endpoint>,
+    pub single_logout_service: Vec<SloEndpoint>,
     /// `AssertionConsumerService` endpoints.
-    pub assertion_consumer_service: Vec<Endpoint>,
+    pub assertion_consumer_service: Vec<AcsEndpoint>,
     /// Element ordering profile for generated metadata.
     pub elements_order: Option<Vec<String>>,
 }
 
-impl SpMetadataConfigTyped {
+impl SpMetadataConfig {
     /// Create SP metadata input with required ACS endpoints visible at the call site.
-    pub fn new(assertion_consumer_service: Vec<Endpoint>) -> Self {
+    pub fn new(assertion_consumer_service: Vec<AcsEndpoint>) -> Self {
         Self {
             name_id_format: Vec::new(),
             single_logout_service: Vec::new(),
@@ -346,20 +341,20 @@ impl SpMetadataConfigTyped {
 
 /// Local IdP metadata inputs used by typed configuration.
 #[derive(Debug, Clone)]
-pub struct IdpMetadataConfigTyped {
+pub struct IdpMetadataConfig {
     /// `<NameIDFormat>` values advertised by the IdP.
     pub name_id_format: Vec<NameIdFormat>,
     /// `SingleSignOnService` endpoints.
-    pub single_sign_on_service: Vec<Endpoint>,
+    pub single_sign_on_service: Vec<SsoEndpoint>,
     /// `SingleLogoutService` endpoints.
-    pub single_logout_service: Vec<Endpoint>,
+    pub single_logout_service: Vec<SloEndpoint>,
     /// Element ordering profile for generated metadata.
     pub elements_order: Option<Vec<String>>,
 }
 
-impl IdpMetadataConfigTyped {
+impl IdpMetadataConfig {
     /// Create IdP metadata input with required SSO endpoints visible at the call site.
-    pub fn new(single_sign_on_service: Vec<Endpoint>) -> Self {
+    pub fn new(single_sign_on_service: Vec<SsoEndpoint>) -> Self {
         Self {
             name_id_format: Vec::new(),
             single_sign_on_service,
@@ -631,24 +626,23 @@ impl Default for TemplatePolicy {
 /// # Examples
 ///
 /// ```
-/// use saml_rs::constants::Binding;
-/// use saml_rs::metadata::Endpoint;
-/// use saml_rs::{EntityId, SpConfig, SpMetadataConfigTyped};
+/// use saml_rs::{AcsEndpoint, EntityId, SpConfig, SpMetadataConfig};
 ///
-/// let acs = Endpoint::new(Binding::Post, "https://sp.example.com/acs");
+/// let acs = AcsEndpoint::post("https://sp.example.com/acs")?;
 /// let config = SpConfig::new(
 ///     EntityId::new("https://sp.example.com/metadata"),
-///     SpMetadataConfigTyped::new(vec![acs]),
+///     SpMetadataConfig::new(vec![acs]),
 /// );
 ///
 /// assert_eq!(config.entity_id.as_str(), "https://sp.example.com/metadata");
+/// # Ok::<(), saml_rs::SamlError>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct SpConfig {
     /// Local SP entity ID.
     pub entity_id: EntityId,
     /// Local SP metadata inputs.
-    pub metadata: SpMetadataConfigTyped,
+    pub metadata: SpMetadataConfig,
     /// Local credentials.
     pub credentials: Credentials,
     /// Validation and outbound signing policy.
@@ -663,7 +657,7 @@ pub struct SpConfig {
 
 impl SpConfig {
     /// Create SP configuration with required identity and metadata inputs.
-    pub fn new(entity_id: EntityId, metadata: SpMetadataConfigTyped) -> Self {
+    pub fn new(entity_id: EntityId, metadata: SpMetadataConfig) -> Self {
         Self {
             entity_id,
             metadata,
@@ -682,7 +676,7 @@ pub struct IdpConfig {
     /// Local IdP entity ID.
     pub entity_id: EntityId,
     /// Local IdP metadata inputs.
-    pub metadata: IdpMetadataConfigTyped,
+    pub metadata: IdpMetadataConfig,
     /// Local credentials.
     pub credentials: Credentials,
     /// Validation policy.
@@ -697,7 +691,7 @@ pub struct IdpConfig {
 
 impl IdpConfig {
     /// Create IdP configuration with required identity and metadata inputs.
-    pub fn new(entity_id: EntityId, metadata: IdpMetadataConfigTyped) -> Self {
+    pub fn new(entity_id: EntityId, metadata: IdpMetadataConfig) -> Self {
         Self {
             entity_id,
             metadata,
@@ -719,7 +713,10 @@ pub enum MetadataTrustPolicy<'a> {
     /// Accept unsigned metadata for legacy interoperability.
     UnsignedForCompatibility,
     /// Require a valid metadata signature from one of the pinned certificates.
-    RequireSignedByPinnedCertificates(&'a [CertificatePem]),
+    RequireSignature {
+        /// Caller-pinned certificates trusted to sign the metadata.
+        trusted_certificates: &'a [CertificatePem],
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -928,9 +925,9 @@ where
         MetadataTrustPolicy::UnsignedForCompatibility => {
             Ok(AppliedMetadataTrust::UnsignedForCompatibility)
         }
-        MetadataTrustPolicy::RequireSignedByPinnedCertificates(certificates) => {
-            verify_pinned_metadata_signature(metadata, certificates)
-        }
+        MetadataTrustPolicy::RequireSignature {
+            trusted_certificates,
+        } => verify_pinned_metadata_signature(metadata, trusted_certificates),
     }
 }
 
