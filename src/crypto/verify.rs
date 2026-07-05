@@ -362,6 +362,15 @@ pub fn verify_signature_with_limits(
     }
 }
 
+/// Detailed metadata signature verification result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataSignatureVerification {
+    /// Whether a metadata signature verified against the pinned certificates.
+    pub verified: bool,
+    /// The signed `<EntityDescriptor>` XML when verification succeeds.
+    pub signed_entity_descriptor_xml: Option<String>,
+}
+
 /// Verify the enveloped XML-DSig signature on a metadata document against
 /// trusted certificate(s); returns whether it is valid and covers the consumed
 /// `<EntityDescriptor>` document.
@@ -378,7 +387,24 @@ pub fn verify_metadata_signature_with_limits(
     trusted_certificates: &[String],
     limits: XmlLimits,
 ) -> Result<bool, SamlError> {
-    Ok(verify_signature_with_limits(xml, trusted_certificates, limits)?.0)
+    Ok(verify_metadata_signature_detailed_with_limits(xml, trusted_certificates, limits)?.verified)
+}
+
+/// Verify a metadata XML-DSig signature and preserve signed descriptor coverage.
+pub fn verify_metadata_signature_detailed_with_limits(
+    xml: &str,
+    trusted_certificates: &[String],
+    limits: XmlLimits,
+) -> Result<MetadataSignatureVerification, SamlError> {
+    let (verified, signed_entity_descriptor_xml) =
+        verify_signature_with_limits(xml, trusted_certificates, limits)?;
+    if verified && signed_entity_descriptor_xml.is_none() {
+        return Err(SamlError::SignedReferenceMismatch);
+    }
+    Ok(MetadataSignatureVerification {
+        verified,
+        signed_entity_descriptor_xml,
+    })
 }
 
 #[cfg(test)]

@@ -177,6 +177,8 @@ pub struct MetadataSignatureVerification {
 Rules:
 
 - `RequireSignature` requires `verified == true`.
-- It must prove the consumed descriptor is covered by a signed reference.
-- If coverage cannot be determined, fail closed with `SignedReferenceMismatch`
-  or `MetadataTrustFailed`.
+- It must prove the consumed `EntityDescriptor` is covered by a signed
+  reference and preserve the signed descriptor XML as trust evidence.
+- If coverage cannot be determined, fail closed with `SignedReferenceMismatch`.
+- If no pinned certificate verifies the metadata signature, fail closed with a
+  branchable signature/trust error such as `SignatureVerification`.

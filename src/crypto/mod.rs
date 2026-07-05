@@ -28,6 +28,7 @@ pub use enc::{
 pub use sign::{construct_message_signature, construct_saml_signature, verify_message_signature};
 #[cfg(feature = "crypto-bergshamra")]
 pub use verify::{
-    verify_metadata_signature, verify_metadata_signature_with_limits, verify_signature,
-    verify_signature_with_limits,
+    verify_metadata_signature, verify_metadata_signature_detailed_with_limits,
+    verify_metadata_signature_with_limits, verify_signature, verify_signature_with_limits,
+    MetadataSignatureVerification,
 };

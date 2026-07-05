@@ -205,6 +205,21 @@ impl Metadata {
             limits,
         )
     }
+
+    /// Verify this metadata document's signature and preserve signed
+    /// `<EntityDescriptor>` coverage evidence.
+    #[cfg(feature = "crypto-bergshamra")]
+    pub fn verify_signature_detailed_with_limits(
+        &self,
+        trusted_certificates: &[String],
+        limits: XmlLimits,
+    ) -> Result<crate::crypto::MetadataSignatureVerification, SamlError> {
+        crate::crypto::verify_metadata_signature_detailed_with_limits(
+            &self.xml,
+            trusted_certificates,
+            limits,
+        )
+    }
 }
 
 #[cfg(test)]
