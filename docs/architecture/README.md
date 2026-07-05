@@ -68,7 +68,7 @@ let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
     expected_idp_entity_id,
     idp_metadata_xml,
     MetadataTrustPolicy::RequireSignature {
-        trusted_certs: &[metadata_signing_cert],
+        trusted_certificates: &[metadata_signing_cert],
     },
 )?;
 

@@ -186,7 +186,7 @@ Rules:
 ```rust
 pub struct LogoutCompleted {
     status: SamlStatus,
-    in_response_to: RequestId,
+    in_response_to: MessageId,
     raw_flow: raw::FlowResult,
 }
 ```

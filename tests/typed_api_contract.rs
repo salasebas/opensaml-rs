@@ -1,7 +1,7 @@
 use saml_rs::{
-    AcsEndpoint, AuthnRequest, EndpointUrl, EntityId, Idp, LogoutBinding, PendingAuthnRequest,
-    PendingSnapshot, RelayStateState, RequestId, Saml, SamlError, SamlInstant, SloEndpoint, Sp,
-    SsoEndpoint, SsoRequestBinding, SsoResponseBinding,
+    AcsEndpoint, AuthnRequest, EndpointUrl, EntityId, Idp, LogoutBinding, MessageId,
+    PendingAuthnRequest, PendingSnapshot, RelayStateParam, Saml, SamlError, SamlInstant,
+    SloEndpoint, Sp, SsoEndpoint, SsoRequestBinding, SsoResponseBinding,
 };
 
 fn assert_send_sync<T: Send + Sync>() {}
@@ -30,16 +30,16 @@ fn typed_api_contract_reexports_typed_binding_building_blocks(
     assert_send_sync::<SsoEndpoint>();
     assert_send_sync::<AcsEndpoint>();
     assert_send_sync::<SloEndpoint>();
-    assert_send_sync::<RequestId>();
-    assert_send_sync::<RelayStateState>();
+    assert_send_sync::<MessageId>();
+    assert_send_sync::<RelayStateParam>();
     assert_send_sync::<SamlInstant>();
     assert_send_sync::<PendingAuthnRequest>();
     assert_send_sync::<PendingSnapshot<AuthnRequest>>();
 
     let acs = AcsEndpoint::post("https://sp.example.com/acs")?;
-    let pending = PendingAuthnRequest::new(
-        RequestId::new("_request123")?,
-        RelayStateState::from_option(Some("relay".to_string())),
+    let pending = PendingAuthnRequest::try_new(
+        MessageId::try_new("_request123")?,
+        RelayStateParam::from_option(Some("relay".to_string())),
         acs,
         SsoResponseBinding::Post,
         EntityId::try_new("https://idp.example.com/metadata")?,
@@ -48,8 +48,37 @@ fn typed_api_contract_reexports_typed_binding_building_blocks(
     let _ = SsoEndpoint::redirect("https://idp.example.com/sso")?;
     let _ = SloEndpoint::new(
         LogoutBinding::Redirect,
-        EndpointUrl::new("https://idp.example.com/slo")?,
+        EndpointUrl::try_new("https://idp.example.com/slo")?,
     );
     let _ = SsoRequestBinding::Redirect;
     Ok(())
+}
+
+#[test]
+fn typed_api_contract_reexports_browser_and_model_types() {
+    let _ = std::any::type_name::<saml_rs::BrowserInput<saml_rs::AuthnRequest>>();
+    let _ = std::any::type_name::<saml_rs::FormField>();
+    let _ = std::any::type_name::<saml_rs::Outbound<saml_rs::AuthnRequest>>();
+    let _ = std::any::type_name::<saml_rs::Pending<saml_rs::AuthnRequest>>();
+    let _ = std::any::type_name::<saml_rs::PostForm>();
+    let _ = std::any::type_name::<saml_rs::Started<saml_rs::AuthnRequest>>();
+    let _ = std::any::type_name::<saml_rs::Assertion>();
+    let _ = std::any::type_name::<saml_rs::AssertionId>();
+    let _ = std::any::type_name::<saml_rs::Attribute>();
+    let _ = std::any::type_name::<saml_rs::AttributeValue>();
+    let _ = std::any::type_name::<saml_rs::Attributes>();
+    let _ = std::any::type_name::<saml_rs::AuthnSession>();
+    let _ = std::any::type_name::<saml_rs::LogoutCompleted>();
+    let _ = std::any::type_name::<saml_rs::LogoutRequest>();
+    let _ = std::any::type_name::<saml_rs::LogoutResponse>();
+    let _ = std::any::type_name::<saml_rs::NameId>();
+    let _ = std::any::type_name::<saml_rs::NameIdPolicy>();
+    let _ = std::any::type_name::<saml_rs::Received<saml_rs::SsoResponse>>();
+    let _ = std::any::type_name::<saml_rs::RelayState>();
+    let _ = saml_rs::MAX_RELAY_STATE_BYTES;
+    let _ = std::any::type_name::<saml_rs::SessionIndex>();
+    let _ = std::any::type_name::<saml_rs::SsoResponse>();
+    let _ = std::any::type_name::<saml_rs::SsoSession>();
+    let _ = std::any::type_name::<saml_rs::Subject>();
+    let _ = std::any::type_name::<saml_rs::SubjectConfirmation>();
 }

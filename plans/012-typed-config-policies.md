@@ -154,7 +154,7 @@ Add typed config and policy groups as the primary constructor inputs:
 ```rust
 pub struct SpConfig {
     pub entity_id: EntityId,
-    pub metadata: SpMetadataConfigTyped,
+    pub metadata: SpMetadataConfig,
     pub credentials: Credentials,
     pub validation: SpValidationPolicy,
     pub algorithms: AlgorithmPolicy,
@@ -164,7 +164,7 @@ pub struct SpConfig {
 
 pub struct IdpConfig {
     pub entity_id: EntityId,
-    pub metadata: IdpMetadataConfigTyped,
+    pub metadata: IdpMetadataConfig,
     pub credentials: Credentials,
     pub validation: IdpValidationPolicy,
     pub algorithms: AlgorithmPolicy,
@@ -367,12 +367,14 @@ metadata verification to plan 021:
 ```rust
 pub enum MetadataTrustPolicy<'a> {
     UnsignedForCompatibility,
-    RequireSignedByPinnedCertificates(&'a [CertificatePem]),
+    RequireSignature {
+        trusted_certificates: &'a [CertificatePem],
+    },
 }
 ```
 
 Implement `UnsignedForCompatibility` now. For
-`RequireSignedByPinnedCertificates`, either implement using the verified
+`RequireSignature`, either implement using the verified
 metadata boundary from plan 021 or return `Unsupported` with docs that plan 021
 must implement it. Do not pretend this validates against a public CA store;
 SAML metadata trust is usually pinned or federation-driven, not web PKI by
@@ -409,19 +411,19 @@ Cover:
 
 ## Done criteria
 
-- [ ] Public typed config and policy structs exist and are documented.
-- [ ] This plan does not add a duplicate public binding subset; plan 018 owns
+- [x] Public typed config and policy structs exist and are documented.
+- [x] This plan does not add a duplicate public binding subset; plan 018 owns
       those types.
-- [ ] Secret-bearing types redact `Debug`.
-- [ ] Typed configs convert into `EntitySetting` without changing existing flow
+- [x] Secret-bearing types redact `Debug`.
+- [x] Typed configs convert into `EntitySetting` without changing existing flow
   behavior.
-- [ ] No new dependencies are added.
-- [ ] `cargo fmt --all --check` exits 0.
-- [ ] `cargo clippy -p saml-rs --all-targets -- -D warnings` exits 0.
-- [ ] `cargo nextest run -p saml-rs` exits 0.
-- [ ] `cargo test -p saml-rs --doc` exits 0.
-- [ ] `cargo check -p saml-rs --no-default-features` exits 0.
-- [ ] `plans/README.md` status row updated.
+- [x] No new dependencies are added.
+- [x] `cargo fmt --all --check` exits 0.
+- [x] `cargo clippy -p saml-rs --all-targets -- -D warnings` exits 0.
+- [x] `cargo nextest run -p saml-rs` exits 0.
+- [x] `cargo test -p saml-rs --doc` exits 0.
+- [x] `cargo check -p saml-rs --no-default-features` exits 0.
+- [x] `plans/README.md` status row updated.
 
 ## STOP conditions
 

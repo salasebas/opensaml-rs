@@ -184,7 +184,7 @@ explicitly accept the entity ID found in metadata.
 ```rust
 pub enum MetadataTrustPolicy<'a> {
     RequireSignature {
-        trusted_certs: &'a [CertificatePem],
+        trusted_certificates: &'a [CertificatePem],
     },
     UnsignedForCompatibility,
 }

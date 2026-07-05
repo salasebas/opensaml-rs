@@ -118,10 +118,10 @@ SSO/SLO facade.
 Add these public types:
 
 ```rust
-pub struct RequestId(String);
+pub struct MessageId(String);
 pub struct AssertionId(String);
 pub struct RelayState(String);
-pub enum RelayStateState {
+pub enum RelayStateParam {
     Absent,
     PresentEmpty,
     PresentValue(RelayState),
@@ -167,14 +167,14 @@ pub enum BrowserInput<Message> {
 }
 
 pub enum Outbound<Message> {
-    Redirect { id: RequestId, url: String, relay_state: Option<RelayState> },
-    Post { id: RequestId, form: PostForm, relay_state: Option<RelayState> },
-    SimpleSignPost { id: RequestId, form: PostForm, relay_state: Option<RelayState> },
+    Redirect { id: MessageId, url: String, relay_state: Option<RelayState> },
+    Post { id: MessageId, form: PostForm, relay_state: Option<RelayState> },
+    SimpleSignPost { id: MessageId, form: PostForm, relay_state: Option<RelayState> },
 }
 
 pub struct Pending<Message> {
-    id: RequestId,
-    relay_state: RelayStateState,
+    id: MessageId,
+    relay_state: RelayStateParam,
     request_binding: Option<SsoRequestBinding>,
     response_binding: Option<SsoResponseBinding>,
     peer_entity_id: EntityId,
@@ -183,7 +183,7 @@ pub struct Pending<Message> {
 
 pub struct PendingSnapshot<Message> {
     id: String,
-    relay_state: RelayStateState,
+    relay_state: RelayStateParam,
     peer_entity_id: String,
     expected_binding: String,
     issued_at: Option<SamlInstant>,
@@ -228,10 +228,10 @@ Implement the ID, entity, endpoint, relay, NameID, and attribute wrapper types.
 Rules:
 
 - Constructors should validate only cheap, local invariants.
-- `RequestId::new("")` must return an error.
+- `MessageId::try_new("")` must return an error.
 - RelayState matching is exact tri-state: absent, present empty, and present
   value are distinct. `RelayState` preserves an explicit empty value; use
-  `RelayStateState` or equivalent to represent absence separately.
+  `RelayStateParam` or equivalent to represent absence separately.
 - `EndpointUrl` should validate absolute HTTP(S) URLs using the existing `url`
   dependency.
 - Avoid panics, `unwrap`, or `expect`.
@@ -266,7 +266,7 @@ Conversion rules:
 
 Add accessors:
 
-- `Outbound::id(&self) -> &RequestId`
+- `Outbound::id(&self) -> &MessageId`
 - `Outbound::relay_state(&self) -> Option<&RelayState>`
 - `Outbound::redirect_url(&self) -> Result<&str, SamlError>`
 - `Outbound::post_form(&self) -> Result<&PostForm, SamlError>`
@@ -383,20 +383,20 @@ Rules:
 
 ## Done criteria
 
-- [ ] Typed scalar wrappers and message models are public and documented.
-- [ ] `PendingSnapshot<Message>` supports persistence without storing keys or
+- [x] Typed scalar wrappers and message models are public and documented.
+- [x] `PendingSnapshot<Message>` supports persistence without storing keys or
       raw metadata.
-- [ ] `Outbound` separates Redirect, POST, and SimpleSign semantics.
-- [ ] `BrowserInput` converts to existing `HttpRequest`.
-- [ ] Typed parsed results expose `raw_flow()`.
-- [ ] Existing string-key extraction is internal only for new typed models.
-- [ ] Artifact is rejected by the high-level browser binding/model boundary.
-- [ ] `cargo fmt --all --check` exits 0.
-- [ ] `cargo clippy -p saml-rs --all-targets -- -D warnings` exits 0.
-- [ ] `cargo nextest run -p saml-rs` exits 0.
-- [ ] `cargo test -p saml-rs --doc` exits 0.
-- [ ] `cargo check -p saml-rs --no-default-features` exits 0.
-- [ ] `plans/README.md` status row updated.
+- [x] `Outbound` separates Redirect, POST, and SimpleSign semantics.
+- [x] `BrowserInput` converts to existing `HttpRequest`.
+- [x] Typed parsed results expose `raw_flow()`.
+- [x] Existing string-key extraction is internal only for new typed models.
+- [x] Artifact is rejected by the high-level browser binding/model boundary.
+- [x] `cargo fmt --all --check` exits 0.
+- [x] `cargo clippy -p saml-rs --all-targets -- -D warnings` exits 0.
+- [x] `cargo nextest run -p saml-rs` exits 0.
+- [x] `cargo test -p saml-rs --doc` exits 0.
+- [x] `cargo check -p saml-rs --no-default-features` exits 0.
+- [x] `plans/README.md` status row updated.
 
 ## STOP conditions
 

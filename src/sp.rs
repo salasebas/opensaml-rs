@@ -55,7 +55,7 @@ struct AuthnRequestXml<'a> {
 #[derive(Debug, Clone, Copy)]
 enum LoginResponseCorrelation<'a> {
     Unsolicited,
-    RequestId(&'a str),
+    MessageId(&'a str),
 }
 
 fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
@@ -359,8 +359,12 @@ impl ServiceProvider {
                 (base64_encode(signed.as_bytes()), None, None)
             }
             Binding::SimpleSign => {
-                let relay = relay_state.clone().unwrap_or_default();
-                let octet = format!("SAMLRequest={xml}&RelayState={relay}&SigAlg={sig_alg}");
+                let octet = crate::binding::build_simplesign_octet(
+                    ParserType::SamlRequest.query_param(),
+                    xml,
+                    relay_state.as_deref(),
+                    sig_alg,
+                );
                 let sig = construct_message_signature(&octet, &key, sig_alg)?;
                 (
                     base64_encode(xml.as_bytes()),
@@ -446,7 +450,7 @@ impl ServiceProvider {
             idp,
             binding,
             request,
-            LoginResponseCorrelation::RequestId(request_id),
+            LoginResponseCorrelation::MessageId(request_id),
         )
     }
 
@@ -465,7 +469,7 @@ impl ServiceProvider {
         };
         let audience = self.entity_id();
         let expected_in_response_to = match correlation {
-            LoginResponseCorrelation::RequestId(request_id) => Some(request_id),
+            LoginResponseCorrelation::MessageId(request_id) => Some(request_id),
             LoginResponseCorrelation::Unsolicited => None,
         };
         let recipient = self

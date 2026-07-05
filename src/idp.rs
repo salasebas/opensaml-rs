@@ -264,8 +264,12 @@ impl IdentityProvider {
                     self.setting.private_key.as_deref().unwrap_or_default(),
                     self.setting.private_key_pass.as_deref(),
                 )?;
-                let relay = relay_state.unwrap_or_default();
-                let octet = format!("SAMLResponse={xml}&RelayState={relay}&SigAlg={sig_alg}");
+                let octet = crate::binding::build_simplesign_octet(
+                    ParserType::SamlResponse.query_param(),
+                    xml,
+                    relay_state,
+                    sig_alg,
+                );
                 let sig = construct_message_signature(&octet, &key, sig_alg)?;
                 Ok((
                     base64_encode(xml.as_bytes()),

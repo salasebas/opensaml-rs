@@ -53,10 +53,10 @@ not adding federation, CA, or XML security implementations in-tree.
   // src/metadata/mod.rs:184-195
   pub fn verify_signature_with_limits(
       &self,
-      trusted_certs: &[String],
+      trusted_certificates: &[String],
       limits: XmlLimits,
   ) -> Result<bool, SamlError> {
-      crate::crypto::verify_metadata_signature_with_limits(&self.xml, trusted_certs, limits)
+      crate::crypto::verify_metadata_signature_with_limits(&self.xml, trusted_certificates, limits)
   }
   ```
 
@@ -67,10 +67,10 @@ not adding federation, CA, or XML security implementations in-tree.
   // src/crypto/verify.rs:338-345
   pub fn verify_metadata_signature_with_limits(
       xml: &str,
-      trusted_certs: &[String],
+      trusted_certificates: &[String],
       limits: XmlLimits,
   ) -> Result<bool, SamlError> {
-      Ok(verify_signature_with_limits(xml, trusted_certs, limits)?.0)
+      Ok(verify_signature_with_limits(xml, trusted_certificates, limits)?.0)
   }
   ```
 
@@ -137,7 +137,7 @@ pub struct MetadataTrust {
 
 pub enum MetadataTrustPolicy<'a> {
     UnsignedForCompatibility,
-    RequireSignature { trusted_certs: &'a [CertificatePem] },
+    RequireSignature { trusted_certificates: &'a [CertificatePem] },
 }
 ```
 
@@ -199,7 +199,7 @@ explicit and bind the expected entity ID:
 let idp = IdpDescriptor::from_metadata_xml_for(
     expected_idp_entity_id,
     xml,
-    MetadataTrustPolicy::RequireSignature { trusted_certs: &[cert] },
+    MetadataTrustPolicy::RequireSignature { trusted_certificates: &[cert] },
 )?;
 ```
 

@@ -95,8 +95,8 @@ impl<Message> Received<Message> {
 }
 
 impl<Message> Outbound<Message> {
-    pub fn raw_context(&self) -> Option<&raw::BindingContext>;
-    pub fn into_raw_context(self) -> Option<raw::BindingContext>;
+    pub fn raw_context(&self) -> &raw::BindingContext;
+    pub fn into_raw_context(self) -> raw::BindingContext;
 }
 ```
 

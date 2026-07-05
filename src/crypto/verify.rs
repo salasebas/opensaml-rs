@@ -336,17 +336,20 @@ pub fn verify_signature_with_limits(
 /// Verify the enveloped XML-DSig signature on a metadata document against
 /// trusted certificate(s); returns whether it is valid and covers the consumed
 /// `<EntityDescriptor>` document.
-pub fn verify_metadata_signature(xml: &str, trusted_certs: &[String]) -> Result<bool, SamlError> {
-    verify_metadata_signature_with_limits(xml, trusted_certs, XmlLimits::default())
+pub fn verify_metadata_signature(
+    xml: &str,
+    trusted_certificates: &[String],
+) -> Result<bool, SamlError> {
+    verify_metadata_signature_with_limits(xml, trusted_certificates, XmlLimits::default())
 }
 
 /// Verify a metadata XML-DSig signature with explicit XML parser limits.
 pub fn verify_metadata_signature_with_limits(
     xml: &str,
-    trusted_certs: &[String],
+    trusted_certificates: &[String],
     limits: XmlLimits,
 ) -> Result<bool, SamlError> {
-    Ok(verify_signature_with_limits(xml, trusted_certs, limits)?.0)
+    Ok(verify_signature_with_limits(xml, trusted_certificates, limits)?.0)
 }
 
 #[cfg(test)]

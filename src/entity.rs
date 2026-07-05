@@ -1,6 +1,8 @@
 //! Entity base settings shared by [`crate::sp::ServiceProvider`] and
 //! [`crate::idp::IdentityProvider`].
 
+use core::fmt;
+
 use crate::binding::MAX_DEFLATE_RAW_DECODE_BYTES;
 use crate::constants::{
     data_encryption_algorithm, key_encryption_algorithm, signature_algorithm, transform_algorithm,
@@ -12,7 +14,7 @@ use crate::xml::XmlLimits;
 ///
 /// Use [`EntitySetting::default`] and tweak the fields you need.
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EntitySetting {
     /// Override entity ID (otherwise taken from metadata).
     pub entity_id: Option<String>,
@@ -95,6 +97,76 @@ pub struct EntitySetting {
     /// XML-DSig transforms applied to signed references (default
     /// enveloped-signature + exclusive C14N).
     pub transformation_algorithms: Vec<String>,
+}
+
+fn redacted_option(value: &Option<String>) -> Option<&'static str> {
+    value.as_ref().map(|_| "<redacted>")
+}
+
+impl fmt::Debug for EntitySetting {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EntitySetting")
+            .field("entity_id", &self.entity_id)
+            .field(
+                "request_signature_algorithm",
+                &self.request_signature_algorithm,
+            )
+            .field("data_encryption_algorithm", &self.data_encryption_algorithm)
+            .field("key_encryption_algorithm", &self.key_encryption_algorithm)
+            .field("message_signing_order", &self.message_signing_order)
+            .field("allow_create", &self.allow_create)
+            .field("is_assertion_encrypted", &self.is_assertion_encrypted)
+            .field(
+                "allow_insecure_software_rsa_key_transport_decryption",
+                &self.allow_insecure_software_rsa_key_transport_decryption,
+            )
+            .field("relay_state", &self.relay_state)
+            .field("authn_requests_signed", &self.authn_requests_signed)
+            .field("want_assertions_signed", &self.want_assertions_signed)
+            .field("validate_audience", &self.validate_audience)
+            .field("want_message_signed", &self.want_message_signed)
+            .field(
+                "want_authn_requests_signed",
+                &self.want_authn_requests_signed,
+            )
+            .field(
+                "want_logout_request_signed",
+                &self.want_logout_request_signed,
+            )
+            .field(
+                "want_logout_response_signed",
+                &self.want_logout_response_signed,
+            )
+            .field("name_id_format", &self.name_id_format)
+            .field("private_key", &redacted_option(&self.private_key))
+            .field("private_key_pass", &redacted_option(&self.private_key_pass))
+            .field("signing_cert", &redacted_option(&self.signing_cert))
+            .field("encrypt_cert", &redacted_option(&self.encrypt_cert))
+            .field("enc_private_key", &redacted_option(&self.enc_private_key))
+            .field(
+                "enc_private_key_pass",
+                &redacted_option(&self.enc_private_key_pass),
+            )
+            .field("clock_drifts", &self.clock_drifts)
+            .field(
+                "redirect_inflate_max_bytes",
+                &self.redirect_inflate_max_bytes,
+            )
+            .field("xml_limits", &self.xml_limits)
+            .field("tag_prefix_protocol", &self.tag_prefix_protocol)
+            .field("tag_prefix_assertion", &self.tag_prefix_assertion)
+            .field(
+                "tag_prefix_encrypted_assertion",
+                &self.tag_prefix_encrypted_assertion,
+            )
+            .field("login_response_template", &self.login_response_template)
+            .field("login_request_template", &self.login_request_template)
+            .field("logout_request_template", &self.logout_request_template)
+            .field("logout_response_template", &self.logout_response_template)
+            .field("signature_config", &self.signature_config)
+            .field("transformation_algorithms", &self.transformation_algorithms)
+            .finish()
+    }
 }
 
 /// Custom message rendering hook: given the resolved template, returns

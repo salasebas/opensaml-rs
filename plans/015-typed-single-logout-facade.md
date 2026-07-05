@@ -210,7 +210,7 @@ Do not invent missing NameID/session data.
 Add `StartSlo` and `RespondSlo` options:
 
 - `binding: LogoutBinding`
-- `relay_state: RelayStateState` or equivalent exact tri-state input
+- `relay_state: RelayStateParam` or equivalent exact tri-state input
 - `signing: LogoutSigning`
 
 Use an enum for signing policy, not a bare bool:

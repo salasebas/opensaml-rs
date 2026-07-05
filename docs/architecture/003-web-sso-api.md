@@ -142,7 +142,7 @@ let sp_descriptor =
 
 let request = idp_saml.receive_sso(
     &sp_descriptor,
-    BrowserInput::<AuthnRequest>::redirect_raw_query(raw_query),
+    BrowserInput::<AuthnRequest>::redirect(raw_query),
     validation,
 )?;
 ```
@@ -227,17 +227,17 @@ pub enum BrowserInput<Message> {
 
 pub enum Outbound<Message> {
     Redirect {
-        id: RequestId,
+        id: MessageId,
         url: String,
         relay_state: Option<RelayState>,
     },
     Post {
-        id: RequestId,
+        id: MessageId,
         form: PostForm,
         relay_state: Option<RelayState>,
     },
     SimpleSignPost {
-        id: RequestId,
+        id: MessageId,
         form: PostForm,
         relay_state: Option<RelayState>,
     },
@@ -245,8 +245,8 @@ pub enum Outbound<Message> {
 ```
 
 Typed SimpleSign POST input must not ask callers for arbitrary signed octets.
-Callers pass the raw form body, or construct the value through a helper such as
-`BrowserInput::<M>::simple_sign_post_from_raw_body(raw_body)`. The library
+Callers pass parsed fields with `BrowserInput::<M>::simple_sign(fields)` or a
+raw form body with `BrowserInput::<M>::simple_sign_body(raw_body)`. The library
 parses the form fields and derives the exact octets used for signature
 verification. Raw `raw::HttpRequest` compatibility may still accept manual
 detached octet data for legacy interop.
@@ -255,8 +255,8 @@ Raw `BindingContext` should remain available through:
 
 ```rust
 impl<Message> Outbound<Message> {
-    pub fn raw_context(&self) -> Option<&raw::BindingContext>;
-    pub fn into_raw_context(self) -> Option<raw::BindingContext>;
+    pub fn raw_context(&self) -> &raw::BindingContext;
+    pub fn into_raw_context(self) -> raw::BindingContext;
 }
 ```
 
@@ -270,11 +270,11 @@ pub struct SsoSession {
 impl SsoSession {
     pub fn subject(&self) -> &Subject;
     pub fn attributes(&self) -> &Attributes;
-    pub fn authn_session(&self) -> Option<&AuthnSession>;
+    pub fn authn_session(&self) -> &AuthnSession;
     pub fn issuer(&self) -> &EntityId;
-    pub fn response_id(&self) -> Option<&MessageId>;
-    pub fn assertion_id(&self) -> Option<&MessageId>;
-    pub fn in_response_to(&self) -> Option<&RequestId>;
+    pub fn response_id(&self) -> &MessageId;
+    pub fn assertion_id(&self) -> Option<&AssertionId>;
+    pub fn in_response_to(&self) -> Option<&MessageId>;
     pub fn raw_flow(&self) -> &raw::FlowResult;
 }
 ```

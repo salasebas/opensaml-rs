@@ -13,10 +13,11 @@ pub use deflate::{
 };
 pub use encoding::{base64_decode, base64_decode_with_limit, base64_encode};
 pub use escape::{html_escape, xml_escape};
-pub use post_form::{saml_post_binding_form, try_saml_post_binding_form};
 pub(crate) use post_form::{
-    saml_post_binding_form_with_signature, try_saml_post_binding_form_with_signature,
+    build_simplesign_octet, saml_post_binding_form_with_signature,
+    try_saml_post_binding_form_with_signature,
 };
+pub use post_form::{saml_post_binding_form, try_saml_post_binding_form};
 pub use redirect::{
     append_signature, build_redirect_octet, build_redirect_url, redirect_binding_query,
 };

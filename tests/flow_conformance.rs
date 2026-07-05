@@ -134,8 +134,10 @@ fn simplesign_request(param: &str, ctx: &BindingContext) -> Result<HttpRequest, 
     let raw_xml = String::from_utf8(base64_decode(&ctx.context)?)
         .map_err(|e| SamlError::Xml(e.to_string()))?;
     let sig_alg = ctx.sig_alg.clone().unwrap_or_default();
-    let relay_state = ctx.relay_state.as_deref().unwrap_or_default();
-    let octet = format!("{param}={raw_xml}&RelayState={relay_state}&SigAlg={sig_alg}");
+    let octet = match ctx.relay_state.as_deref() {
+        Some(relay_state) => format!("{param}={raw_xml}&RelayState={relay_state}&SigAlg={sig_alg}"),
+        None => format!("{param}={raw_xml}&SigAlg={sig_alg}"),
+    };
     let mut body = vec![(param.to_string(), ctx.context.clone())];
     if let Some(relay_state) = &ctx.relay_state {
         body.push(("RelayState".into(), relay_state.clone()));

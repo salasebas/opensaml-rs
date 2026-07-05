@@ -126,7 +126,7 @@ pub trait ReplayCache {
 
 pub enum ReplayKey {
     ResponseId(MessageId),
-    AssertionId(MessageId),
+    AssertionId(AssertionId),
     SessionIndex(SessionIndex),
 }
 ```

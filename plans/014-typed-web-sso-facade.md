@@ -339,7 +339,7 @@ Ensure each typed result exposes raw data without making it primary:
 
 - `SsoSession::raw_flow() -> &FlowResult`
 - `Received<AuthnRequest>::raw_flow() -> &FlowResult`
-- `Outbound<M>::raw_context() -> Option<&BindingContext>` or
+- `Outbound<M>::raw_context() -> &BindingContext` or
   `into_raw_context(self) -> BindingContext`
 
 Add tests that raw data remains available.

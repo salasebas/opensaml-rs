@@ -167,8 +167,8 @@ pub enum SamlError {
 
     #[error("relay state mismatch")]
     RelayStateMismatch {
-        expected: RelayStateState,
-        actual: RelayStateState,
+        expected: RelayStateParam,
+        actual: RelayStateParam,
     },
 
     #[error("audience restriction not satisfied: expected {expected}")]

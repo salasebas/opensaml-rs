@@ -51,11 +51,11 @@ pub use browser::{
 pub use config::{
     AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
     AuthnRequestSignaturePolicy, CertificatePem, Credentials, DataEncryptionAlgorithm,
-    DigestAlgorithm, EntityId, IdpConfig, IdpDescriptor, IdpMetadataConfigTyped,
-    IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy, LogoutSignaturePolicy,
-    MessageSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase,
-    PrivateKeyPem, SignatureAlgorithm, SpConfig, SpDescriptor, SpMetadataConfigTyped,
-    SpValidationPolicy, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
+    DigestAlgorithm, EntityId, IdpConfig, IdpDescriptor, IdpMetadataConfig, IdpValidationPolicy,
+    KeyEncryptionAlgorithm, LogoutPolicy, LogoutSignaturePolicy, MessageSignaturePolicy,
+    MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase, PrivateKeyPem,
+    SignatureAlgorithm, SpConfig, SpDescriptor, SpMetadataConfig, SpValidationPolicy,
+    TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
 };
 #[doc = "Compatibility export. Prefer `raw::EntitySetting` for low-level APIs."]
 pub use entity::EntitySetting;
@@ -63,9 +63,9 @@ pub use entity::EntitySetting;
 pub use idp::IdentityProvider;
 pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
-    LogoutCompleted, LogoutRequest, LogoutResponse, NameId, NameIdPolicy, Received, RelayState,
-    RelayStateState, RequestId, SamlInstant, SessionIndex, SsoResponse, SsoSession, Subject,
-    SubjectConfirmation,
+    LogoutCompleted, LogoutRequest, LogoutResponse, MessageId, NameId, NameIdPolicy, Received,
+    RelayState, RelayStateParam, SamlInstant, SessionIndex, SsoResponse, SsoSession, Subject,
+    SubjectConfirmation, MAX_RELAY_STATE_BYTES,
 };
 #[doc = "Compatibility export. Prefer `raw::ServiceProvider` for low-level APIs."]
 pub use sp::ServiceProvider;
