@@ -1,4 +1,4 @@
-use super::{AssertionId, MessageId, SessionIndex};
+use super::{AssertionId, MessageId};
 use crate::error::SamlError;
 use time::OffsetDateTime;
 
@@ -18,12 +18,37 @@ impl ClockSkew {
         }
     }
 
-    /// Build clock skew from the raw SAML drift tuple, in milliseconds.
+    /// Build clock skew from the raw SAML drift values, in milliseconds.
+    ///
+    /// The first argument applies to `NotBefore`; the second applies to
+    /// `NotOnOrAfter`.
     pub fn from_millis(not_before_ms: i64, not_on_or_after_ms: i64) -> Self {
         Self {
             not_before_ms,
             not_on_or_after_ms,
         }
+    }
+
+    /// Return a copy with the `NotBefore` skew, in milliseconds.
+    pub fn with_not_before_millis(mut self, not_before_ms: i64) -> Self {
+        self.not_before_ms = not_before_ms;
+        self
+    }
+
+    /// Return a copy with the `NotOnOrAfter` skew, in milliseconds.
+    pub fn with_not_on_or_after_millis(mut self, not_on_or_after_ms: i64) -> Self {
+        self.not_on_or_after_ms = not_on_or_after_ms;
+        self
+    }
+
+    /// `NotBefore` skew, in milliseconds.
+    pub fn not_before_millis(self) -> i64 {
+        self.not_before_ms
+    }
+
+    /// `NotOnOrAfter` skew, in milliseconds.
+    pub fn not_on_or_after_millis(self) -> i64 {
+        self.not_on_or_after_ms
     }
 
     /// Return the raw `(NotBefore, NotOnOrAfter)` drift tuple.
@@ -39,23 +64,21 @@ impl Default for ClockSkew {
 }
 
 /// Replay cache key derived from a validated SAML message.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ReplayKey {
     /// SAML protocol response ID.
     ResponseId(MessageId),
     /// SAML assertion ID.
     AssertionId(AssertionId),
-    /// AuthnStatement SessionIndex.
-    SessionIndex(SessionIndex),
 }
 
 impl ReplayKey {
     /// Stable key family.
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::ResponseId(_) => "response",
-            Self::AssertionId(_) => "assertion",
-            Self::SessionIndex(_) => "session",
+            Self::ResponseId(_) => "response_id",
+            Self::AssertionId(_) => "assertion_id",
         }
     }
 
@@ -64,7 +87,6 @@ impl ReplayKey {
         match self {
             Self::ResponseId(id) => id.as_str(),
             Self::AssertionId(id) => id.as_str(),
-            Self::SessionIndex(id) => id.as_str(),
         }
     }
 
@@ -89,6 +111,7 @@ pub trait ReplayCache {
 }
 
 /// Replay behavior for typed inbound browser flows.
+#[non_exhaustive]
 pub enum ReplayPolicy<'a> {
     /// Skip replay checks for raw compatibility migrations.
     DisabledForCompatibility,

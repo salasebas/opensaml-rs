@@ -8,9 +8,13 @@ use super::session::AuthnSession;
 use super::subject::{NameId, Subject};
 use super::{ReplayKey, ReplayPolicy, SamlValidationContext};
 use crate::config::EntityId;
-use crate::error::SamlError;
+use crate::error::{SamlError, TimeWindowField};
 use crate::raw::FlowResult;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use crate::xml::{extract_with_limits, ExtractorField, XmlLimits};
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
+
+const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
+const REPLAY_EXPIRATION_FIELD: TimeWindowField = TimeWindowField::ReplayExpiration;
 
 /// Parsed SSO response envelope.
 #[derive(Debug, Clone)]
@@ -182,15 +186,10 @@ impl SsoSession {
 
     /// Replay keys available from this validated SSO session.
     pub fn replay_keys(&self) -> Vec<ReplayKey> {
-        let mut keys = Vec::with_capacity(3);
-        keys.push(ReplayKey::ResponseId(self.response_id.clone()));
-        if let Some(assertion_id) = &self.assertion_id {
-            keys.push(ReplayKey::AssertionId(assertion_id.clone()));
-        }
-        if let Some(session_index) = self.authn_session.session_index() {
-            keys.push(ReplayKey::SessionIndex(session_index.clone()));
-        }
-        keys
+        vec![
+            ReplayKey::ResponseId(self.response_id.clone()),
+            ReplayKey::AssertionId(self.assertion_id.clone()),
+        ]
     }
 
     /// Check and store this session's replay keys using the caller cache.
@@ -198,14 +197,16 @@ impl SsoSession {
     /// This method is intended for typed inbound SSO facades. It should be
     /// called only after signature, issuer, audience, destination, recipient,
     /// `InResponseTo`, and time validation have already passed.
-    pub fn check_replay(
+    pub fn check_and_store_replay(
         &self,
         validation: &mut SamlValidationContext<'_>,
     ) -> Result<(), SamlError> {
+        let validation_now = validation.now();
+        let not_on_or_after_skew_ms = validation.clock_skew().not_on_or_after_millis();
         match validation.replay_policy() {
             ReplayPolicy::DisabledForCompatibility => Ok(()),
             ReplayPolicy::RequireCache(cache) => {
-                let expires_at = self.replay_expires_at()?;
+                let expires_at = self.replay_expires_at(validation_now, not_on_or_after_skew_ms)?;
                 let keys = self.replay_keys();
                 for key in keys {
                     cache.check_and_store(key, expires_at)?;
@@ -220,19 +221,71 @@ impl SsoSession {
         &self.raw_flow
     }
 
-    fn replay_expires_at(&self) -> Result<OffsetDateTime, SamlError> {
-        let instant = self
-            .not_on_or_after()
-            .or_else(|| self.authn_session().not_on_or_after())
+    fn replay_expires_at(
+        &self,
+        validation_now: OffsetDateTime,
+        not_on_or_after_skew_ms: i64,
+    ) -> Result<OffsetDateTime, SamlError> {
+        let mut candidates = Vec::with_capacity(3);
+        if let Some(instant) = self.not_on_or_after() {
+            candidates.push(parse_replay_expiration(instant.as_str())?);
+        }
+        if let Some(instant) = self.authn_session().not_on_or_after() {
+            candidates.push(parse_replay_expiration(instant.as_str())?);
+        }
+        if let Some(instant) = self.bearer_subject_confirmation_expires_at()? {
+            candidates.push(instant);
+        }
+
+        let expires_at = candidates
+            .into_iter()
+            .min()
             .ok_or(SamlError::TimeWindowInvalid {
-                field: "ReplayExpiration",
-            })?;
-        OffsetDateTime::parse(instant.as_str(), &Rfc3339).map_err(|_| {
-            SamlError::TimeWindowInvalid {
-                field: "ReplayExpiration",
-            }
-        })
+                field: REPLAY_EXPIRATION_FIELD,
+            })?
+            + Duration::milliseconds(not_on_or_after_skew_ms);
+        if validation_now >= expires_at {
+            return Err(SamlError::TimeWindowInvalid {
+                field: REPLAY_EXPIRATION_FIELD,
+            });
+        }
+        Ok(expires_at)
     }
+
+    fn bearer_subject_confirmation_expires_at(&self) -> Result<Option<OffsetDateTime>, SamlError> {
+        let fields = [
+            ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
+            ExtractorField::new(
+                "subjectConfirmationData",
+                &["SubjectConfirmation", "SubjectConfirmationData"],
+            )
+            .attrs(&["NotOnOrAfter"]),
+        ];
+        let mut expires_at = None;
+        for confirmation in self.subject.confirmations() {
+            let extracted =
+                extract_with_limits(confirmation.raw_xml(), &fields, XmlLimits::default())?;
+            if extracted.get_str("subjectConfirmation") != Some(BEARER_SUBJECT_CONFIRMATION_METHOD)
+            {
+                continue;
+            }
+            let Some(not_on_or_after) = extracted.get_str("subjectConfirmationData") else {
+                continue;
+            };
+            let candidate = parse_replay_expiration(not_on_or_after)?;
+            match expires_at {
+                Some(current) if current >= candidate => {}
+                Some(_) | None => expires_at = Some(candidate),
+            }
+        }
+        Ok(expires_at)
+    }
+}
+
+fn parse_replay_expiration(value: &str) -> Result<OffsetDateTime, SamlError> {
+    OffsetDateTime::parse(value, &Rfc3339).map_err(|_| SamlError::TimeWindowInvalid {
+        field: REPLAY_EXPIRATION_FIELD,
+    })
 }
 
 impl TryFrom<FlowResult> for SsoSession {
