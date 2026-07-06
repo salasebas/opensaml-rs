@@ -986,6 +986,24 @@ impl SpConfigBuilder {
 }
 
 /// Typed Identity Provider configuration.
+///
+/// # Examples
+///
+/// The builder starts with strict validation defaults. Use compatibility
+/// policy explicitly when compiling or testing without the default crypto
+/// feature.
+///
+/// ```
+/// use saml_rs::{EntityId, IdpConfig, IdpValidationPolicy, SsoEndpoint};
+///
+/// let config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+///     .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+///     .validation(IdpValidationPolicy::compatibility())
+///     .build()?;
+///
+/// assert_eq!(config.entity_id.as_str(), "https://idp.example.com/metadata");
+/// # Ok::<(), saml_rs::SamlError>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct IdpConfig {
     /// Local IdP entity ID.

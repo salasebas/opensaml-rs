@@ -518,6 +518,23 @@ impl Saml<Sp> {
     /// Returns [`SamlError`] when relay state is invalid, IdP metadata cannot
     /// be parsed, a compatible logout endpoint or signing key is missing, the
     /// selected binding is unsupported, or logout request creation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{IdpDescriptor, LogoutSubject, Saml, StartSlo};
+    ///
+    /// # fn logout(
+    /// #     sp: &Saml<saml_rs::Sp>,
+    /// #     idp: &IdpDescriptor,
+    /// #     subject: LogoutSubject,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let started = sp.start_slo(idp, subject, StartSlo::post())?;
+    /// let form = started.outbound.post_form()?;
+    /// let snapshot = started.pending.snapshot();
+    /// # let _ = (form, snapshot);
+    /// # Ok(()) }
+    /// ```
     pub fn start_slo(
         &self,
         idp: &IdpDescriptor,
@@ -592,6 +609,37 @@ impl Saml<Sp> {
     /// `InResponseTo` mismatches; when IdP metadata cannot be parsed; when XML,
     /// signature, trust, status, or time validation fails; or when replay
     /// validation detects a duplicate or expired message.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{
+    ///     BrowserInput, FormField, IdpDescriptor, LogoutResponse, PendingLogoutRequest,
+    ///     ReplayPolicy, Saml, SamlValidationContext,
+    /// };
+    /// use time::OffsetDateTime;
+    ///
+    /// # fn finish(
+    /// #     sp: &Saml<saml_rs::Sp>,
+    /// #     idp: &IdpDescriptor,
+    /// #     pending: &PendingLogoutRequest,
+    /// #     fields: Vec<FormField>,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let validation = SamlValidationContext::new(
+    ///     OffsetDateTime::now_utc(),
+    ///     ReplayPolicy::DisabledForCompatibility,
+    /// );
+    /// let completed = sp.finish_slo(
+    ///     idp,
+    ///     pending,
+    ///     BrowserInput::<LogoutResponse>::post(fields),
+    ///     validation,
+    /// )?;
+    ///
+    /// let peer = completed.peer_entity_id().as_str();
+    /// # let _ = peer;
+    /// # Ok(()) }
+    /// ```
     pub fn finish_slo(
         &self,
         idp: &IdpDescriptor,
@@ -722,6 +770,41 @@ impl Saml<Idp> {
     /// Returns [`SamlError`] when relay state is invalid, SP metadata cannot be
     /// parsed, a compatible ACS endpoint or signing key is missing, the
     /// selected binding is unsupported, or response creation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{
+    ///     BrowserInput, FormField, IdpDescriptor, ReplayPolicy, RespondSso, Saml,
+    ///     SamlValidationContext, SpDescriptor, SsoResponse, Subject,
+    /// };
+    /// use time::OffsetDateTime;
+    ///
+    /// # fn initiate(
+    /// #     idp: &Saml<saml_rs::Idp>,
+    /// #     sp: &Saml<saml_rs::Sp>,
+    /// #     sp_descriptor: &SpDescriptor,
+    /// #     idp_descriptor: &IdpDescriptor,
+    /// #     subject: Subject,
+    /// #     form_fields: Vec<FormField>,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let response = idp.initiate_sso(sp_descriptor, subject, RespondSso::post())?;
+    /// let form = response.post_form()?;
+    /// # let _ = form;
+    ///
+    /// let validation = SamlValidationContext::new(
+    ///     OffsetDateTime::now_utc(),
+    ///     ReplayPolicy::DisabledForCompatibility,
+    /// );
+    /// let session = sp.accept_unsolicited_sso(
+    ///     idp_descriptor,
+    ///     BrowserInput::<SsoResponse>::post(form_fields),
+    ///     validation,
+    /// )?;
+    /// let issuer = session.issuer().as_str();
+    /// # let _ = issuer;
+    /// # Ok(()) }
+    /// ```
     pub fn initiate_sso(
         &self,
         sp: &SpDescriptor,
@@ -738,6 +821,23 @@ impl Saml<Idp> {
     /// Returns [`SamlError`] when relay state is invalid, SP metadata cannot be
     /// parsed, a compatible logout endpoint or signing key is missing, the
     /// selected binding is unsupported, or logout request creation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{LogoutSubject, Saml, SpDescriptor, StartSlo};
+    ///
+    /// # fn logout(
+    /// #     idp: &Saml<saml_rs::Idp>,
+    /// #     sp: &SpDescriptor,
+    /// #     subject: LogoutSubject,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let started = idp.start_slo(sp, subject, StartSlo::post())?;
+    /// let form = started.outbound.post_form()?;
+    /// let snapshot = started.pending.snapshot();
+    /// # let _ = (form, snapshot);
+    /// # Ok(()) }
+    /// ```
     pub fn start_slo(
         &self,
         sp: &SpDescriptor,
@@ -814,6 +914,22 @@ impl Saml<Idp> {
     /// Returns [`SamlError`] when SP metadata cannot be parsed, relay state is
     /// invalid, a compatible logout endpoint or signing key is missing, the
     /// selected binding is unsupported, or logout response creation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{LogoutRequest, Received, RespondSlo, Saml, SpDescriptor};
+    ///
+    /// # fn respond(
+    /// #     idp: &Saml<saml_rs::Idp>,
+    /// #     sp: &SpDescriptor,
+    /// #     request: &Received<LogoutRequest>,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let response = idp.respond_slo(sp, request, RespondSlo::post())?;
+    /// let form = response.post_form()?;
+    /// # let _ = form;
+    /// # Ok(()) }
+    /// ```
     pub fn respond_slo(
         &self,
         sp: &SpDescriptor,
@@ -839,6 +955,37 @@ impl Saml<Idp> {
     /// `InResponseTo` mismatches; when SP metadata cannot be parsed; when XML,
     /// signature, trust, status, or time validation fails; or when replay
     /// validation detects a duplicate or expired message.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{
+    ///     BrowserInput, FormField, LogoutResponse, PendingLogoutRequest, ReplayPolicy,
+    ///     Saml, SamlValidationContext, SpDescriptor,
+    /// };
+    /// use time::OffsetDateTime;
+    ///
+    /// # fn finish(
+    /// #     idp: &Saml<saml_rs::Idp>,
+    /// #     sp: &SpDescriptor,
+    /// #     pending: &PendingLogoutRequest,
+    /// #     fields: Vec<FormField>,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let validation = SamlValidationContext::new(
+    ///     OffsetDateTime::now_utc(),
+    ///     ReplayPolicy::DisabledForCompatibility,
+    /// );
+    /// let completed = idp.finish_slo(
+    ///     sp,
+    ///     pending,
+    ///     BrowserInput::<LogoutResponse>::post(fields),
+    ///     validation,
+    /// )?;
+    ///
+    /// let peer = completed.peer_entity_id().as_str();
+    /// # let _ = peer;
+    /// # Ok(()) }
+    /// ```
     pub fn finish_slo(
         &self,
         sp: &SpDescriptor,

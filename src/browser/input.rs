@@ -35,6 +35,27 @@ impl MessageField {
 }
 
 /// Typed browser input for inbound SAML messages.
+///
+/// # Examples
+///
+/// ```
+/// use saml_rs::{AuthnRequest, BrowserInput, FormField, SsoResponse};
+///
+/// let redirect = BrowserInput::<AuthnRequest>::redirect("SAMLRequest=...");
+/// let post = BrowserInput::<SsoResponse>::post(vec![
+///     FormField::new("SAMLResponse", "..."),
+/// ]);
+///
+/// # let _ = (redirect, post);
+/// ```
+///
+/// SSO responses are received through POST-family bindings, not Redirect:
+///
+/// ```compile_fail
+/// use saml_rs::{BrowserInput, SsoResponse};
+///
+/// let _ = BrowserInput::<SsoResponse>::redirect("SAMLResponse=...");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrowserInput<Message> {
     /// HTTP-Redirect input as a raw query string.

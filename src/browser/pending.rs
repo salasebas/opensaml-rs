@@ -99,6 +99,26 @@ pub struct PendingSnapshot<Message: PendingMessage> {
 
 impl PendingSnapshot<AuthnRequest> {
     /// Build an AuthnRequest snapshot from persistence fields.
+    ///
+    /// Snapshots store correlation data without copying keys or peer metadata.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use saml_rs::{AuthnRequest, PendingSnapshot, RelayStateParam};
+    ///
+    /// let snapshot = PendingSnapshot::<AuthnRequest>::authn_request(
+    ///     "_request123",
+    ///     RelayStateParam::absent(),
+    ///     "https://idp.example.com/metadata",
+    ///     "post",
+    ///     "https://sp.example.com/acs",
+    ///     "post",
+    /// );
+    ///
+    /// assert_eq!(snapshot.peer_entity_id, "https://idp.example.com/metadata");
+    /// assert_eq!(snapshot.acs_url, "https://sp.example.com/acs");
+    /// ```
     pub fn authn_request(
         id: impl Into<String>,
         relay_state: RelayStateParam,
@@ -128,6 +148,22 @@ impl PendingSnapshot<LogoutRequest> {
     /// Build a LogoutRequest snapshot from persistence fields.
     ///
     /// ACS fields are AuthnRequest-only and are intentionally left empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use saml_rs::{LogoutBinding, LogoutRequest, PendingSnapshot, RelayStateParam};
+    ///
+    /// let snapshot = PendingSnapshot::<LogoutRequest>::logout_request(
+    ///     "_logout123",
+    ///     RelayStateParam::absent(),
+    ///     "https://idp.example.com/metadata",
+    ///     LogoutBinding::Post,
+    /// );
+    ///
+    /// assert_eq!(snapshot.expected_binding, "post");
+    /// assert!(snapshot.acs_url.is_empty());
+    /// ```
     pub fn logout_request(
         id: impl Into<String>,
         relay_state: RelayStateParam,
@@ -277,6 +313,25 @@ impl Pending<AuthnRequest> {
     ///
     /// Returns [`SamlError`] when any snapshot field is malformed or
     /// inconsistent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use saml_rs::{AuthnRequest, Pending, PendingSnapshot, RelayStateParam};
+    ///
+    /// let snapshot = PendingSnapshot::<AuthnRequest>::authn_request(
+    ///     "_request123",
+    ///     RelayStateParam::absent(),
+    ///     "https://idp.example.com/metadata",
+    ///     "post",
+    ///     "https://sp.example.com/acs",
+    ///     "post",
+    /// );
+    /// let pending = Pending::<AuthnRequest>::from_snapshot(snapshot)?;
+    ///
+    /// assert_eq!(pending.idp_entity_id().as_str(), "https://idp.example.com/metadata");
+    /// # Ok::<(), saml_rs::SamlError>(())
+    /// ```
     pub fn from_snapshot(snapshot: PendingSnapshot<AuthnRequest>) -> Result<Self, SamlError> {
         snapshot.relay_state.validate()?;
         Self::validate_snapshot_timing(&snapshot.issued_at, &snapshot.expires_at)?;
@@ -387,6 +442,23 @@ impl Pending<LogoutRequest> {
     ///
     /// Returns [`SamlError`] when any snapshot field is malformed or
     /// inconsistent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use saml_rs::{LogoutBinding, LogoutRequest, Pending, PendingSnapshot, RelayStateParam};
+    ///
+    /// let snapshot = PendingSnapshot::<LogoutRequest>::logout_request(
+    ///     "_logout123",
+    ///     RelayStateParam::absent(),
+    ///     "https://idp.example.com/metadata",
+    ///     LogoutBinding::Post,
+    /// );
+    /// let pending = Pending::<LogoutRequest>::from_snapshot(snapshot)?;
+    ///
+    /// assert_eq!(pending.peer_entity_id().as_str(), "https://idp.example.com/metadata");
+    /// # Ok::<(), saml_rs::SamlError>(())
+    /// ```
     pub fn from_snapshot(snapshot: PendingSnapshot<LogoutRequest>) -> Result<Self, SamlError> {
         snapshot.relay_state.validate()?;
         Self::validate_snapshot_timing(&snapshot.issued_at, &snapshot.expires_at)?;
