@@ -169,6 +169,14 @@ pub struct LogoutCompleted {
     response: Option<LogoutResponse>,
 }
 
+impl PartialEq for LogoutCompleted {
+    fn eq(&self, other: &Self) -> bool {
+        self.peer_entity_id == other.peer_entity_id
+    }
+}
+
+impl Eq for LogoutCompleted {}
+
 impl LogoutCompleted {
     /// Create a completed logout marker.
     pub fn new(peer_entity_id: EntityId) -> Self {

@@ -7,11 +7,11 @@ use saml_rs::util::Value;
 use saml_rs::xml::XmlLimits;
 use saml_rs::{raw::LoginResponseOptions, raw::User};
 use saml_rs::{
-    AcsEndpoint, AuthnRequest, BrowserInput, EndpointUrl, EntitySetting, FormField,
-    IdentityProvider, LogoutRequest, LogoutResponse, MessageId, NameIdCreationRequest,
-    NameIdFormat, NameIdPolicy, Outbound, PendingAuthnRequest, RelayState, RelayStateParam,
-    SamlError, SamlInstant, ServiceProvider, SsoRequestBinding, SsoResponse, SsoResponseBinding,
-    SsoSession,
+    AcsEndpoint, AuthnRequest, BrowserInput, EndpointUrl, EntityId, EntitySetting, FormField,
+    IdentityProvider, LogoutCompleted, LogoutRequest, LogoutResponse, MessageId,
+    NameIdCreationRequest, NameIdFormat, NameIdPolicy, Outbound, PendingAuthnRequest, RelayState,
+    RelayStateParam, SamlError, SamlInstant, ServiceProvider, SsoRequestBinding, SsoResponse,
+    SsoResponseBinding, SsoSession,
 };
 
 const IDP_PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
@@ -1056,6 +1056,18 @@ fn typed_models_logout_response_from_flow_result_exposes_correlation(
         response.destination().map(EndpointUrl::as_str),
         Some("https://sp.example.com/slo")
     );
+    Ok(())
+}
+
+#[test]
+fn typed_models_logout_completed_equality_uses_peer_entity_id(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let first = LogoutCompleted::new(EntityId::try_new("https://idp.example.com/metadata")?);
+    let second = LogoutCompleted::new(EntityId::try_new("https://idp.example.com/metadata")?);
+    let other = LogoutCompleted::new(EntityId::try_new("https://other.example.com/metadata")?);
+
+    assert_eq!(first, second);
+    assert_ne!(first, other);
     Ok(())
 }
 

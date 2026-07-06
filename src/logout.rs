@@ -21,6 +21,20 @@ fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
         .unwrap_or_default()
 }
 
+struct LogoutRequestSubject<'a> {
+    name_id: &'a str,
+    session_indexes: Vec<&'a str>,
+}
+
+impl<'a> LogoutRequestSubject<'a> {
+    fn from_user(user: &'a User) -> Self {
+        Self {
+            name_id: &user.name_id,
+            session_indexes: user.session_index.as_deref().into_iter().collect(),
+        }
+    }
+}
+
 fn render_default_logout_response(
     setting: &EntitySetting,
     meta: &Metadata,
@@ -70,7 +84,7 @@ fn render_default_logout_request(
     id: &str,
     issue_instant: &str,
     destination: &str,
-    user: &User,
+    subject: &LogoutRequestSubject<'_>,
     name_id_format: &str,
 ) -> Result<String, SamlError> {
     validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
@@ -98,8 +112,12 @@ fn render_default_logout_request(
     let mut writer = XmlWriter::new();
     writer.start(&root_name, &attrs);
     writer.text_element(&issuer_name, &[], &issuer);
-    writer.text_element(&name_id_name, &[("Format", name_id_format)], &user.name_id);
-    if let Some(session_index) = user.session_index.as_deref() {
+    writer.text_element(
+        &name_id_name,
+        &[("Format", name_id_format)],
+        subject.name_id,
+    );
+    for session_index in &subject.session_indexes {
         writer.text_element(&session_index_name, &[], session_index);
     }
     writer.end(&root_name);
@@ -240,6 +258,75 @@ pub fn create_logout_request_with_id(
     want_signed: bool,
     message_id: Option<&str>,
 ) -> Result<BindingContext, SamlError> {
+    let name_id_format = init_setting
+        .name_id_format
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    let issue_instant = now_iso8601();
+    let subject = LogoutRequestSubject::from_user(user);
+    create_logout_request_for_subject_inner(
+        init_setting,
+        init_meta,
+        target_meta,
+        binding,
+        &subject,
+        relay_state,
+        want_signed,
+        message_id,
+        &name_id_format,
+        &issue_instant,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_logout_request_with_session_indexes(
+    init_setting: &EntitySetting,
+    init_meta: &Metadata,
+    target_meta: &Metadata,
+    binding: Binding,
+    name_id: &str,
+    session_indexes: &[String],
+    relay_state: Option<&str>,
+    want_signed: bool,
+) -> Result<BindingContext, SamlError> {
+    let name_id_format = init_setting
+        .name_id_format
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    let issue_instant = now_iso8601();
+    let subject = LogoutRequestSubject {
+        name_id,
+        session_indexes: session_indexes.iter().map(String::as_str).collect(),
+    };
+    create_logout_request_for_subject_inner(
+        init_setting,
+        init_meta,
+        target_meta,
+        binding,
+        &subject,
+        relay_state,
+        want_signed,
+        None,
+        &name_id_format,
+        &issue_instant,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_logout_request_for_subject_inner(
+    init_setting: &EntitySetting,
+    init_meta: &Metadata,
+    target_meta: &Metadata,
+    binding: Binding,
+    subject: &LogoutRequestSubject<'_>,
+    relay_state: Option<&str>,
+    want_signed: bool,
+    message_id: Option<&str>,
+    name_id_format: &str,
+    issue_instant: &str,
+) -> Result<BindingContext, SamlError> {
     let destination = target_meta
         .get_single_logout_service(binding)
         .ok_or_else(|| SamlError::MissingMetadata("SingleLogoutService".into()))?;
@@ -247,13 +334,12 @@ pub fn create_logout_request_with_id(
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(generate_id);
-    let name_id_format = init_setting
-        .name_id_format
-        .first()
-        .cloned()
-        .unwrap_or_default();
-    let issue_instant = now_iso8601();
     let xml = if let Some(template) = init_setting.logout_request_template.as_deref() {
+        if subject.session_indexes.len() > 1 {
+            return Err(SamlError::Unsupported(
+                "custom LogoutRequest templates cannot render multiple SessionIndex values".into(),
+            ));
+        }
         validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
         validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
         let template = apply_tag_prefixes(
@@ -265,12 +351,18 @@ pub fn create_logout_request_with_id(
             &template,
             &[
                 ("ID", Some(id.clone())),
-                ("IssueInstant", Some(issue_instant)),
+                ("IssueInstant", Some(issue_instant.to_string())),
                 ("Destination", Some(destination.clone())),
                 ("Issuer", Some(issuer_of(init_setting, init_meta))),
-                ("NameIDFormat", Some(name_id_format)),
-                ("NameID", Some(user.name_id.clone())),
-                ("SessionIndex", user.session_index.clone()),
+                ("NameIDFormat", Some(name_id_format.to_string())),
+                ("NameID", Some(subject.name_id.to_string())),
+                (
+                    "SessionIndex",
+                    subject
+                        .session_indexes
+                        .first()
+                        .map(|value| (*value).to_string()),
+                ),
             ],
         )
     } else {
@@ -278,10 +370,10 @@ pub fn create_logout_request_with_id(
             init_setting,
             init_meta,
             &id,
-            &issue_instant,
+            issue_instant,
             &destination,
-            user,
-            &name_id_format,
+            subject,
+            name_id_format,
         )?
     };
     let (context, signature, sig_alg) = if want_signed {

@@ -1,5 +1,6 @@
 #![cfg(feature = "crypto-bergshamra")]
 
+use saml_rs::binding::{base64_decode, base64_encode};
 use saml_rs::raw::FlowResult;
 use saml_rs::util::Value;
 use saml_rs::{
@@ -85,6 +86,24 @@ fn facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
     Ok((Saml::sp(sp_config()?)?, Saml::idp(idp_config()?)?))
 }
 
+fn compatibility_facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
+    let sp = Saml::sp(
+        SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+            .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
+            .slo_endpoint(SloEndpoint::post(SP_SLO_POST)?)
+            .validation(SpValidationPolicy::compatibility())
+            .build()?,
+    )?;
+    let idp = Saml::idp(
+        IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+            .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+            .slo_endpoint(SloEndpoint::post(IDP_SLO_POST)?)
+            .validation(IdpValidationPolicy::compatibility())
+            .build()?,
+    )?;
+    Ok((sp, idp))
+}
+
 fn descriptors(
     sp: &Saml<saml_rs::Sp>,
     idp: &Saml<saml_rs::Idp>,
@@ -118,6 +137,24 @@ fn validation() -> SamlValidationContext<'static> {
 
 fn post_fields<Message>(outbound: &Outbound<Message>) -> Result<Vec<FormField>, SamlError> {
     Ok(outbound.post_form()?.fields().to_vec())
+}
+
+fn post_form_value<'a>(
+    fields: &'a [FormField],
+    name: &str,
+) -> Result<&'a str, Box<dyn std::error::Error>> {
+    fields
+        .iter()
+        .find(|field| field.name() == name)
+        .map(FormField::value)
+        .ok_or_else(|| format!("missing {name}").into())
+}
+
+fn redirect_query<Message>(
+    outbound: &Outbound<Message>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let url = url::Url::parse(outbound.redirect_url()?)?;
+    Ok(url.query().unwrap_or_default().to_string())
 }
 
 struct SloExchange {
@@ -270,6 +307,35 @@ fn typed_facade_runs_sp_initiated_slo() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
+fn typed_facade_start_slo_renders_multiple_session_indexes(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let subject = LogoutSubject::new(
+        NameId::new("alice@example.com", None),
+        vec![
+            SessionIndex::try_new("_session123")?,
+            SessionIndex::try_new("_session456")?,
+        ],
+    );
+
+    let started = sp.start_slo(&idp_descriptor, subject, StartSlo::post())?;
+    let request_input = BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?);
+    let received = idp.receive_slo(&sp_descriptor, request_input, validation())?;
+
+    assert_eq!(
+        received
+            .message()
+            .session_indexes()
+            .iter()
+            .map(SessionIndex::as_str)
+            .collect::<Vec<_>>(),
+        vec!["_session123", "_session456"]
+    );
+    Ok(())
+}
+
+#[test]
 fn typed_facade_runs_idp_initiated_slo() -> Result<(), Box<dyn std::error::Error>> {
     let (sp, idp) = facades()?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
@@ -391,6 +457,117 @@ fn typed_facade_rejects_slo_relay_state_mismatch() -> Result<(), Box<dyn std::er
             Ok(())
         }
         other => Err(format!("expected RelayStateMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_rejects_duplicate_redirect_relay_state_on_finish_slo(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let relay_state = RelayStateParam::try_from_option(Some("logout-state".to_string()))?;
+    let started = sp.start_slo(
+        &idp_descriptor,
+        subject()?,
+        StartSlo::redirect().relay_state(relay_state.clone()),
+    )?;
+    let received = idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::redirect(redirect_query(&started.outbound)?),
+        validation(),
+    )?;
+    let response = idp.respond_slo(
+        &sp_descriptor,
+        &received,
+        RespondSlo::redirect().relay_state(relay_state),
+    )?;
+    let duplicate_query = format!(
+        "{}&RelayState=other-logout-state",
+        redirect_query(&response)?
+    );
+
+    match sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<LogoutResponse>::redirect(duplicate_query),
+        validation(),
+    ) {
+        Err(SamlError::Invalid(message)) => {
+            assert!(message.contains("duplicate RelayState"));
+            Ok(())
+        }
+        other => Err(format!("expected Invalid, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_receive_slo_rejects_destination_mismatch() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (sp, idp) = compatibility_facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = idp.start_slo(&sp_descriptor, subject()?, StartSlo::post())?;
+    let mut fields = post_fields(&started.outbound)?;
+    let request = post_form_value(&fields, "SAMLRequest")?.to_string();
+    let xml = String::from_utf8(base64_decode(&request)?)?.replace(
+        &format!("Destination=\"{SP_SLO_POST}\""),
+        "Destination=\"https://sp.example.com/slo/wrong\"",
+    );
+    for field in &mut fields {
+        if field.name() == "SAMLRequest" {
+            *field = FormField::new("SAMLRequest", base64_encode(xml.as_bytes()));
+        }
+    }
+
+    match sp.receive_slo(
+        &idp_descriptor,
+        BrowserInput::<LogoutRequest>::post(fields),
+        validation(),
+    ) {
+        Err(SamlError::DestinationMismatch { expected, actual }) => {
+            assert_eq!(expected, SP_SLO_POST);
+            assert_eq!(actual.as_deref(), Some("https://sp.example.com/slo/wrong"));
+            Ok(())
+        }
+        other => Err(format!("expected DestinationMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_finish_slo_rejects_destination_mismatch() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (sp, idp) = compatibility_facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let received = idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    )?;
+    let response = idp.respond_slo(&sp_descriptor, &received, RespondSlo::post())?;
+    let mut fields = post_fields(&response)?;
+    let response = post_form_value(&fields, "SAMLResponse")?.to_string();
+    let xml = String::from_utf8(base64_decode(&response)?)?.replace(
+        &format!("Destination=\"{SP_SLO_POST}\""),
+        "Destination=\"https://sp.example.com/slo/wrong\"",
+    );
+    for field in &mut fields {
+        if field.name() == "SAMLResponse" {
+            *field = FormField::new("SAMLResponse", base64_encode(xml.as_bytes()));
+        }
+    }
+
+    match sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<LogoutResponse>::post(fields),
+        validation(),
+    ) {
+        Err(SamlError::DestinationMismatch { expected, actual }) => {
+            assert_eq!(expected, SP_SLO_POST);
+            assert_eq!(actual.as_deref(), Some("https://sp.example.com/slo/wrong"));
+            Ok(())
+        }
+        other => Err(format!("expected DestinationMismatch, got {other:?}").into()),
     }
 }
 

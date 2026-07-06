@@ -23,8 +23,8 @@ use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
 use crate::idp::{IdentityProvider, LoginResponseOptions, LoginResponseOverrides};
 use crate::logout::{
-    create_logout_request, create_logout_response_checked, parse_logout_request_at,
-    parse_logout_response_at,
+    create_logout_request_with_session_indexes, create_logout_response_checked,
+    parse_logout_request_at, parse_logout_response_at,
 };
 use crate::metadata::{
     IdpMetadataConfig as RawIdpMetadataConfig, Metadata, SpMetadataConfig as RawSpMetadataConfig,
@@ -1043,6 +1043,11 @@ fn user_from_subject(subject: Subject) -> crate::entity::User {
     crate::entity::User::new(name_id)
 }
 
+struct TypedLogoutSubject {
+    name_id: String,
+    session_indexes: Vec<String>,
+}
+
 fn start_slo_impl(
     local_setting: &EntitySetting,
     local_metadata: &Metadata,
@@ -1052,13 +1057,14 @@ fn start_slo_impl(
     options: StartSlo,
 ) -> Result<Started<LogoutRequest>, SamlError> {
     options.relay_state.validate()?;
-    let user = user_from_logout_subject(subject)?;
-    let context = create_logout_request(
+    let subject = typed_logout_subject(subject);
+    let context = create_logout_request_with_session_indexes(
         local_setting,
         local_metadata,
         peer_metadata,
         options.binding.as_binding(),
-        &user,
+        &subject.name_id,
+        &subject.session_indexes,
         options.relay_state.as_deref(),
         logout_request_signing(local_setting, options.signing),
     )?;
@@ -1194,16 +1200,13 @@ fn ensure_logout_destination(
     ))
 }
 
-fn user_from_logout_subject(subject: LogoutSubject) -> Result<crate::entity::User, SamlError> {
-    if subject.session_indexes().len() > 1 {
-        return Err(SamlError::Unsupported(
-            "typed LogoutRequest currently supports one SessionIndex".into(),
-        ));
+fn typed_logout_subject(subject: LogoutSubject) -> TypedLogoutSubject {
+    TypedLogoutSubject {
+        name_id: subject.name_id().value().to_string(),
+        session_indexes: subject
+            .session_indexes()
+            .iter()
+            .map(|session_index| session_index.as_str().to_string())
+            .collect(),
     }
-    let mut user = crate::entity::User::new(subject.name_id().value().to_string());
-    user.session_index = subject
-        .session_indexes()
-        .first()
-        .map(|session_index| session_index.as_str().to_string());
-    Ok(user)
 }
