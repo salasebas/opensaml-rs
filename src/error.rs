@@ -97,6 +97,8 @@ pub enum TimeWindowField {
     SessionNotOnOrAfter,
     /// Assertion `Conditions` NotBefore/NotOnOrAfter window.
     Conditions,
+    /// Replay cache retention window could not be computed or has elapsed.
+    ReplayExpiration,
 }
 
 impl fmt::Display for TimeWindowField {
@@ -104,6 +106,7 @@ impl fmt::Display for TimeWindowField {
         match self {
             Self::SessionNotOnOrAfter => f.write_str("SessionNotOnOrAfter"),
             Self::Conditions => f.write_str("Conditions"),
+            Self::ReplayExpiration => f.write_str("ReplayExpiration"),
         }
     }
 }
@@ -206,6 +209,12 @@ pub enum SamlError {
     SubjectConfirmationInvalid {
         /// Stable validation reason for callers and logs.
         reason: SubjectConfirmationReason,
+    },
+    /// A duplicate SAML message or assertion key was detected.
+    #[error("replayed SAML message or assertion: {key}")]
+    ReplayDetected {
+        /// Replay cache key or duplicate identifier.
+        key: String,
     },
 
     // Signature / crypto validation.
