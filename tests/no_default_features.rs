@@ -11,9 +11,10 @@ use saml_rs::xml::{extract, ExtractorField};
 use saml_rs::{
     AcsEndpoint, AssertionSignaturePolicy, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
     CertificatePem, EntityId, IdentityProvider, IdpConfig, IdpDescriptor, IdpValidationPolicy,
-    LogoutSignaturePolicy, MessageSignaturePolicy, MetadataTrustPolicy, Saml, SamlError,
-    ServiceProvider, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, StartSso,
-    XmlEncryptionPolicy, XmlPolicy,
+    LogoutSignaturePolicy, LogoutSigning, LogoutSubject, MessageSignaturePolicy,
+    MetadataTrustPolicy, NameId, Saml, SamlError, ServiceProvider, SloEndpoint, SpConfig,
+    SpDescriptor, SpValidationPolicy, SsoEndpoint, StartSlo, StartSso, XmlEncryptionPolicy,
+    XmlPolicy,
 };
 
 fn idp_config(want_authn_requests_signed: bool) -> IdpMetadataConfig {
@@ -163,23 +164,64 @@ fn typed_config_builders_construct_protocol_only_without_default_crypto(
 }
 
 #[test]
-fn typed_facades_start_unsigned_sso_without_default_crypto(
+fn typed_facades_start_unsigned_sso_and_slo_without_default_crypto(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = Saml::sp(sp_config_builder()?.build()?)?;
-    let idp = Saml::idp(idp_config_builder()?.build()?)?;
+    let sp = Saml::sp(
+        sp_config_builder()?
+            .slo_endpoint(SloEndpoint::post("https://sp.example.com/slo")?)
+            .build()?,
+    )?;
+    let idp = Saml::idp(
+        idp_config_builder()?
+            .slo_endpoint(SloEndpoint::post("https://idp.example.com/slo")?)
+            .build()?,
+    )?;
     let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
         EntityId::try_new("https://idp.example.com/metadata")?,
         idp.metadata_xml(),
         MetadataTrustPolicy::UnsignedForCompatibility,
     )?;
 
-    let started = sp.start_sso(&idp_descriptor, StartSso::redirect())?;
-
-    assert!(started
+    let sso = sp.start_sso(&idp_descriptor, StartSso::redirect())?;
+    assert!(sso
         .outbound
         .redirect_url()?
         .starts_with("https://idp.example.com/sso"));
-    assert_eq!(started.pending.request_id(), started.outbound.id());
+    assert_eq!(sso.pending.request_id(), sso.outbound.id());
+
+    let slo = sp.start_slo(
+        &idp_descriptor,
+        LogoutSubject::from_name_id(NameId::new("user@example.com", None)),
+        StartSlo::post(),
+    )?;
+    assert!(slo.outbound.post_form()?.value("SAMLRequest").is_some());
+    Ok(())
+}
+
+#[test]
+fn typed_signed_logout_returns_unsupported_without_default_crypto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(
+        sp_config_builder()?
+            .slo_endpoint(SloEndpoint::post("https://sp.example.com/slo")?)
+            .build()?,
+    )?;
+    let idp = Saml::idp(
+        idp_config_builder()?
+            .slo_endpoint(SloEndpoint::post("https://idp.example.com/slo")?)
+            .build()?,
+    )?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+
+    assert_unsupported(sp.start_slo(
+        &idp_descriptor,
+        LogoutSubject::from_name_id(NameId::new("user@example.com", None)),
+        StartSlo::post().signing(LogoutSigning::Sign),
+    ));
     Ok(())
 }
 

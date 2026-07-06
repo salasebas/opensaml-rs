@@ -19,7 +19,7 @@ pub use attributes::{Attribute, AttributeValue, Attributes};
 pub use authn::AuthnRequest;
 pub use endpoint::EndpointUrl;
 pub use identifiers::{AssertionId, MessageId, SamlInstant, SessionIndex};
-pub use logout::{LogoutCompleted, LogoutRequest, LogoutResponse};
+pub use logout::{LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject};
 pub use received::Received;
 pub use relay::{RelayState, RelayStateParam, MAX_RELAY_STATE_BYTES};
 pub use session::AuthnSession;

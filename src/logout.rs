@@ -9,7 +9,9 @@ use crate::metadata::Metadata;
 use crate::template::{
     apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
 };
+use crate::xml::dom::parse_roots_with_limits;
 use crate::xml::write::XmlWriter;
+use time::OffsetDateTime;
 
 fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
     setting
@@ -17,6 +19,20 @@ fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
         .clone()
         .or_else(|| meta.get_entity_id().map(str::to_string))
         .unwrap_or_default()
+}
+
+struct LogoutRequestSubject<'a> {
+    name_id: &'a str,
+    session_indexes: Vec<&'a str>,
+}
+
+impl<'a> LogoutRequestSubject<'a> {
+    fn from_user(user: &'a User) -> Self {
+        Self {
+            name_id: &user.name_id,
+            session_indexes: user.session_index.as_deref().into_iter().collect(),
+        }
+    }
 }
 
 fn render_default_logout_response(
@@ -68,7 +84,7 @@ fn render_default_logout_request(
     id: &str,
     issue_instant: &str,
     destination: &str,
-    user: &User,
+    subject: &LogoutRequestSubject<'_>,
     name_id_format: &str,
 ) -> Result<String, SamlError> {
     validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
@@ -96,8 +112,12 @@ fn render_default_logout_request(
     let mut writer = XmlWriter::new();
     writer.start(&root_name, &attrs);
     writer.text_element(&issuer_name, &[], &issuer);
-    writer.text_element(&name_id_name, &[("Format", name_id_format)], &user.name_id);
-    if let Some(session_index) = user.session_index.as_deref() {
+    writer.text_element(
+        &name_id_name,
+        &[("Format", name_id_format)],
+        subject.name_id,
+    );
+    for session_index in &subject.session_indexes {
         writer.text_element(&session_index_name, &[], session_index);
     }
     writer.end(&root_name);
@@ -238,6 +258,75 @@ pub fn create_logout_request_with_id(
     want_signed: bool,
     message_id: Option<&str>,
 ) -> Result<BindingContext, SamlError> {
+    let name_id_format = init_setting
+        .name_id_format
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    let issue_instant = now_iso8601();
+    let subject = LogoutRequestSubject::from_user(user);
+    create_logout_request_for_subject_inner(
+        init_setting,
+        init_meta,
+        target_meta,
+        binding,
+        &subject,
+        relay_state,
+        want_signed,
+        message_id,
+        &name_id_format,
+        &issue_instant,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_logout_request_with_session_indexes(
+    init_setting: &EntitySetting,
+    init_meta: &Metadata,
+    target_meta: &Metadata,
+    binding: Binding,
+    name_id: &str,
+    session_indexes: &[String],
+    relay_state: Option<&str>,
+    want_signed: bool,
+) -> Result<BindingContext, SamlError> {
+    let name_id_format = init_setting
+        .name_id_format
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    let issue_instant = now_iso8601();
+    let subject = LogoutRequestSubject {
+        name_id,
+        session_indexes: session_indexes.iter().map(String::as_str).collect(),
+    };
+    create_logout_request_for_subject_inner(
+        init_setting,
+        init_meta,
+        target_meta,
+        binding,
+        &subject,
+        relay_state,
+        want_signed,
+        None,
+        &name_id_format,
+        &issue_instant,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_logout_request_for_subject_inner(
+    init_setting: &EntitySetting,
+    init_meta: &Metadata,
+    target_meta: &Metadata,
+    binding: Binding,
+    subject: &LogoutRequestSubject<'_>,
+    relay_state: Option<&str>,
+    want_signed: bool,
+    message_id: Option<&str>,
+    name_id_format: &str,
+    issue_instant: &str,
+) -> Result<BindingContext, SamlError> {
     let destination = target_meta
         .get_single_logout_service(binding)
         .ok_or_else(|| SamlError::MissingMetadata("SingleLogoutService".into()))?;
@@ -245,13 +334,12 @@ pub fn create_logout_request_with_id(
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(generate_id);
-    let name_id_format = init_setting
-        .name_id_format
-        .first()
-        .cloned()
-        .unwrap_or_default();
-    let issue_instant = now_iso8601();
     let xml = if let Some(template) = init_setting.logout_request_template.as_deref() {
+        if subject.session_indexes.len() > 1 {
+            return Err(SamlError::Unsupported(
+                "custom LogoutRequest templates cannot render multiple SessionIndex values".into(),
+            ));
+        }
         validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
         validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
         let template = apply_tag_prefixes(
@@ -263,12 +351,18 @@ pub fn create_logout_request_with_id(
             &template,
             &[
                 ("ID", Some(id.clone())),
-                ("IssueInstant", Some(issue_instant)),
+                ("IssueInstant", Some(issue_instant.to_string())),
                 ("Destination", Some(destination.clone())),
                 ("Issuer", Some(issuer_of(init_setting, init_meta))),
-                ("NameIDFormat", Some(name_id_format)),
-                ("NameID", Some(user.name_id.clone())),
-                ("SessionIndex", user.session_index.clone()),
+                ("NameIDFormat", Some(name_id_format.to_string())),
+                ("NameID", Some(subject.name_id.to_string())),
+                (
+                    "SessionIndex",
+                    subject
+                        .session_indexes
+                        .first()
+                        .map(|value| (*value).to_string()),
+                ),
             ],
         )
     } else {
@@ -276,10 +370,10 @@ pub fn create_logout_request_with_id(
             init_setting,
             init_meta,
             &id,
-            &issue_instant,
+            issue_instant,
             &destination,
-            user,
-            &name_id_format,
+            subject,
+            name_id_format,
         )?
     };
     let (context, signature, sig_alg) = if want_signed {
@@ -350,6 +444,54 @@ pub fn create_logout_response_with_id(
     want_signed: bool,
     message_id: Option<&str>,
 ) -> Result<BindingContext, SamlError> {
+    create_logout_response_inner(
+        init_setting,
+        init_meta,
+        target_meta,
+        binding,
+        in_response_to,
+        relay_state,
+        want_signed,
+        message_id,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_logout_response_checked(
+    init_setting: &EntitySetting,
+    init_meta: &Metadata,
+    target_meta: &Metadata,
+    binding: Binding,
+    in_response_to: Option<&str>,
+    relay_state: Option<&str>,
+    want_signed: bool,
+) -> Result<BindingContext, SamlError> {
+    create_logout_response_inner(
+        init_setting,
+        init_meta,
+        target_meta,
+        binding,
+        in_response_to,
+        relay_state,
+        want_signed,
+        None,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_logout_response_inner(
+    init_setting: &EntitySetting,
+    init_meta: &Metadata,
+    target_meta: &Metadata,
+    binding: Binding,
+    in_response_to: Option<&str>,
+    relay_state: Option<&str>,
+    want_signed: bool,
+    message_id: Option<&str>,
+    check_template_in_response_to: bool,
+) -> Result<BindingContext, SamlError> {
     if matches!(binding, Binding::Artifact) {
         return Err(SamlError::UnsupportedBinding {
             binding: Binding::Artifact,
@@ -395,6 +537,9 @@ pub fn create_logout_response_with_id(
             in_response_to,
         )?
     };
+    if check_template_in_response_to && init_setting.logout_response_template.is_some() {
+        validate_logout_response_in_response_to(&xml, in_response_to, init_setting.xml_limits)?;
+    }
     let (context, signature, sig_alg) = if want_signed {
         sign_logout(
             init_setting,
@@ -429,12 +574,65 @@ pub fn create_logout_response_with_id(
     })
 }
 
+fn validate_logout_response_in_response_to(
+    xml: &str,
+    expected: Option<&str>,
+    limits: crate::xml::XmlLimits,
+) -> Result<(), SamlError> {
+    let roots = parse_roots_with_limits(xml, limits)?;
+    let actual = roots
+        .iter()
+        .find(|node| node.local_name == "LogoutResponse")
+        .and_then(|node| node.attr("InResponseTo"))
+        .filter(|value| !value.is_empty());
+    if actual == expected {
+        return Ok(());
+    }
+    Err(SamlError::in_response_to_mismatch(expected, actual))
+}
+
 /// Parse a `<LogoutRequest>` from `from`.
 pub fn parse_logout_request(
     self_setting: &EntitySetting,
     from_meta: &Metadata,
     binding: Binding,
     request: &HttpRequest,
+) -> Result<FlowResult, SamlError> {
+    parse_logout_request_inner(
+        self_setting,
+        from_meta,
+        binding,
+        request,
+        None,
+        self_setting.clock_drifts,
+    )
+}
+
+pub(crate) fn parse_logout_request_at(
+    self_setting: &EntitySetting,
+    from_meta: &Metadata,
+    binding: Binding,
+    request: &HttpRequest,
+    now: OffsetDateTime,
+    clock_drifts: (i64, i64),
+) -> Result<FlowResult, SamlError> {
+    parse_logout_request_inner(
+        self_setting,
+        from_meta,
+        binding,
+        request,
+        Some(now),
+        clock_drifts,
+    )
+}
+
+fn parse_logout_request_inner(
+    self_setting: &EntitySetting,
+    from_meta: &Metadata,
+    binding: Binding,
+    request: &HttpRequest,
+    now: Option<OffsetDateTime>,
+    clock_drifts: (i64, i64),
 ) -> Result<FlowResult, SamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
     flow(
@@ -447,8 +645,8 @@ pub fn parse_logout_request(
             decrypt_key: None,
             decrypt_key_pass: None,
             allow_insecure_software_rsa_key_transport_decryption: false,
-            clock_drifts: self_setting.clock_drifts,
-            now: None,
+            clock_drifts,
+            now,
             redirect_inflate_max_bytes: self_setting.redirect_inflate_max_bytes,
             xml_limits: self_setting.xml_limits,
             expected_audience: None,
@@ -464,6 +662,8 @@ fn parse_logout_response_inner(
     binding: Binding,
     request: &HttpRequest,
     expected_in_response_to: Option<&str>,
+    now: Option<OffsetDateTime>,
+    clock_drifts: (i64, i64),
 ) -> Result<FlowResult, SamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
     flow(
@@ -476,8 +676,8 @@ fn parse_logout_response_inner(
             decrypt_key: None,
             decrypt_key_pass: None,
             allow_insecure_software_rsa_key_transport_decryption: false,
-            clock_drifts: self_setting.clock_drifts,
-            now: None,
+            clock_drifts,
+            now,
             redirect_inflate_max_bytes: self_setting.redirect_inflate_max_bytes,
             xml_limits: self_setting.xml_limits,
             expected_audience: None,
@@ -506,7 +706,38 @@ pub fn parse_logout_response(
     if request_id.is_empty() {
         return Err(SamlError::InvalidInResponseTo);
     }
-    parse_logout_response_inner(self_setting, from_meta, binding, request, Some(request_id))
+    parse_logout_response_inner(
+        self_setting,
+        from_meta,
+        binding,
+        request,
+        Some(request_id),
+        None,
+        self_setting.clock_drifts,
+    )
+}
+
+pub(crate) fn parse_logout_response_at(
+    self_setting: &EntitySetting,
+    from_meta: &Metadata,
+    binding: Binding,
+    request: &HttpRequest,
+    request_id: &str,
+    now: OffsetDateTime,
+    clock_drifts: (i64, i64),
+) -> Result<FlowResult, SamlError> {
+    if request_id.is_empty() {
+        return Err(SamlError::InvalidInResponseTo);
+    }
+    parse_logout_response_inner(
+        self_setting,
+        from_meta,
+        binding,
+        request,
+        Some(request_id),
+        Some(now),
+        clock_drifts,
+    )
 }
 
 /// Parse a `<LogoutResponse>` without binding it to a `LogoutRequest` ID.
@@ -520,7 +751,15 @@ pub fn parse_logout_response_without_request_id(
     binding: Binding,
     request: &HttpRequest,
 ) -> Result<FlowResult, SamlError> {
-    parse_logout_response_inner(self_setting, from_meta, binding, request, None)
+    parse_logout_response_inner(
+        self_setting,
+        from_meta,
+        binding,
+        request,
+        None,
+        None,
+        self_setting.clock_drifts,
+    )
 }
 
 #[cfg(test)]

@@ -10,8 +10,8 @@
 //! ```
 
 use crate::browser::{
-    AcsEndpoint, BrowserInput, Outbound, Pending, PendingAuthnRequest, SsoRequestBinding,
-    SsoResponseBinding, Started,
+    AcsEndpoint, BrowserInput, LogoutBinding, Outbound, Pending, PendingAuthnRequest,
+    PendingLogoutRequest, SsoRequestBinding, SsoResponseBinding, Started,
 };
 use crate::config::{
     AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, CertificatePem, EntityId, IdpConfig,
@@ -22,12 +22,16 @@ use crate::entity::EntitySetting;
 use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
 use crate::idp::{IdentityProvider, LoginResponseOptions, LoginResponseOverrides};
+use crate::logout::{
+    create_logout_request_with_session_indexes, create_logout_response_checked,
+    parse_logout_request_at, parse_logout_response_at,
+};
 use crate::metadata::{
-    IdpMetadataConfig as RawIdpMetadataConfig, SpMetadataConfig as RawSpMetadataConfig,
+    IdpMetadataConfig as RawIdpMetadataConfig, Metadata, SpMetadataConfig as RawSpMetadataConfig,
 };
 use crate::model::{
-    AuthnRequest, Received, RelayStateParam, SamlValidationContext, SsoResponse, SsoSession,
-    Subject,
+    AuthnRequest, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, Received,
+    RelayStateParam, SamlValidationContext, SsoResponse, SsoSession, Subject,
 };
 use crate::sp::{ExpectedLoginResponse, LoginRequestOptions, ServiceProvider};
 
@@ -188,6 +192,107 @@ impl RespondSso {
     /// encrypted assertions to the sound order required for verification.
     pub fn encrypt_then_sign(mut self) -> Self {
         self.encrypt_then_sign = true;
+        self
+    }
+}
+
+/// Explicit signing choice for typed Single Logout messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogoutSigning {
+    /// Use the local typed logout policy.
+    FollowPolicy,
+    /// Sign this logout message.
+    Sign,
+    /// Send unsigned logout for an explicit compatibility exception.
+    DoNotSignForCompatibility,
+}
+
+/// Options for issuing a LogoutRequest.
+#[derive(Debug, Clone)]
+pub struct StartSlo {
+    binding: LogoutBinding,
+    relay_state: RelayStateParam,
+    signing: LogoutSigning,
+}
+
+impl StartSlo {
+    /// Start SLO with HTTP-Redirect.
+    pub fn redirect() -> Self {
+        Self::new(LogoutBinding::Redirect)
+    }
+
+    /// Start SLO with HTTP-POST.
+    pub fn post() -> Self {
+        Self::new(LogoutBinding::Post)
+    }
+
+    /// Start SLO with HTTP-POST-SimpleSign.
+    pub fn simple_sign() -> Self {
+        Self::new(LogoutBinding::SimpleSign)
+    }
+
+    fn new(binding: LogoutBinding) -> Self {
+        Self {
+            binding,
+            relay_state: RelayStateParam::absent(),
+            signing: LogoutSigning::FollowPolicy,
+        }
+    }
+
+    /// Set exact RelayState state for the logout request.
+    pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
+        self.relay_state = relay_state;
+        self
+    }
+
+    /// Set logout request signing behavior.
+    pub fn signing(mut self, signing: LogoutSigning) -> Self {
+        self.signing = signing;
+        self
+    }
+}
+
+/// Options for issuing a LogoutResponse.
+#[derive(Debug, Clone)]
+pub struct RespondSlo {
+    binding: LogoutBinding,
+    relay_state: RelayStateParam,
+    signing: LogoutSigning,
+}
+
+impl RespondSlo {
+    /// Respond with HTTP-Redirect.
+    pub fn redirect() -> Self {
+        Self::new(LogoutBinding::Redirect)
+    }
+
+    /// Respond with HTTP-POST.
+    pub fn post() -> Self {
+        Self::new(LogoutBinding::Post)
+    }
+
+    /// Respond with HTTP-POST-SimpleSign.
+    pub fn simple_sign() -> Self {
+        Self::new(LogoutBinding::SimpleSign)
+    }
+
+    fn new(binding: LogoutBinding) -> Self {
+        Self {
+            binding,
+            relay_state: RelayStateParam::absent(),
+            signing: LogoutSigning::FollowPolicy,
+        }
+    }
+
+    /// Set exact RelayState state for the logout response.
+    pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
+        self.relay_state = relay_state;
+        self
+    }
+
+    /// Set logout response signing behavior.
+    pub fn signing(mut self, signing: LogoutSigning) -> Self {
+        self.signing = signing;
         self
     }
 }
@@ -379,6 +484,78 @@ impl Saml<Sp> {
         session.check_and_store_replay(&mut validation)?;
         Ok(session)
     }
+
+    /// Start SP-initiated Single Logout.
+    pub fn start_slo(
+        &self,
+        idp: &IdpDescriptor,
+        subject: LogoutSubject,
+        options: StartSlo,
+    ) -> Result<Started<LogoutRequest>, SamlError> {
+        let raw_idp = raw_idp_descriptor(idp)?;
+        start_slo_impl(
+            &self.raw_service_provider().setting,
+            &self.raw_service_provider().metadata,
+            idp.entity_id(),
+            &raw_idp.metadata,
+            subject,
+            options,
+        )
+    }
+
+    /// Receive an IdP LogoutRequest.
+    pub fn receive_slo(
+        &self,
+        idp: &IdpDescriptor,
+        input: BrowserInput<LogoutRequest>,
+        validation: SamlValidationContext<'_>,
+    ) -> Result<Received<LogoutRequest>, SamlError> {
+        let raw_idp = raw_idp_descriptor(idp)?;
+        receive_slo_impl(
+            &self.raw_service_provider().setting,
+            &self.raw_service_provider().metadata,
+            &raw_idp.metadata,
+            input,
+            validation,
+        )
+    }
+
+    /// Respond to a received IdP LogoutRequest.
+    pub fn respond_slo(
+        &self,
+        idp: &IdpDescriptor,
+        request: &Received<LogoutRequest>,
+        options: RespondSlo,
+    ) -> Result<Outbound<LogoutResponse>, SamlError> {
+        let raw_idp = raw_idp_descriptor(idp)?;
+        respond_slo_impl(
+            &self.raw_service_provider().setting,
+            &self.raw_service_provider().metadata,
+            &raw_idp.metadata,
+            request,
+            options,
+        )
+    }
+
+    /// Finish SP-initiated Single Logout using stored pending LogoutRequest state.
+    pub fn finish_slo(
+        &self,
+        idp: &IdpDescriptor,
+        pending: &PendingLogoutRequest,
+        input: BrowserInput<LogoutResponse>,
+        validation: SamlValidationContext<'_>,
+    ) -> Result<LogoutCompleted, SamlError> {
+        let raw_idp = raw_idp_descriptor(idp)?;
+        finish_slo_impl(
+            &self.raw_service_provider().setting,
+            &self.raw_service_provider().metadata,
+            idp.entity_id(),
+            &raw_idp.metadata,
+            pending,
+            input,
+            validation,
+        )
+    }
 }
 
 impl Saml<Idp> {
@@ -480,6 +657,105 @@ impl Saml<Idp> {
         options: RespondSso,
     ) -> Result<Outbound<SsoResponse>, SamlError> {
         self.issue_sso(sp, None, subject, options)
+    }
+
+    /// Start IdP-initiated Single Logout.
+    pub fn start_slo(
+        &self,
+        sp: &SpDescriptor,
+        subject: LogoutSubject,
+        options: StartSlo,
+    ) -> Result<Started<LogoutRequest>, SamlError> {
+        let raw_sp = raw_sp_descriptor(sp)?;
+        start_slo_impl(
+            &self.raw_identity_provider().setting,
+            &self.raw_identity_provider().metadata,
+            sp.entity_id(),
+            &raw_sp.metadata,
+            subject,
+            options,
+        )
+    }
+
+    /// Receive an SP LogoutRequest.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{
+    ///     BrowserInput, FormField, LogoutRequest, ReplayPolicy, RespondSlo, Saml,
+    ///     SamlValidationContext, SpDescriptor,
+    /// };
+    /// use time::OffsetDateTime;
+    ///
+    /// # fn respond(
+    /// #     idp: &Saml<saml_rs::Idp>,
+    /// #     sp: &SpDescriptor,
+    /// #     fields: Vec<FormField>,
+    /// # ) -> Result<(), saml_rs::SamlError> {
+    /// let validation = SamlValidationContext::new(
+    ///     OffsetDateTime::now_utc(),
+    ///     ReplayPolicy::DisabledForCompatibility,
+    /// );
+    /// let input = BrowserInput::<LogoutRequest>::post(fields);
+    /// let request = idp.receive_slo(sp, input, validation)?;
+    /// let response = idp.respond_slo(sp, &request, RespondSlo::post())?;
+    ///
+    /// let form = response.post_form()?;
+    /// # let _ = form;
+    /// # Ok(()) }
+    /// ```
+    pub fn receive_slo(
+        &self,
+        sp: &SpDescriptor,
+        input: BrowserInput<LogoutRequest>,
+        validation: SamlValidationContext<'_>,
+    ) -> Result<Received<LogoutRequest>, SamlError> {
+        let raw_sp = raw_sp_descriptor(sp)?;
+        receive_slo_impl(
+            &self.raw_identity_provider().setting,
+            &self.raw_identity_provider().metadata,
+            &raw_sp.metadata,
+            input,
+            validation,
+        )
+    }
+
+    /// Respond to a received SP LogoutRequest.
+    pub fn respond_slo(
+        &self,
+        sp: &SpDescriptor,
+        request: &Received<LogoutRequest>,
+        options: RespondSlo,
+    ) -> Result<Outbound<LogoutResponse>, SamlError> {
+        let raw_sp = raw_sp_descriptor(sp)?;
+        respond_slo_impl(
+            &self.raw_identity_provider().setting,
+            &self.raw_identity_provider().metadata,
+            &raw_sp.metadata,
+            request,
+            options,
+        )
+    }
+
+    /// Finish IdP-initiated Single Logout using stored pending LogoutRequest state.
+    pub fn finish_slo(
+        &self,
+        sp: &SpDescriptor,
+        pending: &PendingLogoutRequest,
+        input: BrowserInput<LogoutResponse>,
+        validation: SamlValidationContext<'_>,
+    ) -> Result<LogoutCompleted, SamlError> {
+        let raw_sp = raw_sp_descriptor(sp)?;
+        finish_slo_impl(
+            &self.raw_identity_provider().setting,
+            &self.raw_identity_provider().metadata,
+            sp.entity_id(),
+            &raw_sp.metadata,
+            pending,
+            input,
+            validation,
+        )
     }
 
     fn issue_sso(
@@ -765,4 +1041,172 @@ fn ensure_sso_response_binding(
 fn user_from_subject(subject: Subject) -> crate::entity::User {
     let name_id = subject.name_id().value().to_string();
     crate::entity::User::new(name_id)
+}
+
+struct TypedLogoutSubject {
+    name_id: String,
+    session_indexes: Vec<String>,
+}
+
+fn start_slo_impl(
+    local_setting: &EntitySetting,
+    local_metadata: &Metadata,
+    peer_entity_id: &EntityId,
+    peer_metadata: &Metadata,
+    subject: LogoutSubject,
+    options: StartSlo,
+) -> Result<Started<LogoutRequest>, SamlError> {
+    options.relay_state.validate()?;
+    let subject = typed_logout_subject(subject);
+    let context = create_logout_request_with_session_indexes(
+        local_setting,
+        local_metadata,
+        peer_metadata,
+        options.binding.as_binding(),
+        &subject.name_id,
+        &subject.session_indexes,
+        options.relay_state.as_deref(),
+        logout_request_signing(local_setting, options.signing),
+    )?;
+    let outbound = Outbound::<LogoutRequest>::try_from(context)?;
+    let pending = PendingLogoutRequest::try_new(
+        outbound.id().clone(),
+        options.relay_state,
+        options.binding,
+        peer_entity_id.clone(),
+    )?;
+    Ok(Started { pending, outbound })
+}
+
+fn receive_slo_impl(
+    local_setting: &EntitySetting,
+    local_metadata: &Metadata,
+    peer_metadata: &Metadata,
+    input: BrowserInput<LogoutRequest>,
+    validation: SamlValidationContext<'_>,
+) -> Result<Received<LogoutRequest>, SamlError> {
+    let binding = LogoutBinding::try_from(input_binding(&input))?;
+    let request = HttpRequest::try_from(input)?;
+    let flow = parse_logout_request_at(
+        local_setting,
+        peer_metadata,
+        binding.as_binding(),
+        &request,
+        validation.now(),
+        validation.clock_skew().as_millis(),
+    )?;
+    let logout = LogoutRequest::try_from(flow)?;
+    ensure_logout_destination(local_metadata, binding, logout.destination())?;
+    Ok(Received::new(logout))
+}
+
+fn respond_slo_impl(
+    local_setting: &EntitySetting,
+    local_metadata: &Metadata,
+    peer_metadata: &Metadata,
+    request: &Received<LogoutRequest>,
+    options: RespondSlo,
+) -> Result<Outbound<LogoutResponse>, SamlError> {
+    options.relay_state.validate()?;
+    let context = create_logout_response_checked(
+        local_setting,
+        local_metadata,
+        peer_metadata,
+        options.binding.as_binding(),
+        Some(request.message().id().as_str()),
+        options.relay_state.as_deref(),
+        logout_response_signing(local_setting, options.signing),
+    )?;
+    Outbound::<LogoutResponse>::try_from(context)
+}
+
+fn finish_slo_impl(
+    local_setting: &EntitySetting,
+    local_metadata: &Metadata,
+    peer_entity_id: &EntityId,
+    peer_metadata: &Metadata,
+    pending: &PendingLogoutRequest,
+    input: BrowserInput<LogoutResponse>,
+    validation: SamlValidationContext<'_>,
+) -> Result<LogoutCompleted, SamlError> {
+    ensure_entity_id(pending.peer_entity_id(), peer_entity_id)?;
+    ensure_logout_response_binding(input_binding(&input), pending.response_binding())?;
+    ensure_relay_state(pending.relay_state(), &relay_state_from_input(&input)?)?;
+    let request = HttpRequest::try_from(input)?;
+    let flow = parse_logout_response_at(
+        local_setting,
+        peer_metadata,
+        pending.response_binding().as_binding(),
+        &request,
+        pending.id().as_str(),
+        validation.now(),
+        validation.clock_skew().as_millis(),
+    )?;
+    let response = LogoutResponse::try_from(flow)?;
+    ensure_logout_destination(
+        local_metadata,
+        pending.response_binding(),
+        response.destination(),
+    )?;
+    Ok(LogoutCompleted::from_response(
+        peer_entity_id.clone(),
+        response,
+    ))
+}
+
+fn logout_request_signing(setting: &EntitySetting, signing: LogoutSigning) -> bool {
+    match signing {
+        LogoutSigning::FollowPolicy => setting.want_logout_request_signed,
+        LogoutSigning::Sign => true,
+        LogoutSigning::DoNotSignForCompatibility => false,
+    }
+}
+
+fn logout_response_signing(setting: &EntitySetting, signing: LogoutSigning) -> bool {
+    match signing {
+        LogoutSigning::FollowPolicy => setting.want_logout_response_signed,
+        LogoutSigning::Sign => true,
+        LogoutSigning::DoNotSignForCompatibility => false,
+    }
+}
+
+fn ensure_logout_response_binding(
+    actual: Binding,
+    expected: LogoutBinding,
+) -> Result<(), SamlError> {
+    if actual == expected.as_binding() {
+        return Ok(());
+    }
+    Err(Error::UnsupportedBinding { binding: actual })
+}
+
+fn ensure_logout_destination(
+    local_metadata: &Metadata,
+    binding: LogoutBinding,
+    actual: Option<&crate::model::EndpointUrl>,
+) -> Result<(), SamlError> {
+    let Some(actual) = actual else {
+        return Ok(());
+    };
+    let expected = local_metadata
+        .get_single_logout_service(binding.as_binding())
+        .ok_or_else(|| Error::MissingMetadata("SingleLogoutService".into()))?;
+    if actual.as_str() == expected {
+        return Ok(());
+    }
+    Err(Error::destination_mismatch(
+        &expected,
+        Some(actual.as_str()),
+    ))
+}
+
+fn typed_logout_subject(subject: LogoutSubject) -> TypedLogoutSubject {
+    TypedLogoutSubject {
+        name_id: subject.name_id().value().to_string(),
+        session_indexes: subject
+            .session_indexes()
+            .iter()
+            .map(|session_index| session_index.as_str().to_string())
+            .collect(),
+    }
 }

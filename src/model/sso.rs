@@ -7,7 +7,7 @@ use super::extract::{
 use super::identifiers::{AssertionId, MessageId, SamlInstant};
 use super::session::AuthnSession;
 use super::subject::{NameId, Subject};
-use super::{ReplayKey, ReplayPolicy, SamlValidationContext};
+use super::{LogoutSubject, ReplayKey, ReplayPolicy, SamlValidationContext};
 use crate::config::EntityId;
 use crate::error::{SamlError, TimeWindowField};
 use crate::raw::FlowResult;
@@ -183,6 +183,40 @@ impl SsoSession {
             self.issuer.clone(),
             self.subject.clone(),
         )
+    }
+
+    /// Subject data suitable for issuing Single Logout.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use saml_rs::{IdpDescriptor, Saml, SamlError, SsoSession, StartSlo};
+    ///
+    /// # fn logout(
+    /// #     sp: &Saml<saml_rs::Sp>,
+    /// #     idp: &IdpDescriptor,
+    /// #     session: &SsoSession,
+    /// # ) -> Result<(), SamlError> {
+    /// let subject = session
+    ///     .logout_subject()
+    ///     .ok_or_else(|| SamlError::Invalid("missing logout subject".into()))?;
+    /// let started = sp.start_slo(idp, subject, StartSlo::redirect())?;
+    ///
+    /// let redirect_url = started.outbound.redirect_url()?;
+    /// # let _ = redirect_url;
+    /// # Ok(()) }
+    /// ```
+    pub fn logout_subject(&self) -> Option<LogoutSubject> {
+        if self.name_id().value().trim().is_empty() {
+            return None;
+        }
+        let session_indexes = self
+            .authn_session
+            .session_index()
+            .cloned()
+            .into_iter()
+            .collect();
+        Some(LogoutSubject::new(self.name_id().clone(), session_indexes))
     }
 
     /// Replay keys available from this validated SSO session.
