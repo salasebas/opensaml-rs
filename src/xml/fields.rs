@@ -10,6 +10,8 @@ pub fn login_request_fields() -> Vec<ExtractorField> {
             "IssueInstant",
             "Destination",
             "AssertionConsumerServiceURL",
+            "ProtocolBinding",
+            "AssertionConsumerServiceIndex",
         ]),
         ExtractorField::new("issuer", &["AuthnRequest", "Issuer"]),
         ExtractorField::new("nameIDPolicy", &["AuthnRequest", "NameIDPolicy"])
@@ -71,6 +73,9 @@ pub fn login_response_fields(assertion: &str) -> Vec<ExtractorField> {
         .with_shortcut(assertion),
         ExtractorField::new("issuer", &["Assertion", "Issuer"]).with_shortcut(assertion),
         ExtractorField::new("nameID", &["Assertion", "Subject", "NameID"]).with_shortcut(assertion),
+        ExtractorField::new("nameIDFormat", &["Assertion", "Subject", "NameID"])
+            .attrs(&["Format"])
+            .with_shortcut(assertion),
         ExtractorField::new(
             "subjectConfirmation",
             &["Assertion", "Subject", "SubjectConfirmation"],

@@ -58,7 +58,19 @@ struct AuthnRequestXml<'a> {
 #[derive(Debug, Clone, Copy)]
 enum LoginResponseCorrelation<'a> {
     Unsolicited,
-    MessageId(&'a str),
+    MessageId {
+        request_id: &'a str,
+        expected_recipient: Option<&'a str>,
+    },
+}
+
+/// Expected response correlation fields for a solicited login response.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ExpectedLoginResponse<'a> {
+    /// AuthnRequest ID that the response must reference.
+    pub(crate) request_id: &'a str,
+    /// ACS URL that Destination and bearer Recipient must target.
+    pub(crate) recipient: &'a str,
 }
 
 fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
@@ -208,6 +220,25 @@ impl ServiceProvider {
         binding: Binding,
         options: &LoginRequestOptions<'_>,
     ) -> Result<BindingContext, SamlError> {
+        self.create_login_request_with_options_inner(idp, binding, options, false)
+    }
+
+    pub(crate) fn create_login_request_with_options_suppressing_default_relay_state(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        options: &LoginRequestOptions<'_>,
+    ) -> Result<BindingContext, SamlError> {
+        self.create_login_request_with_options_inner(idp, binding, options, true)
+    }
+
+    fn create_login_request_with_options_inner(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        options: &LoginRequestOptions<'_>,
+        suppress_default_relay_state: bool,
+    ) -> Result<BindingContext, SamlError> {
         if self.metadata.is_authn_request_signed() != idp.metadata.is_want_authn_requests_signed() {
             return Err(SamlError::Invalid(format!(
                 "ERR_METADATA_CONFLICT_REQUEST_SIGNED_FLAG: SP AuthnRequestsSigned={} but IdP WantAuthnRequestsSigned={}",
@@ -226,11 +257,17 @@ impl ServiceProvider {
             (None, _) => {
                 let uses_acs_index = options.assertion_consumer_service_index.is_some();
                 let response_binding = options.response_binding.unwrap_or(Binding::Post);
-                let acs_url = (!uses_acs_index).then(|| {
-                    self.metadata
-                        .get_assertion_consumer_service(response_binding)
-                        .unwrap_or_default()
-                });
+                let acs_url = if uses_acs_index {
+                    None
+                } else {
+                    Some(
+                        self.metadata
+                            .get_assertion_consumer_service(response_binding)
+                            .ok_or_else(|| {
+                                SamlError::MissingMetadata("AssertionConsumerService".into())
+                            })?,
+                    )
+                };
                 let protocol_binding =
                     (!uses_acs_index).then(|| response_binding.urn().to_string());
                 let acs_index = options
@@ -285,6 +322,7 @@ impl ServiceProvider {
         };
         let relay_state = match options.relay_state {
             Some(value) => Some(value.to_string()),
+            None if suppress_default_relay_state => None,
             None => {
                 (!self.setting.relay_state.is_empty()).then(|| self.setting.relay_state.clone())
             }
@@ -490,29 +528,35 @@ impl ServiceProvider {
             idp,
             binding,
             request,
-            LoginResponseCorrelation::MessageId(request_id),
+            LoginResponseCorrelation::MessageId {
+                request_id,
+                expected_recipient: None,
+            },
             None,
             self.setting.clock_drifts,
         )
     }
 
-    pub(crate) fn parse_login_response_with_request_id_at(
+    pub(crate) fn parse_login_response_with_request_id_and_recipient_at(
         &self,
         idp: &IdentityProvider,
         binding: Binding,
         request: &HttpRequest,
-        request_id: &str,
+        expected: ExpectedLoginResponse<'_>,
         now: OffsetDateTime,
         clock_drifts: (i64, i64),
     ) -> Result<FlowResult, SamlError> {
-        if request_id.is_empty() {
+        if expected.request_id.is_empty() {
             return Err(SamlError::InvalidInResponseTo);
         }
         self.parse_login_response_inner(
             idp,
             binding,
             request,
-            LoginResponseCorrelation::MessageId(request_id),
+            LoginResponseCorrelation::MessageId {
+                request_id: expected.request_id,
+                expected_recipient: Some(expected.recipient),
+            },
             Some(now),
             clock_drifts,
         )
@@ -535,13 +579,21 @@ impl ServiceProvider {
         };
         let audience = self.entity_id();
         let expected_in_response_to = match correlation {
-            LoginResponseCorrelation::MessageId(request_id) => Some(request_id),
+            LoginResponseCorrelation::MessageId { request_id, .. } => Some(request_id),
             LoginResponseCorrelation::Unsolicited => None,
         };
-        let recipient = self
-            .metadata
-            .get_assertion_consumer_service(binding)
-            .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?;
+        let recipient = match match correlation {
+            LoginResponseCorrelation::MessageId {
+                expected_recipient, ..
+            } => expected_recipient,
+            LoginResponseCorrelation::Unsolicited => None,
+        } {
+            Some(recipient) => recipient.to_string(),
+            None => self
+                .metadata
+                .get_assertion_consumer_service(binding)
+                .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?,
+        };
         let result = flow_with_expected_recipient(
             &FlowOptions {
                 binding: Some(binding),

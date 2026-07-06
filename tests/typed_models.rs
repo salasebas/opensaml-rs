@@ -9,8 +9,9 @@ use saml_rs::{raw::LoginResponseOptions, raw::User};
 use saml_rs::{
     AcsEndpoint, AuthnRequest, BrowserInput, EndpointUrl, EntitySetting, FormField,
     IdentityProvider, LogoutRequest, LogoutResponse, MessageId, NameIdCreationRequest,
-    NameIdPolicy, Outbound, PendingAuthnRequest, RelayState, RelayStateParam, SamlError,
-    SamlInstant, ServiceProvider, SsoRequestBinding, SsoResponse, SsoResponseBinding, SsoSession,
+    NameIdFormat, NameIdPolicy, Outbound, PendingAuthnRequest, RelayState, RelayStateParam,
+    SamlError, SamlInstant, ServiceProvider, SsoRequestBinding, SsoResponse, SsoResponseBinding,
+    SsoSession,
 };
 
 const IDP_PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
@@ -712,6 +713,11 @@ fn typed_models_authn_request_from_flow_result_exposes_typed_fields(
                         "assertionConsumerServiceUrl",
                         value_str("https://sp.example.com/acs"),
                     ),
+                    (
+                        "protocolBinding",
+                        value_str("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"),
+                    ),
+                    ("assertionConsumerServiceIndex", value_str("3")),
                 ]),
             ),
             ("issuer", value_str("https://sp.example.com/metadata")),
@@ -740,6 +746,8 @@ fn typed_models_authn_request_from_flow_result_exposes_typed_fields(
         request.acs_url().map(EndpointUrl::as_str),
         Some("https://sp.example.com/acs")
     );
+    assert_eq!(request.protocol_binding(), Some(SsoResponseBinding::Post));
+    assert_eq!(request.acs_index(), Some(3));
     assert_eq!(
         request
             .name_id_policy()
@@ -867,6 +875,10 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
             ("issuer", value_str("https://idp.example.com/metadata")),
             ("nameID", value_str("alice@example.com")),
             (
+                "nameIDFormat",
+                value_str("urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"),
+            ),
+            (
                 "attributes",
                 value_object(vec![(
                     "eduPersonAffiliation",
@@ -909,6 +921,7 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
         Some("_assertion123")
     );
     assert_eq!(session.name_id().value(), "alice@example.com");
+    assert_eq!(session.name_id().format(), Some(&NameIdFormat::Persistent));
     assert_eq!(
         affiliation
             .values()

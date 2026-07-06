@@ -32,6 +32,17 @@ pub(super) fn optional_endpoint(
     extract.get_str(path).map(EndpointUrl::try_new).transpose()
 }
 
+pub(super) fn optional_u16(extract: &Value, path: &str) -> Result<Option<u16>, SamlError> {
+    extract
+        .get_str(path)
+        .map(|value| {
+            value.parse::<u16>().map_err(|_| {
+                SamlError::Invalid(format!("{path} must be an unsigned 16-bit integer"))
+            })
+        })
+        .transpose()
+}
+
 pub(super) fn optional_instant(
     extract: &Value,
     path: &str,
@@ -62,7 +73,7 @@ fn parse_bool(value: &str) -> Result<bool, SamlError> {
     }
 }
 
-fn name_id_format_from_uri(uri: &str) -> NameIdFormat {
+pub(super) fn name_id_format_from_uri(uri: &str) -> NameIdFormat {
     match uri {
         name_id_format::EMAIL_ADDRESS => NameIdFormat::EmailAddress,
         name_id_format::PERSISTENT => NameIdFormat::Persistent,

@@ -21,7 +21,7 @@ use crate::constants::Binding;
 use crate::entity::EntitySetting;
 use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
-use crate::idp::{IdentityProvider, LoginResponseOptions};
+use crate::idp::{IdentityProvider, LoginResponseOptions, LoginResponseOverrides};
 use crate::metadata::{
     IdpMetadataConfig as RawIdpMetadataConfig, SpMetadataConfig as RawSpMetadataConfig,
 };
@@ -29,7 +29,7 @@ use crate::model::{
     AuthnRequest, Received, RelayStateParam, SamlValidationContext, SsoResponse, SsoSession,
     Subject,
 };
-use crate::sp::{LoginRequestOptions, ServiceProvider};
+use crate::sp::{ExpectedLoginResponse, LoginRequestOptions, ServiceProvider};
 
 /// Typed SAML facade for high-level browser SSO/SLO flows.
 pub struct Saml<Role = Unknown>(Role);
@@ -50,11 +50,33 @@ pub struct Idp {
 /// Error type returned by the typed SAML API.
 pub type SamlError = Error;
 
+#[derive(Debug, Clone, Copy)]
+enum RequestedResponseBinding {
+    DefaultPost,
+    Explicit(SsoResponseBinding),
+}
+
+impl RequestedResponseBinding {
+    fn binding(self) -> SsoResponseBinding {
+        match self {
+            Self::DefaultPost => SsoResponseBinding::Post,
+            Self::Explicit(binding) => binding,
+        }
+    }
+
+    fn explicit(self) -> Option<SsoResponseBinding> {
+        match self {
+            Self::DefaultPost => None,
+            Self::Explicit(binding) => Some(binding),
+        }
+    }
+}
+
 /// Options for starting SP-initiated Web SSO.
 #[derive(Debug, Clone)]
 pub struct StartSso {
     binding: SsoRequestBinding,
-    response_binding: SsoResponseBinding,
+    response_binding: RequestedResponseBinding,
     relay_state: RelayStateParam,
     force_authn: Option<bool>,
     acs_index: Option<u16>,
@@ -79,7 +101,7 @@ impl StartSso {
     fn new(binding: SsoRequestBinding) -> Self {
         Self {
             binding,
-            response_binding: SsoResponseBinding::Post,
+            response_binding: RequestedResponseBinding::DefaultPost,
             relay_state: RelayStateParam::absent(),
             force_authn: None,
             acs_index: None,
@@ -88,7 +110,7 @@ impl StartSso {
 
     /// Set the expected SAML Response binding.
     pub fn response_binding(mut self, binding: SsoResponseBinding) -> Self {
-        self.response_binding = binding;
+        self.response_binding = RequestedResponseBinding::Explicit(binding);
         self
     }
 
@@ -104,6 +126,22 @@ impl StartSso {
         self
     }
 
+    /// Emit `ForceAuthn="true"`.
+    pub fn force_authn_required(self) -> Self {
+        self.force_authn(true)
+    }
+
+    /// Emit `ForceAuthn="false"`.
+    pub fn force_authn_not_required(self) -> Self {
+        self.force_authn(false)
+    }
+
+    /// Omit `ForceAuthn`.
+    pub fn force_authn_omitted(mut self) -> Self {
+        self.force_authn = None;
+        self
+    }
+
     /// Select an AssertionConsumerServiceIndex.
     pub fn acs_index(mut self, acs_index: u16) -> Self {
         self.acs_index = Some(acs_index);
@@ -115,7 +153,7 @@ impl StartSso {
 #[derive(Debug, Clone)]
 pub struct RespondSso {
     binding: SsoResponseBinding,
-    relay_state: RelayStateParam,
+    relay_state: Option<RelayStateParam>,
     encrypt_then_sign: bool,
 }
 
@@ -133,18 +171,21 @@ impl RespondSso {
     fn new(binding: SsoResponseBinding) -> Self {
         Self {
             binding,
-            relay_state: RelayStateParam::absent(),
+            relay_state: None,
             encrypt_then_sign: false,
         }
     }
 
     /// Set exact RelayState state for the response.
     pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
-        self.relay_state = relay_state;
+        self.relay_state = Some(relay_state);
         self
     }
 
-    /// Use encrypt-then-sign for encrypted responses.
+    /// Request encrypt-then-sign ordering for encrypted responses.
+    ///
+    /// The raw response builder already resolves message signatures over
+    /// encrypted assertions to the sound order required for verification.
     pub fn encrypt_then_sign(mut self) -> Self {
         self.encrypt_then_sign = true;
         self
@@ -176,6 +217,10 @@ impl Saml<Sp> {
     }
 
     /// Raw compatibility Service Provider.
+    ///
+    /// This is an escape hatch for compatibility and advanced integrations. It
+    /// bypasses the typed facade invariants enforced by methods such as
+    /// [`Self::start_sso`] and [`Self::finish_sso`].
     pub fn raw_service_provider(&self) -> &ServiceProvider {
         &self.0.service_provider
     }
@@ -221,31 +266,32 @@ impl Saml<Sp> {
     ) -> Result<Started<AuthnRequest>, SamlError> {
         options.relay_state.validate()?;
         let raw_idp = raw_idp_descriptor(idp)?;
-        let raw_options = LoginRequestOptions {
-            relay_state: options.relay_state.as_deref(),
-            force_authn: options.force_authn,
-            assertion_consumer_service_index: options.acs_index,
-            response_binding: Some(options.response_binding.as_binding()),
-            ..Default::default()
-        };
-        let context = self
-            .raw_service_provider()
-            .create_login_request_with_options(
-                &raw_idp,
-                options.binding.as_binding(),
-                &raw_options,
-            )?;
-        let outbound = Outbound::<AuthnRequest>::try_from(context)?;
         let acs = selected_acs(
             self.raw_service_provider(),
             options.response_binding,
             options.acs_index,
         )?;
+        let response_binding = acs.binding();
+        let raw_options = LoginRequestOptions {
+            relay_state: options.relay_state.as_deref(),
+            force_authn: options.force_authn,
+            assertion_consumer_service_index: options.acs_index,
+            response_binding: Some(response_binding.as_binding()),
+            ..Default::default()
+        };
+        let context = self
+            .raw_service_provider()
+            .create_login_request_with_options_suppressing_default_relay_state(
+                &raw_idp,
+                options.binding.as_binding(),
+                &raw_options,
+            )?;
+        let outbound = Outbound::<AuthnRequest>::try_from(context)?;
         let pending = Pending::<AuthnRequest>::try_new(
             outbound.id().clone(),
             options.relay_state,
             acs,
-            options.response_binding,
+            response_binding,
             idp.entity_id().clone(),
         )?
         .with_request_binding(options.binding);
@@ -294,11 +340,14 @@ impl Saml<Sp> {
         let request = HttpRequest::try_from(input)?;
         let flow = self
             .raw_service_provider()
-            .parse_login_response_with_request_id_at(
+            .parse_login_response_with_request_id_and_recipient_at(
                 &raw_idp,
                 pending.response_binding().as_binding(),
                 &request,
-                pending.request_id().as_str(),
+                ExpectedLoginResponse {
+                    request_id: pending.request_id().as_str(),
+                    recipient: pending.acs().location().as_str(),
+                },
                 validation.now(),
                 validation.clock_skew().as_millis(),
             )?;
@@ -339,6 +388,10 @@ impl Saml<Idp> {
     }
 
     /// Raw compatibility Identity Provider.
+    ///
+    /// This is an escape hatch for compatibility and advanced integrations. It
+    /// bypasses the typed facade invariants enforced by methods such as
+    /// [`Self::receive_sso`] and [`Self::respond_sso`].
     pub fn raw_identity_provider(&self) -> &IdentityProvider {
         &self.0.identity_provider
     }
@@ -376,9 +429,10 @@ impl Saml<Idp> {
         &self,
         sp: &SpDescriptor,
         input: BrowserInput<AuthnRequest>,
-        validation: SamlValidationContext<'_>,
+        mut validation: SamlValidationContext<'_>,
     ) -> Result<Received<AuthnRequest>, SamlError> {
         let binding = SsoRequestBinding::try_from(input_binding(&input))?;
+        let relay_state = relay_state_from_input(&input)?;
         let raw_sp = raw_sp_descriptor(sp)?;
         let request = HttpRequest::try_from(input)?;
         let flow = self.raw_identity_provider().parse_login_request_at(
@@ -402,7 +456,8 @@ impl Saml<Idp> {
                 ));
             }
         }
-        Ok(Received::new(authn))
+        authn.check_and_store_replay(&mut validation)?;
+        Ok(Received::with_relay_state(authn, relay_state))
     }
 
     /// Respond to a received SP AuthnRequest.
@@ -413,7 +468,8 @@ impl Saml<Idp> {
         subject: Subject,
         options: RespondSso,
     ) -> Result<Outbound<SsoResponse>, SamlError> {
-        self.issue_sso(sp, Some(request.message().id().as_str()), subject, options)
+        ensure_entity_id(request.message().issuer(), sp.entity_id())?;
+        self.issue_sso(sp, Some(request), subject, options)
     }
 
     /// Initiate IdP-initiated SSO.
@@ -429,25 +485,42 @@ impl Saml<Idp> {
     fn issue_sso(
         &self,
         sp: &SpDescriptor,
-        in_response_to: Option<&str>,
+        request: Option<&Received<AuthnRequest>>,
         subject: Subject,
         options: RespondSso,
     ) -> Result<Outbound<SsoResponse>, SamlError> {
-        options.relay_state.validate()?;
+        let relay_state = options.relay_state.clone().unwrap_or_else(|| {
+            request.map_or_else(RelayStateParam::absent, |r| r.relay_state().clone())
+        });
+        relay_state.validate()?;
         let raw_sp = raw_sp_descriptor(sp)?;
+        let (binding, explicit_acs) = match request {
+            Some(request) => response_target(&raw_sp, request.message(), options.binding)?,
+            None => (options.binding, None),
+        };
+        let name_id_format = subject
+            .name_id()
+            .format()
+            .map(|format| format.as_uri().to_string());
         let user = user_from_subject(subject);
         let raw_options = LoginResponseOptions {
-            in_response_to,
-            relay_state: options.relay_state.as_deref(),
+            in_response_to: request.map(|request| request.message().id().as_str()),
+            relay_state: relay_state.as_deref(),
             encrypt_then_sign: options.encrypt_then_sign,
             custom: None,
         };
-        let context = self.raw_identity_provider().create_login_response(
-            &raw_sp,
-            options.binding.as_binding(),
-            &user,
-            &raw_options,
-        )?;
+        let context = self
+            .raw_identity_provider()
+            .create_login_response_with_overrides(
+                &raw_sp,
+                binding.as_binding(),
+                &user,
+                &raw_options,
+                LoginResponseOverrides {
+                    acs: explicit_acs.as_deref(),
+                    name_id_format: name_id_format.as_deref(),
+                },
+            )?;
         Outbound::<SsoResponse>::try_from(context)
     }
 }
@@ -532,18 +605,91 @@ fn raw_sp_descriptor(sp: &SpDescriptor) -> Result<ServiceProvider, SamlError> {
 
 fn selected_acs(
     sp: &ServiceProvider,
-    binding: SsoResponseBinding,
+    requested_binding: RequestedResponseBinding,
     index: Option<u16>,
 ) -> Result<AcsEndpoint, SamlError> {
-    let location = sp
-        .metadata
-        .get_assertion_consumer_service(binding.as_binding())
-        .ok_or_else(|| Error::MissingMetadata("AssertionConsumerService".into()))?;
-    let mut acs = AcsEndpoint::new(binding, crate::model::EndpointUrl::try_new(location)?);
     if let Some(index) = index {
-        acs = acs.with_index(index);
+        let endpoint = sp
+            .metadata
+            .get_assertion_consumer_service_by_index(index)?
+            .ok_or_else(|| Error::MissingMetadata("AssertionConsumerService".into()))?;
+        let binding = SsoResponseBinding::try_from(endpoint.binding)?;
+        if let Some(explicit) = requested_binding.explicit() {
+            if explicit != binding {
+                return Err(Error::Invalid(
+                    "requested response binding conflicts with ACS index".into(),
+                ));
+            }
+        }
+        return Ok(AcsEndpoint::new(
+            binding,
+            crate::model::EndpointUrl::try_new(endpoint.location)?,
+        )
+        .with_index(index)
+        .with_default_flag(endpoint.is_default));
     }
-    Ok(acs)
+
+    let binding = requested_binding.binding();
+    let endpoint = sp
+        .metadata
+        .get_assertion_consumer_service_endpoint(binding.as_binding())
+        .ok_or_else(|| Error::MissingMetadata("AssertionConsumerService".into()))?;
+    Ok(AcsEndpoint::new(
+        binding,
+        crate::model::EndpointUrl::try_new(endpoint.location)?,
+    )
+    .with_default_flag(endpoint.is_default))
+}
+
+fn response_target(
+    sp: &ServiceProvider,
+    request: &AuthnRequest,
+    selected_binding: SsoResponseBinding,
+) -> Result<(SsoResponseBinding, Option<String>), SamlError> {
+    if request.acs_url().is_some() && request.acs_index().is_some() {
+        return Err(Error::Invalid(
+            "AuthnRequest must not specify both ACS URL and ACS index".into(),
+        ));
+    }
+    if let Some(protocol_binding) = request.protocol_binding() {
+        if protocol_binding != selected_binding {
+            return Err(Error::Invalid(
+                "response binding conflicts with AuthnRequest ProtocolBinding".into(),
+            ));
+        }
+    }
+    let binding = request.protocol_binding().unwrap_or(selected_binding);
+
+    if let Some(acs_url) = request.acs_url() {
+        if !sp
+            .metadata
+            .has_assertion_consumer_service(binding.as_binding(), acs_url.as_str())
+        {
+            return Err(Error::destination_mismatch(
+                acs_url.as_str(),
+                sp.metadata
+                    .get_assertion_consumer_service(binding.as_binding())
+                    .as_deref(),
+            ));
+        }
+        return Ok((binding, Some(acs_url.as_str().to_string())));
+    }
+
+    if let Some(index) = request.acs_index() {
+        let endpoint = sp
+            .metadata
+            .get_assertion_consumer_service_by_index(index)?
+            .ok_or_else(|| Error::MissingMetadata("AssertionConsumerService".into()))?;
+        let indexed_binding = SsoResponseBinding::try_from(endpoint.binding)?;
+        if indexed_binding != binding {
+            return Err(Error::Invalid(
+                "response binding conflicts with AuthnRequest ACS index".into(),
+            ));
+        }
+        return Ok((binding, Some(endpoint.location)));
+    }
+
+    Ok((binding, None))
 }
 
 fn input_binding<Message>(input: &BrowserInput<Message>) -> Binding {
@@ -559,16 +705,25 @@ fn relay_state_from_input<Message>(
 ) -> Result<RelayStateParam, SamlError> {
     match input {
         BrowserInput::Redirect { raw_query, .. } => {
-            let value = url::form_urlencoded::parse(raw_query.trim_start_matches('?').as_bytes())
-                .find(|(name, _)| name == "RelayState")
-                .map(|(_, value)| value.into_owned());
+            let mut values =
+                url::form_urlencoded::parse(raw_query.trim_start_matches('?').as_bytes())
+                    .filter(|(name, _)| name == "RelayState")
+                    .map(|(_, value)| value.into_owned());
+            let value = values.next();
+            if values.next().is_some() {
+                return Err(Error::Invalid("duplicate RelayState".into()));
+            }
             RelayStateParam::try_from_option(value)
         }
         BrowserInput::Post { fields, .. } | BrowserInput::SimpleSignPost { fields, .. } => {
-            let value = fields
+            let mut values = fields
                 .iter()
-                .find(|field| field.name() == "RelayState")
+                .filter(|field| field.name() == "RelayState")
                 .map(|field| field.value().to_string());
+            let value = values.next();
+            if values.next().is_some() {
+                return Err(Error::Invalid("duplicate RelayState".into()));
+            }
             RelayStateParam::try_from_option(value)
         }
     }

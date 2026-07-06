@@ -1,7 +1,8 @@
 use super::attributes::Attributes;
 use super::extract::{
-    attributes_from_extract, authn_session_from_extract, entity_ids_from_value, optional_instant,
-    optional_request_id, required_str, subject_confirmations_from_extract,
+    attributes_from_extract, authn_session_from_extract, entity_ids_from_value,
+    name_id_format_from_uri, optional_instant, optional_request_id, required_str,
+    subject_confirmations_from_extract,
 };
 use super::identifiers::{AssertionId, MessageId, SamlInstant};
 use super::session::AuthnSession;
@@ -296,7 +297,11 @@ impl TryFrom<FlowResult> for SsoSession {
         let assertion_id = AssertionId::try_new(required_str(&raw_flow.extract, "assertion.id")?)?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let in_response_to = optional_request_id(&raw_flow.extract, "response.inResponseTo")?;
-        let name_id = NameId::new(required_str(&raw_flow.extract, "nameID")?, None);
+        let name_id_format = raw_flow
+            .extract
+            .get_str("nameIDFormat")
+            .map(name_id_format_from_uri);
+        let name_id = NameId::new(required_str(&raw_flow.extract, "nameID")?, name_id_format);
         let subject = Subject::new(
             name_id,
             subject_confirmations_from_extract(&raw_flow.extract),

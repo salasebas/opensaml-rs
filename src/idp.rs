@@ -26,10 +26,19 @@ pub struct LoginResponseOptions<'a> {
     pub in_response_to: Option<&'a str>,
     /// RelayState to echo back to the SP.
     pub relay_state: Option<&'a str>,
-    /// Encrypt-then-sign instead of the default sign-then-encrypt.
+    /// Request encrypt-then-sign ordering for encrypted responses.
+    ///
+    /// When message-signing encrypted assertions, the implementation resolves
+    /// to the sound order required for verifiable signatures.
     pub encrypt_then_sign: bool,
     /// Custom template rendering hook.
     pub custom: Option<CustomTagReplacement<'a>>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct LoginResponseOverrides<'a> {
+    pub(crate) acs: Option<&'a str>,
+    pub(crate) name_id_format: Option<&'a str>,
 }
 
 /// A SAML 2.0 Identity Provider: runtime [`EntitySetting`] plus parsed [`IdpMetadata`].
@@ -88,6 +97,7 @@ impl IdentityProvider {
         in_response_to: Option<&str>,
         user: &User,
         acs: &str,
+        name_id_format: Option<&str>,
         custom: Option<CustomTagReplacement<'_>>,
     ) -> Result<(String, String), SamlError> {
         validate_tag_prefix("protocol", &self.setting.tag_prefix_protocol)?;
@@ -98,12 +108,13 @@ impl IdentityProvider {
         if custom.is_none() && !has_custom_context {
             let now = now_iso8601();
             let later = iso8601_offset(300);
-            let name_id_format = self
+            let default_name_id_format = self
                 .setting
                 .name_id_format
                 .first()
                 .cloned()
                 .unwrap_or_default();
+            let name_id_format = name_id_format.unwrap_or(default_name_id_format.as_str());
             let id = generate_id();
             let assertion_id = generate_id();
             let audience = sp.metadata.get_entity_id().unwrap_or_default().to_string();
@@ -123,7 +134,7 @@ impl IdentityProvider {
                 conditions_not_before: &now,
                 conditions_not_on_or_after: &later,
                 audience: &audience,
-                name_id_format: &name_id_format,
+                name_id_format,
                 name_id: &user.name_id,
                 in_response_to,
                 attributes,
@@ -155,12 +166,13 @@ impl IdentityProvider {
         }
         let now = now_iso8601();
         let later = iso8601_offset(300);
-        let name_id_format = self
+        let default_name_id_format = self
             .setting
             .name_id_format
             .first()
             .cloned()
             .unwrap_or_default();
+        let name_id_format = name_id_format.unwrap_or(default_name_id_format.as_str());
         let id = generate_id();
         let mut tags: Vec<(&str, String)> = vec![
             ("ID", id.clone()),
@@ -178,7 +190,7 @@ impl IdentityProvider {
             ("ConditionsNotBefore", now),
             ("ConditionsNotOnOrAfter", later.clone()),
             ("SubjectConfirmationDataNotOnOrAfter", later),
-            ("NameIDFormat", name_id_format),
+            ("NameIDFormat", name_id_format.to_string()),
             ("NameID", user.name_id.clone()),
             (
                 "InResponseTo",
@@ -212,17 +224,54 @@ impl IdentityProvider {
         user: &User,
         options: &LoginResponseOptions<'_>,
     ) -> Result<BindingContext, SamlError> {
+        self.create_login_response_inner(
+            sp,
+            binding,
+            user,
+            options,
+            LoginResponseOverrides::default(),
+        )
+    }
+
+    pub(crate) fn create_login_response_with_overrides(
+        &self,
+        sp: &ServiceProvider,
+        binding: Binding,
+        user: &User,
+        options: &LoginResponseOptions<'_>,
+        overrides: LoginResponseOverrides<'_>,
+    ) -> Result<BindingContext, SamlError> {
+        self.create_login_response_inner(sp, binding, user, options, overrides)
+    }
+
+    fn create_login_response_inner(
+        &self,
+        sp: &ServiceProvider,
+        binding: Binding,
+        user: &User,
+        options: &LoginResponseOptions<'_>,
+        overrides: LoginResponseOverrides<'_>,
+    ) -> Result<BindingContext, SamlError> {
         if matches!(binding, Binding::Artifact) {
             return Err(SamlError::UnsupportedBinding {
                 binding: Binding::Artifact,
             });
         }
-        let acs = sp
-            .metadata
-            .get_assertion_consumer_service(binding)
-            .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?;
-        let (id, raw) =
-            self.render_login_response(sp, options.in_response_to, user, &acs, options.custom)?;
+        let acs = match overrides.acs {
+            Some(acs) => acs.to_string(),
+            None => sp
+                .metadata
+                .get_assertion_consumer_service(binding)
+                .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?,
+        };
+        let (id, raw) = self.render_login_response(
+            sp,
+            options.in_response_to,
+            user,
+            &acs,
+            overrides.name_id_format,
+            options.custom,
+        )?;
         let signed = self.finalize_login_response(sp, binding, &raw, options.encrypt_then_sign)?;
         let relay = options.relay_state.map(str::to_string);
         let (context, signature, sig_alg) =

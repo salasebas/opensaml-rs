@@ -403,6 +403,37 @@ fn no_options_rendering_keeps_acs_url_and_protocol_binding(
     Ok(())
 }
 
+#[test]
+fn requested_response_binding_without_acs_returns_missing_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = ServiceProvider::from_config(
+        &SpMetadataConfig {
+            entity_id: "https://sp.example.com/metadata".into(),
+            assertion_consumer_service: vec![Endpoint::new(
+                Binding::Post,
+                "https://sp.example.com/acs",
+            )],
+            ..Default::default()
+        },
+        EntitySetting::default(),
+    )?;
+
+    match sp.create_login_request_with_options(
+        &unsigned_idp()?,
+        Binding::Post,
+        &LoginRequestOptions {
+            response_binding: Some(Binding::SimpleSign),
+            ..Default::default()
+        },
+    ) {
+        Err(SamlError::MissingMetadata(name)) => {
+            assert_eq!(name, "AssertionConsumerService");
+            Ok(())
+        }
+        other => Err(format!("expected MissingMetadata, got {other:?}").into()),
+    }
+}
+
 #[cfg(feature = "crypto-bergshamra")]
 mod signed {
     use super::*;

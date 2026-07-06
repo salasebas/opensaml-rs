@@ -11,8 +11,9 @@ use saml_rs::xml::{extract, ExtractorField};
 use saml_rs::{
     AcsEndpoint, AssertionSignaturePolicy, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
     CertificatePem, EntityId, IdentityProvider, IdpConfig, IdpDescriptor, IdpValidationPolicy,
-    LogoutSignaturePolicy, MessageSignaturePolicy, MetadataTrustPolicy, SamlError, ServiceProvider,
-    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, XmlEncryptionPolicy, XmlPolicy,
+    LogoutSignaturePolicy, MessageSignaturePolicy, MetadataTrustPolicy, Saml, SamlError,
+    ServiceProvider, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, StartSso,
+    XmlEncryptionPolicy, XmlPolicy,
 };
 
 fn idp_config(want_authn_requests_signed: bool) -> IdpMetadataConfig {
@@ -158,6 +159,27 @@ fn typed_config_builders_construct_protocol_only_without_default_crypto(
     );
     assert_eq!(sp_config.validation, SpValidationPolicy::compatibility());
     assert_eq!(idp_config.validation, IdpValidationPolicy::compatibility());
+    Ok(())
+}
+
+#[test]
+fn typed_facades_start_unsigned_sso_without_default_crypto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_config_builder()?.build()?)?;
+    let idp = Saml::idp(idp_config_builder()?.build()?)?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+
+    let started = sp.start_sso(&idp_descriptor, StartSso::redirect())?;
+
+    assert!(started
+        .outbound
+        .redirect_url()?
+        .starts_with("https://idp.example.com/sso"));
+    assert_eq!(started.pending.request_id(), started.outbound.id());
     Ok(())
 }
 
