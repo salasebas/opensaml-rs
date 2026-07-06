@@ -35,6 +35,28 @@ pub use validation::{ReplayCache, ReplayKey, ReplayPolicy, SamlValidationContext
 The exact module names can change during implementation, but root docs should
 make these types discoverable.
 
+## docs.rs public surface
+
+New integrations should use the crate-root re-exports and visible docs.rs
+modules as the supported public documentation surface. The visible modules are
+`browser`, `config`, `constants`, `error`, `metadata`, `model`, and `raw`.
+Advanced callers that need the lower-level compatibility API should import it
+through `saml_rs::raw`.
+
+Some root modules remain publicly importable but hidden from docs.rs. These
+hidden public modules are not the recommended starting point for new
+integrations. When such paths remain available for compatibility, they are
+lower-level implementation or protocol surfaces and may receive less item-level
+documentation than the visible API.
+
+Current hidden root modules are classified as:
+
+| Category | Modules |
+| --- | --- |
+| Root-reexported implementation module | `api` |
+| Raw implementation modules | `sp`, `idp`, `flow`, `entity`, `logout` |
+| Protocol/helper modules | `binding`, `crypto`, `xml`, `context`, `template`, `util`, `validator` |
+
 ## Current Raw API
 
 Today:

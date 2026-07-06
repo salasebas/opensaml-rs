@@ -241,6 +241,11 @@
 //! [`raw::IdentityProvider`], [`raw::HttpRequest`], and [`raw::BindingContext`]
 //! from there rather than using root compatibility exports.
 //!
+//! Visible docs.rs modules and crate-root re-exports are the supported public
+//! documentation surface. The [`raw`] module is supported for compatibility;
+//! hidden modules are lower-level implementation or compatibility paths and
+//! should not be the first choice for new integrations.
+//!
 //! # Unsupported profiles
 //!
 //! The high-level [`Saml`] API focuses on browser Web SSO, metadata-driven SP/IdP

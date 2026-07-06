@@ -191,6 +191,8 @@ callers that need direct access to `ServiceProvider`, `IdentityProvider`,
 `HttpRequest`, `BindingContext`, or protocol helper functions. New browser
 SSO/SLO integrations should start with `Saml`, typed descriptors, and the
 builder-backed config types shown above.
+Use visible docs.rs modules, crate-root re-exports, and `saml_rs::raw` before
+reaching for hidden lower-level module paths.
 
 ## Features
 
