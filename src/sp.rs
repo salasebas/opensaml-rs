@@ -176,6 +176,12 @@ fn reject_unsolicited_request_bound_bearer_confirmations(
 
 impl ServiceProvider {
     /// Build from SP metadata XML, merging the metadata-declared flags into `setting`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `xml` is malformed, exceeds XML limits, or cannot
+    /// be parsed as SP metadata. Metadata parser errors include invalid entity,
+    /// endpoint, certificate, or signing flag declarations.
     pub fn from_metadata(xml: &str, mut setting: EntitySetting) -> Result<Self, SamlError> {
         let metadata = SpMetadata::from_xml(xml)?;
         setting.authn_requests_signed = metadata.is_authn_request_signed();
@@ -191,6 +197,11 @@ impl ServiceProvider {
     }
 
     /// Build by generating SP metadata from `config`, then importing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the generated metadata cannot be parsed back into SP
+    /// metadata, including invalid endpoint or certificate declarations.
     pub fn from_config(
         config: &SpMetadataConfig,
         setting: EntitySetting,
@@ -217,6 +228,16 @@ impl ServiceProvider {
     /// `crypto-bergshamra` feature and the SP's `private_key`/`signing_cert`).
     /// `custom` overrides template rendering, receiving the resolved template
     /// and returning `(id, xml)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SP and IdP signing requirements conflict, the IdP
+    /// metadata has no SSO endpoint for `binding`, the SP metadata has no ACS
+    /// endpoint for the requested response binding, or `binding` is unsupported
+    /// for AuthnRequest generation. When signing is required, key loading,
+    /// missing `private_key`/`signing_cert`, unsupported crypto features, XML
+    /// signature construction, and detached-signature construction errors are
+    /// propagated.
     pub fn create_login_request(
         &self,
         idp: &IdentityProvider,
@@ -231,6 +252,16 @@ impl ServiceProvider {
     }
 
     /// Build a login `<AuthnRequest>` for `idp` over `binding` with per-call options.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SP and IdP signing requirements conflict, the IdP
+    /// metadata has no SSO endpoint for `binding`, the SP metadata has no ACS
+    /// endpoint for `options.response_binding` when ACS index mode is not used,
+    /// or `binding` is unsupported. When signing is required, key loading,
+    /// missing `private_key`/`signing_cert`, unsupported crypto features, XML
+    /// signature construction, and detached-signature construction errors are
+    /// propagated.
     pub fn create_login_request_with_options(
         &self,
         idp: &IdentityProvider,
@@ -460,6 +491,15 @@ impl ServiceProvider {
     ///
     /// When `setting.validate_audience` is set, the assertion's `<Audience>`
     /// must include this SP's entity ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for all unsolicited-response validation failures from
+    /// [`Self::parse_unsolicited_login_response`], including malformed browser
+    /// input, unsupported bindings, missing ACS metadata, XML parsing failures,
+    /// missing or invalid signatures, untrusted signing certificates, issuer,
+    /// destination, recipient, audience, status, time-window, and unexpected
+    /// `InResponseTo` failures.
     pub fn parse_login_response(
         &self,
         idp: &IdentityProvider,
@@ -471,6 +511,17 @@ impl ServiceProvider {
 
     /// Parse and validate an IdP-initiated login `<Response>` that is not bound
     /// to an outbound AuthnRequest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the SP metadata has no ACS endpoint for `binding`,
+    /// `binding` is unsupported, the request is missing required binding
+    /// parameters, the SAML payload cannot be base64/DEFLATE decoded, XML
+    /// parsing or extraction fails, the status is not success, the required
+    /// signature is missing or invalid, no trusted IdP signing key is available,
+    /// or issuer, destination, bearer recipient, audience, subject-confirmation,
+    /// or time-window validation fails. Because this path is unsolicited, any
+    /// non-empty response or bearer `InResponseTo` also returns an error.
     pub fn parse_unsolicited_login_response(
         &self,
         idp: &IdentityProvider,
@@ -509,6 +560,16 @@ impl ServiceProvider {
     /// An empty caller-provided `request_id` is rejected as
     /// [`SamlError::InvalidInResponseTo`]. A non-empty `request_id` that does
     /// not match the SAML response returns [`SamlError::InResponseToMismatch`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `request_id` is empty, the SP metadata has no ACS
+    /// endpoint for `binding`, `binding` is unsupported, the request is missing
+    /// required binding parameters, the SAML payload cannot be base64/DEFLATE
+    /// decoded, XML parsing or extraction fails, the status is not success, the
+    /// required signature is missing or invalid, no trusted IdP signing key is
+    /// available, or issuer, destination, bearer recipient, audience,
+    /// `InResponseTo`, subject-confirmation, or time-window validation fails.
     pub fn parse_login_response_with_request_id(
         &self,
         idp: &IdentityProvider,

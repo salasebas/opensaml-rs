@@ -313,9 +313,9 @@ pub use config::{
     SpDescriptor, SpMetadataConfig, SpValidationPolicy, TemplatePolicy, TransformAlgorithm,
     XmlEncryptionPolicy, XmlPolicy,
 };
-#[doc = "Compatibility export. Prefer `raw::EntitySetting` for low-level APIs."]
+#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::EntitySetting`."]
 pub use entity::EntitySetting;
-#[doc = "Compatibility export. Prefer `raw::IdentityProvider` for low-level APIs."]
+#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::IdentityProvider`."]
 pub use idp::IdentityProvider;
 #[cfg(feature = "crypto-bergshamra")]
 pub use metadata::MetadataSignatureVerification;
@@ -326,5 +326,5 @@ pub use model::{
     ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex, SsoResponse,
     SsoSession, Subject, SubjectConfirmation, MAX_RELAY_STATE_BYTES,
 };
-#[doc = "Compatibility export. Prefer `raw::ServiceProvider` for low-level APIs."]
+#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;

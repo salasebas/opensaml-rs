@@ -52,6 +52,12 @@ pub struct IdentityProvider {
 
 impl IdentityProvider {
     /// Build from IdP metadata XML, merging metadata-declared flags into `setting`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `xml` is malformed, exceeds XML limits, or cannot
+    /// be parsed as IdP metadata. Metadata parser errors include invalid entity,
+    /// SSO endpoint, certificate, or signing flag declarations.
     pub fn from_metadata(xml: &str, mut setting: EntitySetting) -> Result<Self, SamlError> {
         let metadata = IdpMetadata::from_xml(xml)?;
         setting.want_authn_requests_signed = metadata.is_want_authn_requests_signed();
@@ -66,6 +72,12 @@ impl IdentityProvider {
     }
 
     /// Build by generating IdP metadata from `config`, then importing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `config` cannot produce valid IdP metadata, such as
+    /// when required IdP SSO metadata is missing, or if the generated metadata
+    /// cannot be parsed back into IdP metadata.
     pub fn from_config(
         config: &IdpMetadataConfig,
         setting: EntitySetting,
@@ -91,6 +103,12 @@ impl IdentityProvider {
     ///
     /// `custom` overrides tag filling: it receives the template with the
     /// `<AttributeStatement>` already injected.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when configured XML tag prefixes are invalid, the
+    /// default response renderer cannot produce valid XML, or template
+    /// rendering validation fails.
     fn render_login_response(
         &self,
         sp: &ServiceProvider,
@@ -217,6 +235,16 @@ impl IdentityProvider {
     /// (assertion- or message-level) and optionally encrypted. Attributes are
     /// taken from `user`; `options` carries `InResponseTo`, RelayState, the
     /// encrypt-then-sign toggle, and an optional `customTagReplacement` hook.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `binding` is unsupported, the SP metadata has no ACS
+    /// endpoint for `binding`, response template rendering fails, the IdP
+    /// signing key or certificate configuration is missing or invalid, the
+    /// `crypto-bergshamra` feature is unavailable, XML signature construction
+    /// fails, the SP encryption certificate is missing when assertion
+    /// encryption is enabled, XML encryption fails, or detached-signature
+    /// construction for Redirect/SimpleSign fails.
     pub fn create_login_response(
         &self,
         sp: &ServiceProvider,
@@ -448,6 +476,17 @@ impl IdentityProvider {
     }
 
     /// Parse and validate an SP login `<AuthnRequest>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `binding` is unsupported, the request is missing
+    /// required binding parameters, the SAML payload cannot be base64/DEFLATE
+    /// decoded, XML parsing or extraction fails, the status is invalid for the
+    /// parser, the SP issuer does not match metadata, or AuthnRequest signature
+    /// validation fails when this IdP metadata requires signed requests.
+    /// Signature failures include missing signatures, untrusted SP signing
+    /// certificates, invalid detached signatures, and XML signature validation
+    /// errors.
     pub fn parse_login_request(
         &self,
         sp: &ServiceProvider,
