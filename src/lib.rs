@@ -10,6 +10,12 @@
 //! The dependency-free config builders use strict typed defaults. Opt into
 //! compatibility policy by name when a legacy peer requires unsigned protocol
 //! messages.
+//! Where the compact flow examples below use
+//! [`ReplayPolicy::DisabledForCompatibility`] or unsigned metadata, treat those
+//! as explicit interoperability choices. Production-shaped inbound flows should
+//! use [`ReplayPolicy::RequireCache`] with a caller-owned [`ReplayCache`] and,
+//! when protocol timestamps are not enough for expiry,
+//! [`SamlValidationContext::with_replay_retention`].
 //!
 //! ```
 //! use saml_rs::{AcsEndpoint, EntityId, SpConfig, SpValidationPolicy};
@@ -222,9 +228,11 @@
 //! # Metadata trust
 //!
 //! Metadata trust is explicit and caller-pinned. [`MetadataTrustPolicy`] can
-//! accept unsigned metadata for compatibility or require a signature from
-//! caller-provided certificates; the crate does not treat the public web PKI CA
-//! store as SAML metadata trust.
+//! accept unsigned metadata for explicit legacy compatibility or require a
+//! signature from caller-provided certificates with
+//! [`MetadataTrustPolicy::RequireSignature`]. Prefer signed metadata with pinned
+//! certificates for production trust decisions; the crate does not treat the
+//! public web PKI CA store as SAML metadata trust.
 //!
 //! # Raw compatibility API
 //!
@@ -245,9 +253,10 @@
 //!
 //! XML cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
 //! message signatures) is delegated to `bergshamra` behind the
-//! `crypto-bergshamra` feature, which is on by default. Disable default features
-//! to build the crypto-free protocol layer; crypto operations then fail closed
-//! with [`SamlError::Unsupported`].
+//! `crypto-bergshamra` feature, which is on by default. Configure assertion
+//! encryption and XML-Enc compatibility exceptions through [`XmlEncryptionPolicy`].
+//! Disable default features to build the crypto-free protocol layer; crypto
+//! operations then fail closed with [`SamlError::Unsupported`].
 
 #![forbid(unsafe_code)]
 
