@@ -11,6 +11,7 @@
 //! - Only content covered by a verified reference is returned for extraction.
 
 use super::keys::load_certificate;
+use crate::constants::transform_algorithm;
 use crate::error::{ReferenceResolutionReason, SamlError, SignatureVerificationReason};
 use crate::util::normalize_cert_string;
 use crate::xml::dom::{self, Node, XmlLimits};
@@ -163,6 +164,58 @@ fn verified_content_not_covered() -> SamlError {
     SamlError::SignedReferenceMismatch
 }
 
+const EXC_C14N_WITH_COMMENTS: &str = "http://www.w3.org/2001/10/xml-exc-c14n#WithComments";
+const XML_C14N_10: &str = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315";
+const XML_C14N_10_WITH_COMMENTS: &str =
+    "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments";
+const XML_C14N_11: &str = "http://www.w3.org/2006/12/xml-c14n11";
+const XML_C14N_11_WITH_COMMENTS: &str = "http://www.w3.org/2006/12/xml-c14n11#WithComments";
+
+fn metadata_signature_transform_allowed(algorithm: &str) -> bool {
+    matches!(
+        algorithm,
+        transform_algorithm::ENVELOPED_SIGNATURE
+            | transform_algorithm::EXC_C14N
+            | EXC_C14N_WITH_COMMENTS
+            | XML_C14N_10
+            | XML_C14N_10_WITH_COMMENTS
+            | XML_C14N_11
+            | XML_C14N_11_WITH_COMMENTS
+    )
+}
+
+fn ensure_metadata_reference_transforms_preserve_descriptor(
+    reference: &Node,
+) -> Result<(), SamlError> {
+    for transforms in children_named(reference, "Transforms") {
+        for transform in children_named(transforms, "Transform") {
+            if transform
+                .attr("Algorithm")
+                .is_some_and(metadata_signature_transform_allowed)
+            {
+                continue;
+            }
+            return Err(verified_content_not_covered());
+        }
+    }
+    Ok(())
+}
+
+fn ensure_metadata_signature_transforms_preserve_descriptor(root: &Node) -> Result<(), SamlError> {
+    if root.local_name != "EntityDescriptor" {
+        return Ok(());
+    }
+
+    for signature in children_named(root, "Signature") {
+        for signed_info in children_named(signature, "SignedInfo") {
+            for reference in children_named(signed_info, "Reference") {
+                ensure_metadata_reference_transforms_preserve_descriptor(reference)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn verified_root_content(
     root: &Node,
     xml: &str,
@@ -259,6 +312,11 @@ fn inline_signature_cert(node: &Node, in_signature: bool) -> Option<String> {
 /// - `(false, None)` when there is no signature or it does not verify;
 /// - `(true, Some(xml))` with the signed assertion/response on success;
 /// - `Err(PotentialWrappingAttack)` on a detected XSW attempt.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when XML parsing, trust checks, reference resolution,
+/// cryptographic verification, or signed-content coverage checks fail.
 pub fn verify_signature(
     xml: &str,
     metadata_certs: &[String],
@@ -267,6 +325,11 @@ pub fn verify_signature(
 }
 
 /// Verify the XML-DSig signature(s) of `xml` with explicit XML parser limits.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when XML parsing, trust checks, reference resolution,
+/// cryptographic verification, or signed-content coverage checks fail.
 pub fn verify_signature_with_limits(
     xml: &str,
     metadata_certs: &[String],
@@ -365,15 +428,48 @@ pub fn verify_signature_with_limits(
 /// Detailed metadata signature verification result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetadataSignatureVerification {
+    verified: bool,
+    signed_entity_descriptor_xml: Option<String>,
+}
+
+impl MetadataSignatureVerification {
+    pub(crate) fn from_signed_descriptor(signed_entity_descriptor_xml: String) -> Self {
+        Self {
+            verified: true,
+            signed_entity_descriptor_xml: Some(signed_entity_descriptor_xml),
+        }
+    }
+
+    pub(crate) fn unverified() -> Self {
+        Self {
+            verified: false,
+            signed_entity_descriptor_xml: None,
+        }
+    }
+
     /// Whether a metadata signature verified against the pinned certificates.
-    pub verified: bool,
+    pub fn verified(&self) -> bool {
+        self.verified
+    }
+
     /// The signed `<EntityDescriptor>` XML when verification succeeds.
-    pub signed_entity_descriptor_xml: Option<String>,
+    pub fn signed_entity_descriptor_xml(&self) -> Option<&str> {
+        self.signed_entity_descriptor_xml.as_deref()
+    }
+
+    pub(crate) fn into_signed_entity_descriptor_xml(self) -> Option<String> {
+        self.signed_entity_descriptor_xml
+    }
 }
 
 /// Verify the enveloped XML-DSig signature on a metadata document against
 /// trusted certificate(s); returns whether it is valid and covers the consumed
 /// `<EntityDescriptor>` document.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when XML parsing, certificate loading, cryptographic
+/// verification, or signed `<EntityDescriptor>` coverage checks fail.
 pub fn verify_metadata_signature(
     xml: &str,
     trusted_certificates: &[String],
@@ -382,29 +478,60 @@ pub fn verify_metadata_signature(
 }
 
 /// Verify a metadata XML-DSig signature with explicit XML parser limits.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when XML parsing, certificate loading, cryptographic
+/// verification, or signed `<EntityDescriptor>` coverage checks fail.
 pub fn verify_metadata_signature_with_limits(
     xml: &str,
     trusted_certificates: &[String],
     limits: XmlLimits,
 ) -> Result<bool, SamlError> {
-    Ok(verify_metadata_signature_detailed_with_limits(xml, trusted_certificates, limits)?.verified)
+    Ok(
+        verify_metadata_signature_detailed_with_limits(xml, trusted_certificates, limits)?
+            .verified(),
+    )
+}
+
+/// Verify a metadata XML-DSig signature and preserve signed descriptor coverage
+/// using default XML parser limits.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when XML parsing, certificate loading, cryptographic
+/// verification, transform policy, or signed `<EntityDescriptor>` coverage
+/// checks fail.
+pub fn verify_metadata_signature_detailed(
+    xml: &str,
+    trusted_certificates: &[String],
+) -> Result<MetadataSignatureVerification, SamlError> {
+    verify_metadata_signature_detailed_with_limits(xml, trusted_certificates, XmlLimits::default())
 }
 
 /// Verify a metadata XML-DSig signature and preserve signed descriptor coverage.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when XML parsing, certificate loading, cryptographic
+/// verification, transform policy, or signed `<EntityDescriptor>` coverage
+/// checks fail.
 pub fn verify_metadata_signature_detailed_with_limits(
     xml: &str,
     trusted_certificates: &[String],
     limits: XmlLimits,
 ) -> Result<MetadataSignatureVerification, SamlError> {
+    let doc = dom::parse_with_limits(xml, limits)?;
+    ensure_metadata_signature_transforms_preserve_descriptor(&doc.root)?;
+
     let (verified, signed_entity_descriptor_xml) =
         verify_signature_with_limits(xml, trusted_certificates, limits)?;
-    if verified && signed_entity_descriptor_xml.is_none() {
-        return Err(SamlError::SignedReferenceMismatch);
+    if !verified {
+        return Ok(MetadataSignatureVerification::unverified());
     }
-    Ok(MetadataSignatureVerification {
-        verified,
-        signed_entity_descriptor_xml,
-    })
+    signed_entity_descriptor_xml
+        .map(MetadataSignatureVerification::from_signed_descriptor)
+        .ok_or_else(verified_content_not_covered)
 }
 
 #[cfg(test)]
@@ -426,6 +553,35 @@ mod tests {
         assert!(is_external_reference("/etc/passwd"));
         assert!(is_external_reference("file:///etc/passwd"));
         assert!(is_external_reference("cid:attachment"));
+    }
+
+    #[test]
+    fn metadata_signature_transform_allowlist_preserves_canonicalization_interoperability() {
+        const XPATH_TRANSFORM: &str = "http://www.w3.org/TR/1999/REC-xpath-19991116";
+        const XSLT_TRANSFORM: &str = "http://www.w3.org/TR/1999/REC-xslt-19991116";
+        const UNKNOWN_TRANSFORM: &str = "urn:example:unknown-transform";
+
+        for algorithm in [
+            transform_algorithm::ENVELOPED_SIGNATURE,
+            transform_algorithm::EXC_C14N,
+            EXC_C14N_WITH_COMMENTS,
+            XML_C14N_10,
+            XML_C14N_10_WITH_COMMENTS,
+            XML_C14N_11,
+            XML_C14N_11_WITH_COMMENTS,
+        ] {
+            assert!(
+                metadata_signature_transform_allowed(algorithm),
+                "{algorithm}"
+            );
+        }
+
+        for algorithm in [XPATH_TRANSFORM, XSLT_TRANSFORM, UNKNOWN_TRANSFORM] {
+            assert!(
+                !metadata_signature_transform_allowed(algorithm),
+                "{algorithm}"
+            );
+        }
     }
 
     #[test]

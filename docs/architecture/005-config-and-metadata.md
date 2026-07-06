@@ -295,9 +295,11 @@ The implemented typed descriptors store private trust evidence rather than a
 public fingerprint type:
 
 ```rust
-pub struct MetadataSignatureVerification {
-    pub verified: bool,
-    pub signed_entity_descriptor_xml: Option<String>,
+pub struct MetadataSignatureVerification { /* private fields */ }
+
+impl MetadataSignatureVerification {
+    pub fn verified(&self) -> bool;
+    pub fn signed_entity_descriptor_xml(&self) -> Option<&str>;
 }
 
 impl IdpDescriptor {
@@ -316,7 +318,8 @@ Rules:
 - `RequireSignature` means signed metadata must verify against caller-pinned
   trusted certificates.
 - Verification must prove the consumed `EntityDescriptor` is covered by the
-  signature.
+  signature, and metadata signature references may use only descriptor-preserving
+  transforms.
 - `signed_entity_descriptor_xml()` exposes the signed descriptor evidence when
   pinned verification passed.
 - `UnsignedForCompatibility` is explicit and visible in call sites.

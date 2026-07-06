@@ -20,6 +20,10 @@ Entries before the rebrand use the package names that were current at the time.
 - Added typed config builders and direction-specific AuthnRequest policy names;
   builders use strict defaults while constructors/default policy values preserve
   compatibility, and final config validation now covers policy requirements.
+- Hardened detailed metadata signature verification so signed metadata evidence
+  is exposed through accessors, default-limit detailed wrappers are available,
+  and unsafe metadata reference transforms such as XPath/XSLT fail closed before
+  descriptor coverage is accepted.
 
 ## [0.1.4] - 2026-06-21
 

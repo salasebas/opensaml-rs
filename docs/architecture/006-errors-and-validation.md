@@ -168,17 +168,21 @@ Signed metadata validation must not return only `bool` in the typed API.
 Target:
 
 ```rust
-pub struct MetadataSignatureVerification {
-    pub verified: bool,
-    pub signed_entity_descriptor_xml: Option<String>,
+pub struct MetadataSignatureVerification { /* private fields */ }
+
+impl MetadataSignatureVerification {
+    pub fn verified(&self) -> bool;
+    pub fn signed_entity_descriptor_xml(&self) -> Option<&str>;
 }
 ```
 
 Rules:
 
-- `RequireSignature` requires `verified == true`.
+- `RequireSignature` requires `verification.verified() == true`.
 - It must prove the consumed `EntityDescriptor` is covered by a signed
   reference and preserve the signed descriptor XML as trust evidence.
+- It must reject metadata signature transforms that can narrow the referenced
+  node set, such as XPath/XSLT transforms.
 - If coverage cannot be determined, fail closed with `SignedReferenceMismatch`.
 - If no pinned certificate verifies the metadata signature, fail closed with a
   branchable signature/trust error such as `SignatureVerification`.

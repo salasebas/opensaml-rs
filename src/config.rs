@@ -1561,9 +1561,9 @@ where
         .collect();
     let verification = metadata
         .verify_signature_detailed_with_limits(&trusted_certificates, XmlLimits::default())?;
-    if verification.verified {
+    if verification.verified() {
         let signed_entity_descriptor_xml = verification
-            .signed_entity_descriptor_xml
+            .into_signed_entity_descriptor_xml()
             .ok_or(SamlError::SignedReferenceMismatch)?;
         return Ok(AppliedMetadataTrust::SignedByPinnedCertificates {
             signed_entity_descriptor_xml,
