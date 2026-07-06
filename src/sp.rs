@@ -255,11 +255,17 @@ impl ServiceProvider {
             (None, _) => {
                 let uses_acs_index = options.assertion_consumer_service_index.is_some();
                 let response_binding = options.response_binding.unwrap_or(Binding::Post);
-                let acs_url = (!uses_acs_index).then(|| {
-                    self.metadata
-                        .get_assertion_consumer_service(response_binding)
-                        .unwrap_or_default()
-                });
+                let acs_url = if uses_acs_index {
+                    None
+                } else {
+                    Some(
+                        self.metadata
+                            .get_assertion_consumer_service(response_binding)
+                            .ok_or_else(|| {
+                                SamlError::MissingMetadata("AssertionConsumerService".into())
+                            })?,
+                    )
+                };
                 let protocol_binding =
                     (!uses_acs_index).then(|| response_binding.urn().to_string());
                 let acs_index = options
