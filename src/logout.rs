@@ -432,6 +432,18 @@ pub fn create_logout_response(
     )
 }
 
+struct LogoutResponseInput<'a> {
+    init_setting: &'a EntitySetting,
+    init_meta: &'a Metadata,
+    target_meta: &'a Metadata,
+    binding: Binding,
+    in_response_to: Option<&'a str>,
+    relay_state: Option<&'a str>,
+    want_signed: bool,
+    message_id: Option<&'a str>,
+    validate_template_in_response_to: bool,
+}
+
 /// Like [`create_logout_response`] but uses `message_id` when provided.
 #[allow(clippy::too_many_arguments)] // public API adds optional `message_id`
 pub fn create_logout_response_with_id(
@@ -444,7 +456,7 @@ pub fn create_logout_response_with_id(
     want_signed: bool,
     message_id: Option<&str>,
 ) -> Result<BindingContext, SamlError> {
-    create_logout_response_inner(
+    create_logout_response_inner(LogoutResponseInput {
         init_setting,
         init_meta,
         target_meta,
@@ -453,11 +465,10 @@ pub fn create_logout_response_with_id(
         relay_state,
         want_signed,
         message_id,
-        false,
-    )
+        validate_template_in_response_to: false,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn create_logout_response_checked(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -467,7 +478,7 @@ pub(crate) fn create_logout_response_checked(
     relay_state: Option<&str>,
     want_signed: bool,
 ) -> Result<BindingContext, SamlError> {
-    create_logout_response_inner(
+    create_logout_response_inner(LogoutResponseInput {
         init_setting,
         init_meta,
         target_meta,
@@ -475,23 +486,26 @@ pub(crate) fn create_logout_response_checked(
         in_response_to,
         relay_state,
         want_signed,
-        None,
-        true,
-    )
+        message_id: None,
+        validate_template_in_response_to: true,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn create_logout_response_inner(
-    init_setting: &EntitySetting,
-    init_meta: &Metadata,
-    target_meta: &Metadata,
-    binding: Binding,
-    in_response_to: Option<&str>,
-    relay_state: Option<&str>,
-    want_signed: bool,
-    message_id: Option<&str>,
-    check_template_in_response_to: bool,
+    input: LogoutResponseInput<'_>,
 ) -> Result<BindingContext, SamlError> {
+    let LogoutResponseInput {
+        init_setting,
+        init_meta,
+        target_meta,
+        binding,
+        in_response_to,
+        relay_state,
+        want_signed,
+        message_id,
+        validate_template_in_response_to,
+    } = input;
+
     if matches!(binding, Binding::Artifact) {
         return Err(SamlError::UnsupportedBinding {
             binding: Binding::Artifact,
@@ -537,7 +551,7 @@ fn create_logout_response_inner(
             in_response_to,
         )?
     };
-    if check_template_in_response_to && init_setting.logout_response_template.is_some() {
+    if validate_template_in_response_to && init_setting.logout_response_template.is_some() {
         validate_logout_response_in_response_to(&xml, in_response_to, init_setting.xml_limits)?;
     }
     let (context, signature, sig_alg) = if want_signed {

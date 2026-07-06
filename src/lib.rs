@@ -308,6 +308,8 @@ pub use config::{
 pub use entity::EntitySetting;
 #[doc = "Compatibility export. Prefer `raw::IdentityProvider` for low-level APIs."]
 pub use idp::IdentityProvider;
+#[cfg(feature = "crypto-bergshamra")]
+pub use metadata::MetadataSignatureVerification;
 pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
     ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, MessageId, NameId,
