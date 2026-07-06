@@ -147,15 +147,24 @@ let response_fields = response.post_form()?.fields();
 ### Single Logout
 
 ```rust
-use saml_rs::{BrowserInput, LogoutResponse, StartSlo};
+use saml_rs::{BrowserInput, LogoutRequest, LogoutResponse, RespondSlo, StartSlo};
 
 if let Some(subject) = session.logout_subject() {
     let logout = sp.start_slo(&idp, subject, StartSlo::post())?;
+
+    // Peer receives the LogoutRequest and emits a LogoutResponse.
+    let received = idp_saml.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(logout_request_fields),
+        validation_for_request,
+    )?;
+    let response = idp_saml.respond_slo(&sp_descriptor, &received, RespondSlo::post())?;
+
     let completed = sp.finish_slo(
         &idp,
         &logout.pending,
-        BrowserInput::<LogoutResponse>::post(response_fields),
-        validation,
+        BrowserInput::<LogoutResponse>::post(response.post_form()?.fields().to_vec()),
+        validation_for_response,
     )?;
     assert_eq!(completed.peer_entity_id(), idp.entity_id());
 }

@@ -1,17 +1,21 @@
 #![cfg(feature = "crypto-bergshamra")]
 
-use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode};
+use std::collections::HashMap;
+
+use saml_rs::binding::{base64_decode, deflate_raw_decode};
+use saml_rs::error::TimeWindowField;
 use saml_rs::raw::{Binding, FlowResult};
 use saml_rs::util::Value;
 use saml_rs::{
     AcsEndpoint, BrowserInput, CertificatePem, Credentials, EntityId, FormField, IdpConfig,
     IdpDescriptor, IdpValidationPolicy, LogoutBinding, LogoutRequest, LogoutResponse,
     LogoutSigning, LogoutSubject, MetadataTrustPolicy, NameId, Outbound, PendingLogoutRequest,
-    PendingSnapshot, PrivateKeyPem, Received, RelayStateParam, RespondSlo, Saml, SamlError,
-    SamlValidationContext, SessionIndex, SloEndpoint, SpConfig, SpDescriptor, SpValidationPolicy,
-    SsoEndpoint, SsoSession, StartSlo, TemplatePolicy,
+    PendingSnapshot, PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey,
+    ReplayPolicy, RespondSlo, Saml, SamlError, SamlValidationContext, SessionIndex, SloEndpoint,
+    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoSession, StartSlo, TemplatePolicy,
 };
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
+use url::Url;
 
 const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
 const IDP_ENTITY_ID: &str = "https://idp.example.com/metadata";
@@ -44,6 +48,26 @@ fn credentials() -> Credentials {
         signing_key: Some(PrivateKeyPem::new(PRIVKEY)),
         signing_certificate: Some(CertificatePem::new(CERT)),
         ..Credentials::default()
+    }
+}
+
+#[derive(Default)]
+struct MemoryReplayCache {
+    seen: HashMap<String, OffsetDateTime>,
+}
+
+impl ReplayCache for MemoryReplayCache {
+    fn check_and_store(
+        &mut self,
+        key: ReplayKey,
+        expires_at: OffsetDateTime,
+    ) -> Result<(), SamlError> {
+        let cache_key = key.cache_key();
+        if self.seen.contains_key(&cache_key) {
+            return Err(SamlError::ReplayDetected { key: cache_key });
+        }
+        self.seen.insert(cache_key, expires_at);
+        Ok(())
     }
 }
 
@@ -86,24 +110,6 @@ fn facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
     Ok((Saml::sp(sp_config()?)?, Saml::idp(idp_config()?)?))
 }
 
-fn compatibility_facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
-    let sp = Saml::sp(
-        SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
-            .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
-            .slo_endpoint(SloEndpoint::post(SP_SLO_POST)?)
-            .validation(SpValidationPolicy::compatibility())
-            .build()?,
-    )?;
-    let idp = Saml::idp(
-        IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
-            .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
-            .slo_endpoint(SloEndpoint::post(IDP_SLO_POST)?)
-            .validation(IdpValidationPolicy::compatibility())
-            .build()?,
-    )?;
-    Ok((sp, idp))
-}
-
 fn descriptors(
     sp: &Saml<saml_rs::Sp>,
     idp: &Saml<saml_rs::Idp>,
@@ -122,9 +128,9 @@ fn descriptors(
 }
 
 fn subject() -> Result<LogoutSubject, SamlError> {
-    Ok(LogoutSubject::new(
+    Ok(LogoutSubject::with_session_index(
         NameId::new("alice@example.com", None),
-        vec![SessionIndex::try_new("_session123")?],
+        SessionIndex::try_new("_session123")?,
     ))
 }
 
@@ -135,26 +141,13 @@ fn validation() -> SamlValidationContext<'static> {
     )
 }
 
+fn validation_with_cache(cache: &mut dyn ReplayCache) -> SamlValidationContext<'_> {
+    SamlValidationContext::new(OffsetDateTime::now_utc(), ReplayPolicy::RequireCache(cache))
+        .with_replay_retention(Duration::minutes(5))
+}
+
 fn post_fields<Message>(outbound: &Outbound<Message>) -> Result<Vec<FormField>, SamlError> {
     Ok(outbound.post_form()?.fields().to_vec())
-}
-
-fn post_form_value<'a>(
-    fields: &'a [FormField],
-    name: &str,
-) -> Result<&'a str, Box<dyn std::error::Error>> {
-    fields
-        .iter()
-        .find(|field| field.name() == name)
-        .map(FormField::value)
-        .ok_or_else(|| format!("missing {name}").into())
-}
-
-fn redirect_query<Message>(
-    outbound: &Outbound<Message>,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let url = url::Url::parse(outbound.redirect_url()?)?;
-    Ok(url.query().unwrap_or_default().to_string())
 }
 
 fn outbound_xml<Message>(
@@ -163,7 +156,7 @@ fn outbound_xml<Message>(
 ) -> Result<String, Box<dyn std::error::Error>> {
     match outbound.raw_context().binding {
         Binding::Redirect => {
-            let url = url::Url::parse(outbound.redirect_url()?)?;
+            let url = Url::parse(outbound.redirect_url()?)?;
             let (_, encoded) = url
                 .query_pairs()
                 .find(|(key, _)| key == message_field)
@@ -172,9 +165,9 @@ fn outbound_xml<Message>(
                 encoded.as_ref(),
             )?)?)?)
         }
-        Binding::Post | Binding::SimpleSign => {
-            Ok(String::from_utf8(base64_decode(&outbound.raw_context().context)?)?)
-        }
+        Binding::Post | Binding::SimpleSign => Ok(String::from_utf8(base64_decode(
+            &outbound.raw_context().context,
+        )?)?),
         Binding::Artifact => Err("artifact binding is unsupported".into()),
     }
 }
@@ -196,7 +189,7 @@ fn sp_started_exchange() -> Result<SloExchange, SamlError> {
     let started = sp.start_slo(
         &idp_descriptor,
         subject()?,
-        StartSlo::post().relay_state(relay_state.clone()),
+        StartSlo::post().relay_state(relay_state),
     )?;
     assert_eq!(started.outbound.raw_context().request_type, "SAMLRequest");
 
@@ -210,11 +203,7 @@ fn sp_started_exchange() -> Result<SloExchange, SamlError> {
     assert_eq!(received.message().session_indexes().len(), 1);
     assert!(!received.message().raw_flow().saml_content.is_empty());
 
-    let response = idp.respond_slo(
-        &sp_descriptor,
-        &received,
-        RespondSlo::post().relay_state(relay_state),
-    )?;
+    let response = idp.respond_slo(&sp_descriptor, &received, RespondSlo::post())?;
     assert_eq!(response.raw_context().request_type, "SAMLResponse");
     let response_fields = post_fields(&response)?;
 
@@ -269,34 +258,11 @@ fn sso_session() -> Result<SsoSession, SamlError> {
 }
 
 #[test]
-fn typed_slo_subject_can_come_from_sso_session() -> Result<(), Box<dyn std::error::Error>> {
-    let session = sso_session()?;
-    let subject = session.logout_subject().ok_or("missing logout subject")?;
-
-    assert_eq!(subject.name_id().value(), "alice@example.com");
-    assert_eq!(subject.session_indexes()[0].as_str(), "_session123");
-    Ok(())
-}
-
-#[test]
-fn typed_facade_starts_slo_redirect() -> Result<(), Box<dyn std::error::Error>> {
-    let (sp, idp) = facades()?;
-    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::redirect())?;
-
-    let redirect_url = started.outbound.redirect_url()?;
-    assert!(redirect_url.starts_with(IDP_SLO_REDIRECT));
-    assert_eq!(started.pending.id(), started.outbound.id());
-    assert_eq!(started.pending.request_binding(), LogoutBinding::Redirect);
-    assert_eq!(started.pending.peer_entity_id().as_str(), IDP_ENTITY_ID);
-    Ok(())
-}
-
-#[test]
 fn typed_slo_logout_request_session_index_follows_subject() -> Result<(), Box<dyn std::error::Error>>
 {
     let (sp, idp) = facades()?;
     let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+
     let with_session = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
     let with_session_xml = outbound_xml(&with_session.outbound, "SAMLRequest")?;
     assert!(with_session_xml.contains("<samlp:SessionIndex>_session123</samlp:SessionIndex>"));
@@ -318,7 +284,10 @@ fn typed_slo_start_and_response_bindings_use_peer_endpoints(
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
 
     let redirect = sp.start_slo(&idp_descriptor, subject()?, StartSlo::redirect())?;
-    assert!(redirect.outbound.redirect_url()?.starts_with(IDP_SLO_REDIRECT));
+    assert!(redirect
+        .outbound
+        .redirect_url()?
+        .starts_with(IDP_SLO_REDIRECT));
     assert_eq!(redirect.pending.request_binding(), LogoutBinding::Redirect);
 
     let post = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
@@ -393,8 +362,40 @@ fn typed_slo_rejects_peer_without_requested_logout_binding(
 }
 
 #[test]
+fn typed_slo_subject_can_come_from_sso_session() -> Result<(), Box<dyn std::error::Error>> {
+    let session = sso_session()?;
+    let subject = session.logout_subject().ok_or("missing logout subject")?;
+
+    assert_eq!(subject.name_id().value(), "alice@example.com");
+    assert_eq!(
+        subject.session_index().map(SessionIndex::as_str),
+        Some("_session123")
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_facade_starts_slo_redirect() -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::redirect())?;
+
+    let redirect_url = started.outbound.redirect_url()?;
+    assert!(redirect_url.starts_with(IDP_SLO_REDIRECT));
+    assert_eq!(started.pending.id(), started.outbound.id());
+    assert_eq!(started.pending.request_binding(), LogoutBinding::Redirect);
+    assert_eq!(started.pending.peer_entity_id().as_str(), IDP_ENTITY_ID);
+    Ok(())
+}
+
+#[test]
 fn typed_facade_runs_sp_initiated_slo() -> Result<(), Box<dyn std::error::Error>> {
     let exchange = sp_started_exchange()?;
+
+    assert_eq!(
+        exchange.received.relay_state(),
+        &RelayStateParam::try_from_option(Some("logout-state".to_string()))?
+    );
 
     let completed = exchange.sp.finish_slo(
         &exchange.idp_descriptor,
@@ -429,32 +430,112 @@ fn typed_facade_runs_sp_initiated_slo() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
-fn typed_facade_start_slo_renders_multiple_session_indexes(
+fn typed_facade_receive_slo_checks_logout_request_replay() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let request_fields = post_fields(&started.outbound)?;
+    let mut cache = MemoryReplayCache::default();
+
+    let received = idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields.clone()),
+        validation_with_cache(&mut cache),
+    )?;
+    let replay_key = format!("logout_request_id:{}", received.message().id().as_str());
+    assert!(cache.seen.contains_key(&replay_key));
+
+    match idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields),
+        validation_with_cache(&mut cache),
+    ) {
+        Err(SamlError::ReplayDetected { key }) => {
+            assert_eq!(key, replay_key);
+            Ok(())
+        }
+        other => Err(format!("expected LogoutRequest ReplayDetected, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_receive_slo_requires_replay_retention_for_logout_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (sp, idp) = facades()?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let subject = LogoutSubject::new(
-        NameId::new("alice@example.com", None),
-        vec![
-            SessionIndex::try_new("_session123")?,
-            SessionIndex::try_new("_session456")?,
-        ],
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let mut cache = MemoryReplayCache::default();
+    let validation = SamlValidationContext::new(
+        OffsetDateTime::now_utc(),
+        ReplayPolicy::RequireCache(&mut cache),
     );
 
-    let started = sp.start_slo(&idp_descriptor, subject, StartSlo::post())?;
-    let request_input = BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?);
-    let received = idp.receive_slo(&sp_descriptor, request_input, validation())?;
+    match idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?),
+        validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::ReplayExpiration);
+            Ok(())
+        }
+        other => Err(format!("expected ReplayExpiration error, got {other:?}").into()),
+    }
+}
 
-    assert_eq!(
-        received
-            .message()
-            .session_indexes()
-            .iter()
-            .map(SessionIndex::as_str)
-            .collect::<Vec<_>>(),
-        vec!["_session123", "_session456"]
+#[test]
+fn typed_facade_finish_slo_checks_logout_response_replay() -> Result<(), Box<dyn std::error::Error>>
+{
+    let exchange = sp_started_exchange()?;
+    let mut cache = MemoryReplayCache::default();
+
+    let completed = exchange.sp.finish_slo(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<LogoutResponse>::post(exchange.response_fields.clone()),
+        validation_with_cache(&mut cache),
+    )?;
+    let response = completed.response().ok_or("missing logout response")?;
+    let replay_key = format!("logout_response_id:{}", response.id().as_str());
+    assert!(cache.seen.contains_key(&replay_key));
+
+    match exchange.sp.finish_slo(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<LogoutResponse>::post(exchange.response_fields),
+        validation_with_cache(&mut cache),
+    ) {
+        Err(SamlError::ReplayDetected { key }) => {
+            assert_eq!(key, replay_key);
+            Ok(())
+        }
+        other => Err(format!("expected LogoutResponse ReplayDetected, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_finish_slo_requires_replay_retention_for_logout_response(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = sp_started_exchange()?;
+    let mut cache = MemoryReplayCache::default();
+    let validation = SamlValidationContext::new(
+        OffsetDateTime::now_utc(),
+        ReplayPolicy::RequireCache(&mut cache),
     );
-    Ok(())
+
+    match exchange.sp.finish_slo(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<LogoutResponse>::post(exchange.response_fields),
+        validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::ReplayExpiration);
+            Ok(())
+        }
+        other => Err(format!("expected ReplayExpiration error, got {other:?}").into()),
+    }
 }
 
 #[test]
@@ -465,18 +546,14 @@ fn typed_facade_runs_idp_initiated_slo() -> Result<(), Box<dyn std::error::Error
     let started = idp.start_slo(
         &sp_descriptor,
         subject()?,
-        StartSlo::post().relay_state(relay_state.clone()),
+        StartSlo::post().relay_state(relay_state),
     )?;
 
     let request_input = BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?);
     let received = sp.receive_slo(&idp_descriptor, request_input, validation())?;
     assert_eq!(received.message().issuer().as_str(), IDP_ENTITY_ID);
 
-    let response = sp.respond_slo(
-        &idp_descriptor,
-        &received,
-        RespondSlo::post().relay_state(relay_state),
-    )?;
+    let response = sp.respond_slo(&idp_descriptor, &received, RespondSlo::post())?;
     let completed = idp.finish_slo(
         &sp_descriptor,
         &started.pending,
@@ -583,117 +660,6 @@ fn typed_facade_rejects_slo_relay_state_mismatch() -> Result<(), Box<dyn std::er
 }
 
 #[test]
-fn typed_facade_rejects_duplicate_redirect_relay_state_on_finish_slo(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (sp, idp) = facades()?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let relay_state = RelayStateParam::try_from_option(Some("logout-state".to_string()))?;
-    let started = sp.start_slo(
-        &idp_descriptor,
-        subject()?,
-        StartSlo::redirect().relay_state(relay_state.clone()),
-    )?;
-    let received = idp.receive_slo(
-        &sp_descriptor,
-        BrowserInput::<LogoutRequest>::redirect(redirect_query(&started.outbound)?),
-        validation(),
-    )?;
-    let response = idp.respond_slo(
-        &sp_descriptor,
-        &received,
-        RespondSlo::redirect().relay_state(relay_state),
-    )?;
-    let duplicate_query = format!(
-        "{}&RelayState=other-logout-state",
-        redirect_query(&response)?
-    );
-
-    match sp.finish_slo(
-        &idp_descriptor,
-        &started.pending,
-        BrowserInput::<LogoutResponse>::redirect(duplicate_query),
-        validation(),
-    ) {
-        Err(SamlError::Invalid(message)) => {
-            assert!(message.contains("duplicate RelayState"));
-            Ok(())
-        }
-        other => Err(format!("expected Invalid, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn typed_facade_receive_slo_rejects_destination_mismatch() -> Result<(), Box<dyn std::error::Error>>
-{
-    let (sp, idp) = compatibility_facades()?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = idp.start_slo(&sp_descriptor, subject()?, StartSlo::post())?;
-    let mut fields = post_fields(&started.outbound)?;
-    let request = post_form_value(&fields, "SAMLRequest")?.to_string();
-    let xml = String::from_utf8(base64_decode(&request)?)?.replace(
-        &format!("Destination=\"{SP_SLO_POST}\""),
-        "Destination=\"https://sp.example.com/slo/wrong\"",
-    );
-    for field in &mut fields {
-        if field.name() == "SAMLRequest" {
-            *field = FormField::new("SAMLRequest", base64_encode(xml.as_bytes()));
-        }
-    }
-
-    match sp.receive_slo(
-        &idp_descriptor,
-        BrowserInput::<LogoutRequest>::post(fields),
-        validation(),
-    ) {
-        Err(SamlError::DestinationMismatch { expected, actual }) => {
-            assert_eq!(expected, SP_SLO_POST);
-            assert_eq!(actual.as_deref(), Some("https://sp.example.com/slo/wrong"));
-            Ok(())
-        }
-        other => Err(format!("expected DestinationMismatch, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn typed_facade_finish_slo_rejects_destination_mismatch() -> Result<(), Box<dyn std::error::Error>>
-{
-    let (sp, idp) = compatibility_facades()?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
-    let received = idp.receive_slo(
-        &sp_descriptor,
-        BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?),
-        validation(),
-    )?;
-    let response = idp.respond_slo(&sp_descriptor, &received, RespondSlo::post())?;
-    let mut fields = post_fields(&response)?;
-    let response = post_form_value(&fields, "SAMLResponse")?.to_string();
-    let xml = String::from_utf8(base64_decode(&response)?)?.replace(
-        &format!("Destination=\"{SP_SLO_POST}\""),
-        "Destination=\"https://sp.example.com/slo/wrong\"",
-    );
-    for field in &mut fields {
-        if field.name() == "SAMLResponse" {
-            *field = FormField::new("SAMLResponse", base64_encode(xml.as_bytes()));
-        }
-    }
-
-    match sp.finish_slo(
-        &idp_descriptor,
-        &started.pending,
-        BrowserInput::<LogoutResponse>::post(fields),
-        validation(),
-    ) {
-        Err(SamlError::DestinationMismatch { expected, actual }) => {
-            assert_eq!(expected, SP_SLO_POST);
-            assert_eq!(actual.as_deref(), Some("https://sp.example.com/slo/wrong"));
-            Ok(())
-        }
-        other => Err(format!("expected DestinationMismatch, got {other:?}").into()),
-    }
-}
-
-#[test]
 fn typed_facade_rejects_slo_wrong_pending_request_id() -> Result<(), Box<dyn std::error::Error>> {
     let exchange = sp_started_exchange()?;
     let mut snapshot: PendingSnapshot<LogoutRequest> = exchange.pending.snapshot();
@@ -741,6 +707,85 @@ fn typed_facade_rejects_unexpected_slo_relay_state() -> Result<(), Box<dyn std::
             assert_eq!(
                 actual,
                 RelayStateParam::try_from_option(Some("unexpected".to_string()))?
+            );
+            Ok(())
+        }
+        other => Err(format!("expected RelayStateMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_allows_respond_slo_to_suppress_relay_state_echo(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let relay_state = RelayStateParam::try_from_option(Some("logout-state".to_string()))?;
+    let started = sp.start_slo(
+        &idp_descriptor,
+        subject()?,
+        StartSlo::post().relay_state(relay_state),
+    )?;
+    let request_input = BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?);
+    let received = idp.receive_slo(&sp_descriptor, request_input, validation())?;
+    let response = idp.respond_slo(
+        &sp_descriptor,
+        &received,
+        RespondSlo::post().relay_state(RelayStateParam::absent()),
+    )?;
+
+    match sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<LogoutResponse>::post(post_fields(&response)?),
+        validation(),
+    ) {
+        Err(SamlError::RelayStateMismatch { expected, actual }) => {
+            assert_eq!(
+                expected,
+                RelayStateParam::try_from_option(Some("logout-state".to_string()))?
+            );
+            assert_eq!(actual, RelayStateParam::Absent);
+            Ok(())
+        }
+        other => Err(format!("expected RelayStateMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_allows_respond_slo_to_override_relay_state_echo(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let relay_state = RelayStateParam::try_from_option(Some("logout-state".to_string()))?;
+    let started = sp.start_slo(
+        &idp_descriptor,
+        subject()?,
+        StartSlo::post().relay_state(relay_state),
+    )?;
+    let request_input = BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?);
+    let received = idp.receive_slo(&sp_descriptor, request_input, validation())?;
+    let response = idp.respond_slo(
+        &sp_descriptor,
+        &received,
+        RespondSlo::post().relay_state(RelayStateParam::try_from_option(Some(
+            "override".to_string(),
+        ))?),
+    )?;
+
+    match sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<LogoutResponse>::post(post_fields(&response)?),
+        validation(),
+    ) {
+        Err(SamlError::RelayStateMismatch { expected, actual }) => {
+            assert_eq!(
+                expected,
+                RelayStateParam::try_from_option(Some("logout-state".to_string()))?
+            );
+            assert_eq!(
+                actual,
+                RelayStateParam::try_from_option(Some("override".to_string()))?
             );
             Ok(())
         }

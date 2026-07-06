@@ -8,10 +8,30 @@
 //!
 //! let binding = SsoRequestBinding::Artifact;
 //! ```
+//!
+//! ```compile_fail
+//! use saml_rs::{AuthnRequest, Received, RespondSso, Saml, Sp, SpDescriptor, Subject};
+//!
+//! let sp: Saml<Sp> = unreachable!();
+//! let peer: SpDescriptor = unreachable!();
+//! let request: Received<AuthnRequest> = unreachable!();
+//! let subject: Subject = unreachable!();
+//!
+//! let _ = sp.respond_sso(&peer, &request, subject, RespondSso::post());
+//! ```
+//!
+//! ```compile_fail
+//! use saml_rs::{Idp, IdpDescriptor, Saml, StartSso};
+//!
+//! let idp: Saml<Idp> = unreachable!();
+//! let peer: IdpDescriptor = unreachable!();
+//!
+//! let _ = idp.start_sso(&peer, StartSso::post());
+//! ```
 
 use crate::browser::{
-    AcsEndpoint, BrowserInput, LogoutBinding, Outbound, Pending, PendingAuthnRequest,
-    PendingLogoutRequest, SsoRequestBinding, SsoResponseBinding, Started,
+    AcsEndpoint, BrowserInput, LogoutBinding, Outbound, PendingAuthnRequest, PendingLogoutRequest,
+    SsoRequestBinding, SsoResponseBinding, Started,
 };
 use crate::config::{
     AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, CertificatePem, EntityId, IdpConfig,
@@ -31,9 +51,9 @@ use crate::metadata::{
 };
 use crate::model::{
     AuthnRequest, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, Received,
-    RelayStateParam, SamlValidationContext, SsoResponse, SsoSession, Subject,
+    RelayStateParam, ReplayKey, SamlValidationContext, SsoResponse, SsoSession, Subject,
 };
-use crate::sp::{ExpectedLoginResponse, LoginRequestOptions, ServiceProvider};
+use crate::sp::{LoginRequestOptions, LoginResponseParseOptions, ServiceProvider};
 
 /// Typed SAML facade for high-level browser SSO/SLO flows.
 pub struct Saml<Role = Unknown>(Role);
@@ -54,24 +74,20 @@ pub struct Idp {
 /// Error type returned by the typed SAML API.
 pub type SamlError = Error;
 
-#[derive(Debug, Clone, Copy)]
-enum RequestedResponseBinding {
-    DefaultPost,
-    Explicit(SsoResponseBinding),
+/// Explicit `ForceAuthn` value for outbound AuthnRequests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForceAuthn {
+    /// Emit `ForceAuthn="true"`.
+    Required,
+    /// Emit `ForceAuthn="false"`.
+    NotRequired,
 }
 
-impl RequestedResponseBinding {
-    fn binding(self) -> SsoResponseBinding {
+impl ForceAuthn {
+    fn as_bool(self) -> bool {
         match self {
-            Self::DefaultPost => SsoResponseBinding::Post,
-            Self::Explicit(binding) => binding,
-        }
-    }
-
-    fn explicit(self) -> Option<SsoResponseBinding> {
-        match self {
-            Self::DefaultPost => None,
-            Self::Explicit(binding) => Some(binding),
+            Self::Required => true,
+            Self::NotRequired => false,
         }
     }
 }
@@ -80,9 +96,9 @@ impl RequestedResponseBinding {
 #[derive(Debug, Clone)]
 pub struct StartSso {
     binding: SsoRequestBinding,
-    response_binding: RequestedResponseBinding,
+    response_binding: Option<SsoResponseBinding>,
     relay_state: RelayStateParam,
-    force_authn: Option<bool>,
+    force_authn: Option<ForceAuthn>,
     acs_index: Option<u16>,
 }
 
@@ -105,7 +121,7 @@ impl StartSso {
     fn new(binding: SsoRequestBinding) -> Self {
         Self {
             binding,
-            response_binding: RequestedResponseBinding::DefaultPost,
+            response_binding: None,
             relay_state: RelayStateParam::absent(),
             force_authn: None,
             acs_index: None,
@@ -114,7 +130,7 @@ impl StartSso {
 
     /// Set the expected SAML Response binding.
     pub fn response_binding(mut self, binding: SsoResponseBinding) -> Self {
-        self.response_binding = RequestedResponseBinding::Explicit(binding);
+        self.response_binding = Some(binding);
         self
     }
 
@@ -124,30 +140,14 @@ impl StartSso {
         self
     }
 
-    /// Set ForceAuthn.
-    pub fn force_authn(mut self, force_authn: bool) -> Self {
+    /// Set the exact `ForceAuthn` value.
+    pub fn force_authn(mut self, force_authn: ForceAuthn) -> Self {
         self.force_authn = Some(force_authn);
         self
     }
 
-    /// Emit `ForceAuthn="true"`.
-    pub fn force_authn_required(self) -> Self {
-        self.force_authn(true)
-    }
-
-    /// Emit `ForceAuthn="false"`.
-    pub fn force_authn_not_required(self) -> Self {
-        self.force_authn(false)
-    }
-
-    /// Omit `ForceAuthn`.
-    pub fn force_authn_omitted(mut self) -> Self {
-        self.force_authn = None;
-        self
-    }
-
     /// Select an AssertionConsumerServiceIndex.
-    pub fn acs_index(mut self, acs_index: u16) -> Self {
+    pub fn assertion_consumer_service_index(mut self, acs_index: u16) -> Self {
         self.acs_index = Some(acs_index);
         self
     }
@@ -158,7 +158,6 @@ impl StartSso {
 pub struct RespondSso {
     binding: SsoResponseBinding,
     relay_state: Option<RelayStateParam>,
-    encrypt_then_sign: bool,
 }
 
 impl RespondSso {
@@ -176,22 +175,15 @@ impl RespondSso {
         Self {
             binding,
             relay_state: None,
-            encrypt_then_sign: false,
         }
     }
 
     /// Set exact RelayState state for the response.
+    ///
+    /// When omitted for a response to a received request, the received
+    /// RelayState is echoed. Pass [`RelayStateParam::absent`] to suppress echo.
     pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
         self.relay_state = Some(relay_state);
-        self
-    }
-
-    /// Request encrypt-then-sign ordering for encrypted responses.
-    ///
-    /// The raw response builder already resolves message signatures over
-    /// encrypted assertions to the sound order required for verification.
-    pub fn encrypt_then_sign(mut self) -> Self {
-        self.encrypt_then_sign = true;
         self
     }
 }
@@ -200,7 +192,7 @@ impl RespondSso {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogoutSigning {
     /// Use the local typed logout policy.
-    FollowPolicy,
+    FollowLocalPolicy,
     /// Sign this logout message.
     Sign,
     /// Send unsigned logout for an explicit compatibility exception.
@@ -235,7 +227,7 @@ impl StartSlo {
         Self {
             binding,
             relay_state: RelayStateParam::absent(),
-            signing: LogoutSigning::FollowPolicy,
+            signing: LogoutSigning::FollowLocalPolicy,
         }
     }
 
@@ -256,7 +248,7 @@ impl StartSlo {
 #[derive(Debug, Clone)]
 pub struct RespondSlo {
     binding: LogoutBinding,
-    relay_state: RelayStateParam,
+    relay_state: Option<RelayStateParam>,
     signing: LogoutSigning,
 }
 
@@ -279,14 +271,17 @@ impl RespondSlo {
     fn new(binding: LogoutBinding) -> Self {
         Self {
             binding,
-            relay_state: RelayStateParam::absent(),
-            signing: LogoutSigning::FollowPolicy,
+            relay_state: None,
+            signing: LogoutSigning::FollowLocalPolicy,
         }
     }
 
     /// Set exact RelayState state for the logout response.
+    ///
+    /// When omitted, the received LogoutRequest RelayState is echoed. Pass
+    /// [`RelayStateParam::absent`] to suppress echo.
     pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
-        self.relay_state = relay_state;
+        self.relay_state = Some(relay_state);
         self
     }
 
@@ -322,10 +317,6 @@ impl Saml<Sp> {
     }
 
     /// Raw compatibility Service Provider.
-    ///
-    /// This is an escape hatch for compatibility and advanced integrations. It
-    /// bypasses the typed facade invariants enforced by methods such as
-    /// [`Self::start_sso`] and [`Self::finish_sso`].
     pub fn raw_service_provider(&self) -> &ServiceProvider {
         &self.0.service_provider
     }
@@ -379,20 +370,20 @@ impl Saml<Sp> {
         let response_binding = acs.binding();
         let raw_options = LoginRequestOptions {
             relay_state: options.relay_state.as_deref(),
-            force_authn: options.force_authn,
+            force_authn: options.force_authn.map(ForceAuthn::as_bool),
             assertion_consumer_service_index: options.acs_index,
             response_binding: Some(response_binding.as_binding()),
             ..Default::default()
         };
         let context = self
             .raw_service_provider()
-            .create_login_request_with_options_suppressing_default_relay_state(
+            .create_login_request_with_options(
                 &raw_idp,
                 options.binding.as_binding(),
                 &raw_options,
             )?;
         let outbound = Outbound::<AuthnRequest>::try_from(context)?;
-        let pending = Pending::<AuthnRequest>::try_new(
+        let pending = PendingAuthnRequest::try_new(
             outbound.id().clone(),
             options.relay_state,
             acs,
@@ -445,16 +436,16 @@ impl Saml<Sp> {
         let request = HttpRequest::try_from(input)?;
         let flow = self
             .raw_service_provider()
-            .parse_login_response_with_request_id_and_recipient_at(
+            .parse_login_response_with_request_id_at(
                 &raw_idp,
                 pending.response_binding().as_binding(),
                 &request,
-                ExpectedLoginResponse {
-                    request_id: pending.request_id().as_str(),
-                    recipient: pending.acs().location().as_str(),
-                },
-                validation.now(),
-                validation.clock_skew().as_millis(),
+                pending.request_id().as_str(),
+                LoginResponseParseOptions::at(
+                    validation.now(),
+                    validation.clock_skew().as_millis(),
+                )
+                .with_expected_recipient(pending.acs().location().as_str()),
             )?;
         let session = SsoSession::try_from(flow)?;
         session.check_and_store_replay(&mut validation)?;
@@ -565,10 +556,6 @@ impl Saml<Idp> {
     }
 
     /// Raw compatibility Identity Provider.
-    ///
-    /// This is an escape hatch for compatibility and advanced integrations. It
-    /// bypasses the typed facade invariants enforced by methods such as
-    /// [`Self::receive_sso`] and [`Self::respond_sso`].
     pub fn raw_identity_provider(&self) -> &IdentityProvider {
         &self.0.identity_provider
     }
@@ -606,10 +593,10 @@ impl Saml<Idp> {
         &self,
         sp: &SpDescriptor,
         input: BrowserInput<AuthnRequest>,
-        mut validation: SamlValidationContext<'_>,
+        validation: SamlValidationContext<'_>,
     ) -> Result<Received<AuthnRequest>, SamlError> {
-        let binding = SsoRequestBinding::try_from(input_binding(&input))?;
         let relay_state = relay_state_from_input(&input)?;
+        let binding = SsoRequestBinding::try_from(input_binding(&input))?;
         let raw_sp = raw_sp_descriptor(sp)?;
         let request = HttpRequest::try_from(input)?;
         let flow = self.raw_identity_provider().parse_login_request_at(
@@ -633,8 +620,9 @@ impl Saml<Idp> {
                 ));
             }
         }
-        authn.check_and_store_replay(&mut validation)?;
-        Ok(Received::with_relay_state(authn, relay_state))
+        let mut validation = validation;
+        validation.check_and_store_message_replay(ReplayKey::AuthnRequestId(authn.id().clone()))?;
+        Ok(Received::new(authn).with_relay_state(relay_state))
     }
 
     /// Respond to a received SP AuthnRequest.
@@ -765,8 +753,10 @@ impl Saml<Idp> {
         subject: Subject,
         options: RespondSso,
     ) -> Result<Outbound<SsoResponse>, SamlError> {
-        let relay_state = options.relay_state.clone().unwrap_or_else(|| {
-            request.map_or_else(RelayStateParam::absent, |r| r.relay_state().clone())
+        let relay_state = options.relay_state.unwrap_or_else(|| {
+            request.map_or_else(RelayStateParam::absent, |request| {
+                request.relay_state().clone()
+            })
         });
         relay_state.validate()?;
         let raw_sp = raw_sp_descriptor(sp)?;
@@ -782,7 +772,7 @@ impl Saml<Idp> {
         let raw_options = LoginResponseOptions {
             in_response_to: request.map(|request| request.message().id().as_str()),
             relay_state: relay_state.as_deref(),
-            encrypt_then_sign: options.encrypt_then_sign,
+            encrypt_then_sign: false,
             custom: None,
         };
         let context = self
@@ -881,7 +871,7 @@ fn raw_sp_descriptor(sp: &SpDescriptor) -> Result<ServiceProvider, SamlError> {
 
 fn selected_acs(
     sp: &ServiceProvider,
-    requested_binding: RequestedResponseBinding,
+    requested_binding: Option<SsoResponseBinding>,
     index: Option<u16>,
 ) -> Result<AcsEndpoint, SamlError> {
     if let Some(index) = index {
@@ -890,10 +880,10 @@ fn selected_acs(
             .get_assertion_consumer_service_by_index(index)?
             .ok_or_else(|| Error::MissingMetadata("AssertionConsumerService".into()))?;
         let binding = SsoResponseBinding::try_from(endpoint.binding)?;
-        if let Some(explicit) = requested_binding.explicit() {
-            if explicit != binding {
+        if let Some(requested_binding) = requested_binding {
+            if requested_binding != binding {
                 return Err(Error::Invalid(
-                    "requested response binding conflicts with ACS index".into(),
+                    "AssertionConsumerServiceIndex binding does not match response_binding".into(),
                 ));
             }
         }
@@ -905,7 +895,7 @@ fn selected_acs(
         .with_default_flag(endpoint.is_default));
     }
 
-    let binding = requested_binding.binding();
+    let binding = requested_binding.unwrap_or(SsoResponseBinding::Post);
     let endpoint = sp
         .metadata
         .get_assertion_consumer_service_endpoint(binding.as_binding())
@@ -981,25 +971,16 @@ fn relay_state_from_input<Message>(
 ) -> Result<RelayStateParam, SamlError> {
     match input {
         BrowserInput::Redirect { raw_query, .. } => {
-            let mut values =
-                url::form_urlencoded::parse(raw_query.trim_start_matches('?').as_bytes())
-                    .filter(|(name, _)| name == "RelayState")
-                    .map(|(_, value)| value.into_owned());
-            let value = values.next();
-            if values.next().is_some() {
-                return Err(Error::Invalid("duplicate RelayState".into()));
-            }
+            let value = url::form_urlencoded::parse(raw_query.trim_start_matches('?').as_bytes())
+                .find(|(name, _)| name == "RelayState")
+                .map(|(_, value)| value.into_owned());
             RelayStateParam::try_from_option(value)
         }
         BrowserInput::Post { fields, .. } | BrowserInput::SimpleSignPost { fields, .. } => {
-            let mut values = fields
+            let value = fields
                 .iter()
-                .filter(|field| field.name() == "RelayState")
+                .find(|field| field.name() == "RelayState")
                 .map(|field| field.value().to_string());
-            let value = values.next();
-            if values.next().is_some() {
-                return Err(Error::Invalid("duplicate RelayState".into()));
-            }
             RelayStateParam::try_from_option(value)
         }
     }
@@ -1083,8 +1064,9 @@ fn receive_slo_impl(
     local_metadata: &Metadata,
     peer_metadata: &Metadata,
     input: BrowserInput<LogoutRequest>,
-    validation: SamlValidationContext<'_>,
+    mut validation: SamlValidationContext<'_>,
 ) -> Result<Received<LogoutRequest>, SamlError> {
+    let relay_state = relay_state_from_input(&input)?;
     let binding = LogoutBinding::try_from(input_binding(&input))?;
     let request = HttpRequest::try_from(input)?;
     let flow = parse_logout_request_at(
@@ -1097,7 +1079,8 @@ fn receive_slo_impl(
     )?;
     let logout = LogoutRequest::try_from(flow)?;
     ensure_logout_destination(local_metadata, binding, logout.destination())?;
-    Ok(Received::new(logout))
+    validation.check_and_store_message_replay(ReplayKey::LogoutRequestId(logout.id().clone()))?;
+    Ok(Received::new(logout).with_relay_state(relay_state))
 }
 
 fn respond_slo_impl(
@@ -1107,14 +1090,17 @@ fn respond_slo_impl(
     request: &Received<LogoutRequest>,
     options: RespondSlo,
 ) -> Result<Outbound<LogoutResponse>, SamlError> {
-    options.relay_state.validate()?;
+    let relay_state = options
+        .relay_state
+        .unwrap_or_else(|| request.relay_state().clone());
+    relay_state.validate()?;
     let context = create_logout_response_checked(
         local_setting,
         local_metadata,
         peer_metadata,
         options.binding.as_binding(),
         Some(request.message().id().as_str()),
-        options.relay_state.as_deref(),
+        relay_state.as_deref(),
         logout_response_signing(local_setting, options.signing),
     )?;
     Outbound::<LogoutResponse>::try_from(context)
@@ -1127,7 +1113,7 @@ fn finish_slo_impl(
     peer_metadata: &Metadata,
     pending: &PendingLogoutRequest,
     input: BrowserInput<LogoutResponse>,
-    validation: SamlValidationContext<'_>,
+    mut validation: SamlValidationContext<'_>,
 ) -> Result<LogoutCompleted, SamlError> {
     ensure_entity_id(pending.peer_entity_id(), peer_entity_id)?;
     ensure_logout_response_binding(input_binding(&input), pending.response_binding())?;
@@ -1148,6 +1134,8 @@ fn finish_slo_impl(
         pending.response_binding(),
         response.destination(),
     )?;
+    validation
+        .check_and_store_message_replay(ReplayKey::LogoutResponseId(response.id().clone()))?;
     Ok(LogoutCompleted::from_response(
         peer_entity_id.clone(),
         response,
@@ -1156,7 +1144,7 @@ fn finish_slo_impl(
 
 fn logout_request_signing(setting: &EntitySetting, signing: LogoutSigning) -> bool {
     match signing {
-        LogoutSigning::FollowPolicy => setting.want_logout_request_signed,
+        LogoutSigning::FollowLocalPolicy => setting.want_logout_request_signed,
         LogoutSigning::Sign => true,
         LogoutSigning::DoNotSignForCompatibility => false,
     }
@@ -1164,7 +1152,7 @@ fn logout_request_signing(setting: &EntitySetting, signing: LogoutSigning) -> bo
 
 fn logout_response_signing(setting: &EntitySetting, signing: LogoutSigning) -> bool {
     match signing {
-        LogoutSigning::FollowPolicy => setting.want_logout_response_signed,
+        LogoutSigning::FollowLocalPolicy => setting.want_logout_response_signed,
         LogoutSigning::Sign => true,
         LogoutSigning::DoNotSignForCompatibility => false,
     }

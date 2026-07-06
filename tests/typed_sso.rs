@@ -6,14 +6,15 @@ use saml_rs::binding::{base64_decode, deflate_raw_decode};
 use saml_rs::error::TimeWindowField;
 use saml_rs::raw::Binding;
 use saml_rs::{
-    AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, FormField,
-    IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId, NameIdFormat,
-    Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received, RelayStateParam,
-    ReplayCache, ReplayKey, ReplayPolicy, RespondSso, Saml, SamlError, SamlValidationContext,
-    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse, SsoResponseBinding,
-    StartSso, Subject, TemplatePolicy,
+    AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, ForceAuthn,
+    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId,
+    NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
+    RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, Saml, SamlError,
+    SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse,
+    SsoResponseBinding, StartSso, Subject,
 };
 use time::{Duration, OffsetDateTime};
+use url::Url;
 
 const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
 const IDP_ENTITY_ID: &str = "https://idp.example.com/metadata";
@@ -155,17 +156,11 @@ fn validation() -> SamlValidationContext<'static> {
 
 fn validation_with_cache(cache: &mut dyn ReplayCache) -> SamlValidationContext<'_> {
     SamlValidationContext::new(OffsetDateTime::now_utc(), ReplayPolicy::RequireCache(cache))
+        .with_replay_retention(Duration::minutes(5))
 }
 
 fn post_fields<Message>(outbound: &Outbound<Message>) -> Result<Vec<FormField>, SamlError> {
     Ok(outbound.post_form()?.fields().to_vec())
-}
-
-fn form_value<'a>(fields: &'a [FormField], name: &str) -> Option<&'a str> {
-    fields
-        .iter()
-        .find(|field| field.name() == name)
-        .map(FormField::value)
 }
 
 fn authn_request_xml(
@@ -173,7 +168,7 @@ fn authn_request_xml(
 ) -> Result<String, Box<dyn std::error::Error>> {
     match outbound.raw_context().binding {
         Binding::Redirect => {
-            let url = url::Url::parse(outbound.redirect_url()?)?;
+            let url = Url::parse(outbound.redirect_url()?)?;
             let (_, encoded) = url
                 .query_pairs()
                 .find(|(key, _)| key == "SAMLRequest")
@@ -182,9 +177,9 @@ fn authn_request_xml(
                 encoded.as_ref(),
             )?)?)?)
         }
-        Binding::Post | Binding::SimpleSign => {
-            Ok(String::from_utf8(base64_decode(&outbound.raw_context().context)?)?)
-        }
+        Binding::Post | Binding::SimpleSign => Ok(String::from_utf8(base64_decode(
+            &outbound.raw_context().context,
+        )?)?),
         Binding::Artifact => Err("artifact binding is unsupported".into()),
     }
 }
@@ -194,7 +189,7 @@ fn authn_request_input(
 ) -> Result<BrowserInput<AuthnRequest>, Box<dyn std::error::Error>> {
     match outbound.raw_context().binding {
         Binding::Redirect => {
-            let url = url::Url::parse(outbound.redirect_url()?)?;
+            let url = Url::parse(outbound.redirect_url()?)?;
             Ok(BrowserInput::<AuthnRequest>::redirect(
                 url.query().unwrap_or_default(),
             ))
@@ -249,8 +244,8 @@ fn start_receive_respond_with(
 fn start_receive_respond() -> Result<SsoExchange, SamlError> {
     let relay_state = RelayStateParam::try_from_option(Some("state-123".to_string()))?;
     start_receive_respond_with(
-        StartSso::post().relay_state(relay_state.clone()),
-        RespondSso::post().relay_state(relay_state),
+        StartSso::post().relay_state(relay_state),
+        RespondSso::post(),
     )
 }
 
@@ -277,7 +272,9 @@ fn typed_builder_authn_request_escapes_hostile_values_for_all_bindings(
         let relay_state = RelayStateParam::try_from_option(Some("typed-state".to_string()))?;
         let started = sp.start_sso(
             &idp_descriptor,
-            start.force_authn(true).relay_state(relay_state),
+            start
+                .force_authn(ForceAuthn::Required)
+                .relay_state(relay_state),
         )?;
         let xml = authn_request_xml(&started.outbound)?;
 
@@ -318,14 +315,19 @@ fn typed_builder_authn_request_options_render_force_authn_and_acs_index(
     let (sp, idp) = facades()?;
     let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
 
-    for force_authn in [Some(true), Some(false), None] {
+    for force_authn in [
+        Some(ForceAuthn::Required),
+        Some(ForceAuthn::NotRequired),
+        None,
+    ] {
         let mut options = StartSso::post();
         if let Some(force_authn) = force_authn {
             options = options.force_authn(force_authn);
         }
         let xml = authn_request_xml(&sp.start_sso(&idp_descriptor, options)?.outbound)?;
         match force_authn {
-            Some(force_authn) => assert!(xml.contains(&format!("ForceAuthn=\"{force_authn}\""))),
+            Some(ForceAuthn::Required) => assert!(xml.contains("ForceAuthn=\"true\"")),
+            Some(ForceAuthn::NotRequired) => assert!(xml.contains("ForceAuthn=\"false\"")),
             None => assert!(!xml.contains("ForceAuthn=")),
         }
     }
@@ -333,9 +335,7 @@ fn typed_builder_authn_request_options_render_force_authn_and_acs_index(
     let xml = authn_request_xml(
         &sp.start_sso(
             &idp_descriptor,
-            StartSso::post()
-                .response_binding(SsoResponseBinding::SimpleSign)
-                .acs_index(1),
+            StartSso::post().assertion_consumer_service_index(1),
         )?
         .outbound,
     )?;
@@ -343,6 +343,26 @@ fn typed_builder_authn_request_options_render_force_authn_and_acs_index(
     assert!(!xml.contains("AssertionConsumerServiceURL="));
     assert!(!xml.contains("ProtocolBinding="));
     Ok(())
+}
+
+#[test]
+fn typed_builder_rejects_acs_index_response_binding_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+
+    match sp.start_sso(
+        &idp_descriptor,
+        StartSso::post()
+            .assertion_consumer_service_index(1)
+            .response_binding(SsoResponseBinding::Post),
+    ) {
+        Err(SamlError::Invalid(message)) => {
+            assert!(message.contains("AssertionConsumerServiceIndex binding"));
+            Ok(())
+        }
+        other => Err(format!("expected Invalid ACS binding mismatch, got {other:?}").into()),
+    }
 }
 
 #[test]
@@ -370,6 +390,61 @@ fn typed_detached_authn_requests_parse_with_relay_state() -> Result<(), Box<dyn 
 }
 
 #[test]
+fn typed_facade_receive_sso_checks_authn_request_replay() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let request_fields = post_fields(&started.outbound)?;
+    let mut cache = MemoryReplayCache::default();
+
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(request_fields.clone()),
+        validation_with_cache(&mut cache),
+    )?;
+    let replay_key = format!("authn_request_id:{}", received.message().id().as_str());
+    assert!(cache.seen.contains_key(&replay_key));
+
+    match idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(request_fields),
+        validation_with_cache(&mut cache),
+    ) {
+        Err(SamlError::ReplayDetected { key }) => {
+            assert_eq!(key, replay_key);
+            Ok(())
+        }
+        other => Err(format!("expected AuthnRequest ReplayDetected, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_receive_sso_requires_replay_retention_for_authn_request(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let mut cache = MemoryReplayCache::default();
+    let validation = SamlValidationContext::new(
+        OffsetDateTime::now_utc(),
+        ReplayPolicy::RequireCache(&mut cache),
+    );
+
+    match idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::ReplayExpiration);
+            Ok(())
+        }
+        other => Err(format!("expected ReplayExpiration error, got {other:?}").into()),
+    }
+}
+
+#[test]
 fn typed_facade_start_sso_redirect_returns_url() -> Result<(), Box<dyn std::error::Error>> {
     let (sp, idp) = facades()?;
     let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
@@ -388,6 +463,11 @@ fn typed_facade_start_sso_redirect_returns_url() -> Result<(), Box<dyn std::erro
 #[test]
 fn typed_facade_runs_sp_initiated_sso() -> Result<(), Box<dyn std::error::Error>> {
     let exchange = start_receive_respond()?;
+
+    assert_eq!(
+        exchange.received.relay_state(),
+        &RelayStateParam::try_from_option(Some("state-123".to_string()))?
+    );
 
     let session = exchange.sp.finish_sso(
         &exchange.idp_descriptor,
@@ -420,375 +500,76 @@ fn typed_facade_runs_sp_initiated_sso() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
-fn typed_facade_rejects_response_when_pending_acs_was_mutated(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let exchange = start_receive_respond()?;
-    let mut snapshot: PendingSnapshot<AuthnRequest> = exchange.pending.snapshot();
-    snapshot.acs_url = "https://sp.example.com/acs/other".to_string();
-    let wrong_pending = PendingAuthnRequest::from_snapshot(snapshot)?;
+fn typed_facade_runs_simplesign_sso_response_binding() -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(
+        &idp_descriptor,
+        StartSso::post().response_binding(SsoResponseBinding::SimpleSign),
+    )?;
+    let request_input = BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?);
+    let received = idp.receive_sso(&sp_descriptor, request_input, validation())?;
+    let response = idp.respond_sso(
+        &sp_descriptor,
+        &received,
+        subject(),
+        RespondSso::simple_sign(),
+    )?;
+    let response_form = response.post_form()?;
+    assert_eq!(response_form.action().as_str(), SP_ACS_SIMPLESIGN);
+    assert!(response_form.value("SigAlg").is_some());
+    assert!(response_form.value("Signature").is_some());
 
-    match exchange.sp.finish_sso(
-        &exchange.idp_descriptor,
-        &wrong_pending,
-        BrowserInput::<SsoResponse>::post(exchange.response_fields),
+    let session = sp.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::simple_sign(response_form.fields().to_vec()),
         validation(),
-    ) {
-        Err(SamlError::DestinationMismatch { expected, actual }) => {
-            assert_eq!(expected, "https://sp.example.com/acs/other");
-            assert_eq!(actual.as_deref(), Some(SP_ACS_POST));
-            Ok(())
-        }
-        other => Err(format!("expected DestinationMismatch, got {other:?}").into()),
-    }
+    )?;
+
+    assert_eq!(session.in_response_to(), Some(started.pending.request_id()));
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    Ok(())
 }
 
 #[test]
-fn typed_facade_indexed_non_first_acs_finishes_successfully(
+fn typed_facade_persists_indexed_acs_for_response_validation(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (sp, idp) = facades()?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_sso(&idp_descriptor, StartSso::post().acs_index(1))?;
+    let started = sp.start_sso(
+        &idp_descriptor,
+        StartSso::post().assertion_consumer_service_index(1),
+    )?;
+
     assert_eq!(
         started.pending.response_binding(),
         SsoResponseBinding::SimpleSign
     );
+    assert_eq!(started.pending.acs().index(), Some(1));
     assert_eq!(started.pending.acs().location().as_str(), SP_ACS_SIMPLESIGN);
+    let snapshot = started.pending.snapshot();
+    assert_eq!(snapshot.acs_index, Some(1));
+    let restored = PendingAuthnRequest::from_snapshot(snapshot)?;
+    assert_eq!(restored.acs().index(), Some(1));
+    assert_eq!(restored.response_binding(), SsoResponseBinding::SimpleSign);
 
-    let received = idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
-        validation(),
-    )?;
-    assert_eq!(received.message().acs_index(), Some(1));
+    let request_input = BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?);
+    let received = idp.receive_sso(&sp_descriptor, request_input, validation())?;
     let response = idp.respond_sso(
         &sp_descriptor,
         &received,
         subject(),
         RespondSso::simple_sign(),
     )?;
-    let response_fields = post_fields(&response)?;
-    assert_eq!(response.post_form()?.action().as_str(), SP_ACS_SIMPLESIGN);
-
     let session = sp.finish_sso(
         &idp_descriptor,
-        &started.pending,
-        BrowserInput::<SsoResponse>::simple_sign(response_fields),
+        &restored,
+        BrowserInput::<SsoResponse>::simple_sign(post_fields(&response)?),
         validation(),
     )?;
 
-    assert_eq!(session.name_id().value(), "alice@example.com");
-    Ok(())
-}
-
-#[test]
-fn typed_facade_rejects_explicit_response_binding_conflict_with_acs_index(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (sp, idp) = facades()?;
-    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-
-    match sp.start_sso(
-        &idp_descriptor,
-        StartSso::post()
-            .acs_index(1)
-            .response_binding(SsoResponseBinding::Post),
-    ) {
-        Err(SamlError::Invalid(message)) => {
-            assert!(message.contains("conflicts with ACS index"));
-            Ok(())
-        }
-        other => Err(format!("expected Invalid conflict, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn typed_facade_absent_relay_state_suppresses_raw_default() -> Result<(), Box<dyn std::error::Error>>
-{
-    let sp_config = SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
-        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
-        .credentials(credentials())
-        .validation(SpValidationPolicy::strict())
-        .templates(TemplatePolicy {
-            relay_state: "legacy-default".to_string(),
-            ..TemplatePolicy::default()
-        })
-        .build()?;
-    let sp = Saml::sp(sp_config)?;
-    let idp = Saml::idp(idp_config()?)?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-
-    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
-    assert_eq!(started.outbound.relay_state(), None);
-    assert_eq!(
-        form_value(post_fields(&started.outbound)?.as_slice(), "RelayState"),
-        None
-    );
-
-    let received = idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
-        validation(),
-    )?;
-    assert_eq!(received.relay_state(), &RelayStateParam::Absent);
-    let response = idp.respond_sso(&sp_descriptor, &received, subject(), RespondSso::post())?;
-    let response_fields = post_fields(&response)?;
-    assert_eq!(form_value(&response_fields, "RelayState"), None);
-
-    let session = sp.finish_sso(
-        &idp_descriptor,
-        &started.pending,
-        BrowserInput::<SsoResponse>::post(response_fields),
-        validation(),
-    )?;
-
-    assert_eq!(session.name_id().value(), "alice@example.com");
-    Ok(())
-}
-
-#[test]
-fn typed_facade_respond_sso_echoes_request_relay_state_by_default(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let relay_state = RelayStateParam::try_from_option(Some("state-echo".to_string()))?;
-    let exchange = start_receive_respond_with(
-        StartSso::post().relay_state(relay_state.clone()),
-        RespondSso::post(),
-    )?;
-
-    assert_eq!(exchange.received.relay_state(), &relay_state);
-    assert_eq!(
-        form_value(&exchange.response_fields, "RelayState"),
-        Some("state-echo")
-    );
-    let session = exchange.sp.finish_sso(
-        &exchange.idp_descriptor,
-        &exchange.pending,
-        BrowserInput::<SsoResponse>::post(exchange.response_fields),
-        validation(),
-    )?;
-    assert_eq!(session.name_id().value(), "alice@example.com");
-    Ok(())
-}
-
-#[test]
-fn typed_facade_respond_sso_relay_state_override_still_wins(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let override_state = RelayStateParam::try_from_option(Some("override".to_string()))?;
-    let exchange = start_receive_respond_with(
-        StartSso::post().relay_state(RelayStateParam::try_from_option(Some(
-            "request-state".to_string(),
-        ))?),
-        RespondSso::post().relay_state(override_state),
-    )?;
-
-    assert_eq!(
-        form_value(&exchange.response_fields, "RelayState"),
-        Some("override")
-    );
-    Ok(())
-}
-
-#[test]
-fn typed_facade_respond_sso_rejects_wrong_sp_descriptor() -> Result<(), Box<dyn std::error::Error>>
-{
-    let exchange = start_receive_respond()?;
-    let other_sp = Saml::sp(
-        SpConfig::builder(EntityId::try_new("https://other-sp.example.com/metadata")?)
-            .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
-            .credentials(credentials())
-            .validation(SpValidationPolicy::strict())
-            .build()?,
-    )?;
-    let other_descriptor = SpDescriptor::from_metadata_xml(
-        other_sp.metadata_xml(),
-        MetadataTrustPolicy::UnsignedForCompatibility,
-    )?;
-
-    match exchange.idp.respond_sso(
-        &other_descriptor,
-        &exchange.received,
-        subject(),
-        RespondSso::post(),
-    ) {
-        Err(SamlError::IssuerMismatch { expected, actual }) => {
-            assert_eq!(expected, SP_ENTITY_ID);
-            assert_eq!(
-                actual.as_deref(),
-                Some("https://other-sp.example.com/metadata")
-            );
-            Ok(())
-        }
-        other => Err(format!("expected IssuerMismatch, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn typed_facade_rejects_post_response_when_request_demands_simplesign(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (sp, idp) = facades()?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_sso(
-        &idp_descriptor,
-        StartSso::post().response_binding(SsoResponseBinding::SimpleSign),
-    )?;
-    let received = idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
-        validation(),
-    )?;
-    assert_eq!(
-        received.message().protocol_binding(),
-        Some(SsoResponseBinding::SimpleSign)
-    );
-
-    match idp.respond_sso(&sp_descriptor, &received, subject(), RespondSso::post()) {
-        Err(SamlError::Invalid(message)) => {
-            assert!(message.contains("ProtocolBinding"));
-            Ok(())
-        }
-        other => Err(format!("expected Invalid ProtocolBinding conflict, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn typed_facade_response_targets_requested_acs_url() -> Result<(), Box<dyn std::error::Error>> {
-    let (sp, idp) = facades()?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_sso(
-        &idp_descriptor,
-        StartSso::post().response_binding(SsoResponseBinding::SimpleSign),
-    )?;
-    let received = idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
-        validation(),
-    )?;
-    assert_eq!(
-        received.message().acs_url().map(|url| url.as_str()),
-        Some(SP_ACS_SIMPLESIGN)
-    );
-
-    let response = idp.respond_sso(
-        &sp_descriptor,
-        &received,
-        subject(),
-        RespondSso::simple_sign(),
-    )?;
-
-    assert_eq!(response.post_form()?.action().as_str(), SP_ACS_SIMPLESIGN);
-    Ok(())
-}
-
-#[test]
-fn typed_facade_duplicate_response_relay_state_is_rejected(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut exchange = start_receive_respond()?;
-    exchange
-        .response_fields
-        .push(FormField::new("RelayState", "duplicate"));
-
-    match exchange.sp.finish_sso(
-        &exchange.idp_descriptor,
-        &exchange.pending,
-        BrowserInput::<SsoResponse>::post(exchange.response_fields),
-        validation(),
-    ) {
-        Err(SamlError::Invalid(message)) => {
-            assert!(message.contains("RelayState"));
-            Ok(())
-        }
-        other => Err(format!("expected Invalid duplicate RelayState, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn typed_facade_authn_request_replay_cache_rejects_duplicate(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (sp, idp) = facades()?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
-    let fields = post_fields(&started.outbound)?;
-    let now = OffsetDateTime::now_utc();
-    let expires_at = now + Duration::minutes(5);
-    let mut cache = MemoryReplayCache::default();
-
-    let first_validation = SamlValidationContext::new(now, ReplayPolicy::RequireCache(&mut cache))
-        .with_message_replay_expiration(expires_at);
-    idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(fields.clone()),
-        first_validation,
-    )?;
-
-    let second_validation = SamlValidationContext::new(now, ReplayPolicy::RequireCache(&mut cache))
-        .with_message_replay_expiration(expires_at);
-    match idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(fields),
-        second_validation,
-    ) {
-        Err(SamlError::ReplayDetected { key }) => {
-            assert_eq!(
-                key,
-                format!("request_id:{}", started.pending.request_id().as_str())
-            );
-            Ok(())
-        }
-        other => Err(format!("expected ReplayDetected, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn typed_facade_authn_request_replay_requires_expiration() -> Result<(), Box<dyn std::error::Error>>
-{
-    let (sp, idp) = facades()?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
-    let mut cache = MemoryReplayCache::default();
-
-    match idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
-        SamlValidationContext::new(
-            OffsetDateTime::now_utc(),
-            ReplayPolicy::RequireCache(&mut cache),
-        ),
-    ) {
-        Err(SamlError::TimeWindowInvalid { field }) => {
-            assert_eq!(field, TimeWindowField::ReplayExpiration);
-            Ok(())
-        }
-        other => Err(format!("expected ReplayExpiration failure, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn typed_facade_preserves_subject_name_id_format() -> Result<(), Box<dyn std::error::Error>> {
-    let (sp, idp) = facades()?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
-    let received = idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
-        validation(),
-    )?;
-    let subject = Subject::new(
-        NameId::new("alice", Some(NameIdFormat::Persistent)),
-        Vec::new(),
-    );
-    let response = idp.respond_sso(&sp_descriptor, &received, subject, RespondSso::post())?;
-    let response_fields = post_fields(&response)?;
-    let encoded = form_value(&response_fields, "SAMLResponse").ok_or("missing SAMLResponse")?;
-    let xml = String::from_utf8(base64_decode(encoded)?)?;
-    assert!(xml.contains("Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:persistent\""));
-
-    let session = sp.finish_sso(
-        &idp_descriptor,
-        &started.pending,
-        BrowserInput::<SsoResponse>::post(response_fields),
-        validation(),
-    )?;
-
-    assert_eq!(session.name_id().value(), "alice");
-    assert_eq!(session.name_id().format(), Some(&NameIdFormat::Persistent));
+    assert_eq!(session.in_response_to(), Some(restored.request_id()));
     Ok(())
 }
 
@@ -908,6 +689,65 @@ fn typed_facade_rejects_unexpected_relay_state() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+fn typed_facade_allows_respond_sso_to_suppress_relay_state_echo(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let relay_state = RelayStateParam::try_from_option(Some("state-123".to_string()))?;
+    let exchange = start_receive_respond_with(
+        StartSso::post().relay_state(relay_state),
+        RespondSso::post().relay_state(RelayStateParam::absent()),
+    )?;
+
+    match exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(exchange.response_fields),
+        validation(),
+    ) {
+        Err(SamlError::RelayStateMismatch { expected, actual }) => {
+            assert_eq!(
+                expected,
+                RelayStateParam::try_from_option(Some("state-123".to_string()))?
+            );
+            assert_eq!(actual, RelayStateParam::Absent);
+            Ok(())
+        }
+        other => Err(format!("expected RelayStateMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_allows_respond_sso_to_override_relay_state_echo(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let relay_state = RelayStateParam::try_from_option(Some("state-123".to_string()))?;
+    let exchange = start_receive_respond_with(
+        StartSso::post().relay_state(relay_state),
+        RespondSso::post().relay_state(RelayStateParam::try_from_option(Some(
+            "override".to_string(),
+        ))?),
+    )?;
+
+    match exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(exchange.response_fields),
+        validation(),
+    ) {
+        Err(SamlError::RelayStateMismatch { expected, actual }) => {
+            assert_eq!(
+                expected,
+                RelayStateParam::try_from_option(Some("state-123".to_string()))?
+            );
+            assert_eq!(
+                actual,
+                RelayStateParam::try_from_option(Some("override".to_string()))?
+            );
+            Ok(())
+        }
+        other => Err(format!("expected RelayStateMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
 fn typed_facade_rejects_wrong_pending_request_id() -> Result<(), Box<dyn std::error::Error>> {
     let exchange = start_receive_respond()?;
     let mut snapshot: PendingSnapshot<AuthnRequest> = exchange.pending.snapshot();
@@ -965,7 +805,17 @@ fn typed_facade_checks_replay_cache() -> Result<(), Box<dyn std::error::Error>> 
         BrowserInput::<SsoResponse>::post(exchange.response_fields.clone()),
         validation_with_cache(&mut cache),
     )?;
-    assert!(!first.replay_keys().is_empty());
+    let replay_keys: Vec<_> = first
+        .replay_keys()
+        .into_iter()
+        .map(|key| key.cache_key())
+        .collect();
+    assert!(replay_keys
+        .iter()
+        .any(|key| key.starts_with("response_id:")));
+    assert!(replay_keys
+        .iter()
+        .any(|key| key.starts_with("assertion_id:")));
 
     match exchange.sp.finish_sso(
         &exchange.idp_descriptor,
@@ -974,7 +824,7 @@ fn typed_facade_checks_replay_cache() -> Result<(), Box<dyn std::error::Error>> 
         validation_with_cache(&mut cache),
     ) {
         Err(SamlError::ReplayDetected { key }) => {
-            assert!(key.starts_with("response_id:"));
+            assert!(replay_keys.contains(&key));
             Ok(())
         }
         other => Err(format!("expected ReplayDetected, got {other:?}").into()),

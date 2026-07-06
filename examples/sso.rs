@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &sp_descriptor,
         &request,
         Subject::new(NameId::new("alice@example.com", None), Vec::new()),
-        RespondSso::post().relay_state(started.pending.relay_state().clone()),
+        RespondSso::post(),
     )?;
 
     let session = sp.finish_sso(

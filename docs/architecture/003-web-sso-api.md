@@ -1,6 +1,6 @@
 # Typed Web SSO API
 
-This document describes the target browser Web SSO API.
+This document describes the typed browser Web SSO API.
 
 ## SP-Initiated Login
 
@@ -20,7 +20,7 @@ store_pending(started.pending.snapshot());
 send_to_browser(started.outbound);
 ```
 
-Proposed methods:
+Method:
 
 ```rust
 impl Saml<Sp> {
@@ -66,16 +66,13 @@ let pending = Pending::<AuthnRequest>::from_snapshot(load_pending_snapshot())?;
 
 let input = BrowserInput::<SsoResponse>::post(form_fields);
 
-let validation = SamlValidationContext {
-    now,
-    clock_skew,
-    replay: ReplayPolicy::RequireCache(&mut replay_cache),
-};
+let validation = SamlValidationContext::new(now, ReplayPolicy::RequireCache(&mut replay_cache))
+    .with_clock_skew(clock_skew);
 
 let session = sp_saml.finish_sso(&idp_descriptor, &pending, input, validation)?;
 ```
 
-Proposed method:
+Method:
 
 ```rust
 impl Saml<Sp> {
@@ -114,7 +111,7 @@ let session = sp.accept_unsolicited_sso(
 )?;
 ```
 
-Proposed method:
+Method:
 
 ```rust
 impl Saml<Sp> {
@@ -147,7 +144,7 @@ let request = idp_saml.receive_sso(
 )?;
 ```
 
-Proposed method:
+Method:
 
 ```rust
 impl Saml<Idp> {
@@ -169,6 +166,9 @@ Rules:
   AuthnRequest validation.
 - Validate requested ACS URL/index against SP metadata before response
   issuance.
+- When `AssertionConsumerServiceIndex` is used, resolve the indexed ACS from
+  SP metadata and infer the response binding from that endpoint. If a caller
+  also sets `response_binding`, it must match the indexed ACS binding.
 
 ## IdP Responding to AuthnRequest
 
@@ -177,11 +177,11 @@ let outbound = idp_saml.respond_sso(
     &sp_descriptor,
     &request,
     subject,
-    RespondSso::post().relay_state(request.relay_state().cloned()),
+    RespondSso::post(),
 )?;
 ```
 
-Proposed methods:
+Methods:
 
 ```rust
 impl Saml<Idp> {
@@ -206,7 +206,11 @@ Rules:
 
 - `respond_sso` gets `InResponseTo` from `Received<AuthnRequest>`, not a raw
   string.
+- `respond_sso` echoes `Received<AuthnRequest>` RelayState by default. An
+  explicit `relay_state(RelayStateParam::absent())` suppresses echo, and an
+  explicit present RelayState overrides it.
 - `initiate_sso` omits `InResponseTo`.
+- `initiate_sso` does not synthesize RelayState by default.
 - Typed SSO responses cannot use Redirect.
 
 ## Browser Transport Types

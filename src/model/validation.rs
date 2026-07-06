@@ -1,6 +1,6 @@
 use super::{AssertionId, MessageId};
 use crate::error::SamlError;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 
 /// Clock skew applied to SAML time-window checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,33 +68,41 @@ impl Default for ClockSkew {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[expect(
     clippy::enum_variant_names,
-    reason = "public replay keys include the SAML identifier family in each variant"
+    reason = "variants name the exact SAML identifier family used in stable cache keys"
 )]
 pub enum ReplayKey {
+    /// SAML AuthnRequest ID.
+    AuthnRequestId(MessageId),
+    /// SAML LogoutRequest ID.
+    LogoutRequestId(MessageId),
+    /// SAML LogoutResponse ID.
+    LogoutResponseId(MessageId),
     /// SAML protocol response ID.
     ResponseId(MessageId),
     /// SAML assertion ID.
     AssertionId(AssertionId),
-    /// SAML protocol request ID.
-    RequestId(MessageId),
 }
 
 impl ReplayKey {
     /// Stable key family.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::AuthnRequestId(_) => "authn_request_id",
+            Self::LogoutRequestId(_) => "logout_request_id",
+            Self::LogoutResponseId(_) => "logout_response_id",
             Self::ResponseId(_) => "response_id",
             Self::AssertionId(_) => "assertion_id",
-            Self::RequestId(_) => "request_id",
         }
     }
 
     /// Raw SAML identifier value.
     pub fn value(&self) -> &str {
         match self {
+            Self::AuthnRequestId(id) | Self::LogoutRequestId(id) | Self::LogoutResponseId(id) => {
+                id.as_str()
+            }
             Self::ResponseId(id) => id.as_str(),
             Self::AssertionId(id) => id.as_str(),
-            Self::RequestId(id) => id.as_str(),
         }
     }
 
@@ -132,7 +140,7 @@ pub struct SamlValidationContext<'a> {
     now: OffsetDateTime,
     clock_skew: ClockSkew,
     replay: ReplayPolicy<'a>,
-    message_replay_expires_at: Option<OffsetDateTime>,
+    replay_retention: Option<Duration>,
 }
 
 impl<'a> SamlValidationContext<'a> {
@@ -142,7 +150,7 @@ impl<'a> SamlValidationContext<'a> {
             now,
             clock_skew: ClockSkew::strict(),
             replay,
-            message_replay_expires_at: None,
+            replay_retention: None,
         }
     }
 
@@ -152,10 +160,10 @@ impl<'a> SamlValidationContext<'a> {
         self
     }
 
-    /// Set replay-cache expiration for inbound messages that do not carry a
-    /// protocol `NotOnOrAfter`.
-    pub fn with_message_replay_expiration(mut self, expires_at: OffsetDateTime) -> Self {
-        self.message_replay_expires_at = Some(expires_at);
+    /// Set explicit replay retention for protocol messages that do not carry a
+    /// SAML `NotOnOrAfter` value suitable for cache expiry.
+    pub fn with_replay_retention(mut self, retention: Duration) -> Self {
+        self.replay_retention = Some(retention);
         self
     }
 
@@ -169,11 +177,44 @@ impl<'a> SamlValidationContext<'a> {
         self.clock_skew
     }
 
+    /// Replay retention for protocol message IDs without SAML expiry.
+    pub fn replay_retention(&self) -> Option<Duration> {
+        self.replay_retention
+    }
+
     pub(crate) fn replay_policy(&mut self) -> &mut ReplayPolicy<'a> {
         &mut self.replay
     }
 
-    pub(crate) fn message_replay_expires_at(&self) -> Option<OffsetDateTime> {
-        self.message_replay_expires_at
+    pub(crate) fn check_and_store_message_replay(
+        &mut self,
+        key: ReplayKey,
+    ) -> Result<(), SamlError> {
+        if matches!(&self.replay, ReplayPolicy::DisabledForCompatibility) {
+            return Ok(());
+        }
+        let expires_at = self.message_replay_expires_at()?;
+        match &mut self.replay {
+            ReplayPolicy::DisabledForCompatibility => Ok(()),
+            ReplayPolicy::RequireCache(cache) => cache.check_and_store(key, expires_at),
+        }
+    }
+
+    fn message_replay_expires_at(&self) -> Result<OffsetDateTime, SamlError> {
+        let Some(retention) = self.replay_retention else {
+            return Err(SamlError::TimeWindowInvalid {
+                field: crate::error::TimeWindowField::ReplayExpiration,
+            });
+        };
+        if retention <= Duration::ZERO {
+            return Err(SamlError::TimeWindowInvalid {
+                field: crate::error::TimeWindowField::ReplayExpiration,
+            });
+        }
+        self.now
+            .checked_add(retention)
+            .ok_or(SamlError::TimeWindowInvalid {
+                field: crate::error::TimeWindowField::ReplayExpiration,
+            })
     }
 }

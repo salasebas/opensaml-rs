@@ -1,12 +1,11 @@
 use super::extract::{name_id_policy_from_extract, optional_endpoint, optional_u16, required_str};
 use super::identifiers::MessageId;
 use super::subject::NameIdPolicy;
-use super::{EndpointUrl, ReplayKey, ReplayPolicy, SamlValidationContext};
+use super::{EndpointUrl, ReplayKey, SamlValidationContext};
 use crate::browser::SsoResponseBinding;
 use crate::config::EntityId;
 use crate::constants::Binding;
 use crate::error::SamlError;
-use crate::error::TimeWindowField;
 use crate::raw::FlowResult;
 
 /// Parsed AuthnRequest result.
@@ -63,22 +62,7 @@ impl AuthnRequest {
         &self,
         validation: &mut SamlValidationContext<'_>,
     ) -> Result<(), SamlError> {
-        let validation_now = validation.now();
-        let expires_at = validation.message_replay_expires_at();
-        match validation.replay_policy() {
-            ReplayPolicy::DisabledForCompatibility => Ok(()),
-            ReplayPolicy::RequireCache(cache) => {
-                let expires_at = expires_at.ok_or(SamlError::TimeWindowInvalid {
-                    field: TimeWindowField::ReplayExpiration,
-                })?;
-                if validation_now >= expires_at {
-                    return Err(SamlError::TimeWindowInvalid {
-                        field: TimeWindowField::ReplayExpiration,
-                    });
-                }
-                cache.check_and_store(ReplayKey::RequestId(self.id.clone()), expires_at)
-            }
-        }
+        validation.check_and_store_message_replay(ReplayKey::AuthnRequestId(self.id.clone()))
     }
 
     /// Raw validated flow result.

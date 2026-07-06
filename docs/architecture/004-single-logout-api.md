@@ -8,7 +8,7 @@ finish with typed correlation.
 ```rust
 pub struct LogoutSubject {
     name_id: NameId,
-    session_indexes: Vec<SessionIndex>,
+    session_index: Option<SessionIndex>,
 }
 
 impl SsoSession {
@@ -35,7 +35,7 @@ pub struct RespondSlo {
 }
 
 pub enum LogoutSigning {
-    FollowPolicy,
+    FollowLocalPolicy,
     Sign,
     DoNotSignForCompatibility,
 }
@@ -109,7 +109,7 @@ impl Saml<Idp> {
 - request ID;
 - issuer;
 - NameID;
-- session indexes;
+- parsed inbound session indexes;
 - RelayState;
 - raw flow.
 
@@ -141,6 +141,9 @@ impl Saml<Idp> {
 Rules:
 
 - `InResponseTo` comes from `Received<LogoutRequest>`.
+- `respond_slo` echoes `Received<LogoutRequest>` RelayState by default. An
+  explicit `relay_state(RelayStateParam::absent())` suppresses echo, and an
+  explicit present RelayState overrides it.
 - Callers must not pass arbitrary request ID strings in the typed API.
 - Custom LogoutResponse rendering must not silently emit wrong or empty
   `InResponseTo` when a typed request exists.
