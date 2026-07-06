@@ -57,6 +57,7 @@ impl SsoEndpoint {
         Endpoint {
             binding: self.binding.as_binding(),
             location: self.url.as_str().to_string(),
+            index: None,
             is_default: false,
         }
     }
@@ -130,7 +131,7 @@ impl AcsEndpoint {
         Ok(Self {
             binding: SsoResponseBinding::try_from(endpoint.binding)?,
             url: EndpointUrl::try_new(endpoint.location)?,
-            index: None,
+            index: endpoint.index,
             is_default: endpoint.is_default,
         })
     }
@@ -140,6 +141,7 @@ impl AcsEndpoint {
         Endpoint {
             binding: self.binding.as_binding(),
             location: self.url.as_str().to_string(),
+            index: self.index,
             is_default: self.is_default,
         }
     }
@@ -212,6 +214,7 @@ impl SloEndpoint {
         Endpoint {
             binding: self.binding.as_binding(),
             location: self.url.as_str().to_string(),
+            index: None,
             is_default: false,
         }
     }

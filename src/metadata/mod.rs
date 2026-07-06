@@ -5,6 +5,8 @@ pub mod idp;
 pub mod sp;
 mod write;
 
+#[cfg(feature = "crypto-bergshamra")]
+pub use crate::crypto::MetadataSignatureVerification;
 pub use generate::{
     generate_idp_metadata, generate_sp_metadata, try_generate_idp_metadata, Endpoint,
     IdpMetadataConfig, SpMetadataConfig,
@@ -247,7 +249,7 @@ impl Metadata {
         &self,
         trusted_certificates: &[String],
         limits: XmlLimits,
-    ) -> Result<crate::crypto::MetadataSignatureVerification, SamlError> {
+    ) -> Result<MetadataSignatureVerification, SamlError> {
         crate::crypto::verify_metadata_signature_detailed_with_limits(
             &self.xml,
             trusted_certificates,

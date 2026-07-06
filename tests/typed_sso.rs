@@ -366,6 +366,51 @@ fn typed_builder_rejects_acs_index_response_binding_mismatch(
 }
 
 #[test]
+fn typed_facade_rejects_unknown_acs_index() -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+
+    match sp.start_sso(
+        &idp_descriptor,
+        StartSso::post().assertion_consumer_service_index(99),
+    ) {
+        Err(SamlError::MissingMetadata(name)) => {
+            assert_eq!(name, "AssertionConsumerService");
+            Ok(())
+        }
+        other => Err(format!("expected MissingMetadata, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_honors_custom_acs_index_from_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(
+        SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+            .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.with_index(7))
+            .credentials(credentials())
+            .validation(SpValidationPolicy::strict())
+            .build()?,
+    )?;
+    let idp = Saml::idp(idp_config()?)?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new(IDP_ENTITY_ID)?,
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+
+    let started = sp.start_sso(
+        &idp_descriptor,
+        StartSso::post().assertion_consumer_service_index(7),
+    )?;
+    let xml = authn_request_xml(&started.outbound)?;
+
+    assert_eq!(started.pending.acs().index(), Some(7));
+    assert!(sp.metadata_xml().contains("index=\"7\""));
+    assert!(xml.contains("AssertionConsumerServiceIndex=\"7\""));
+    Ok(())
+}
+
+#[test]
 fn typed_detached_authn_requests_parse_with_relay_state() -> Result<(), Box<dyn std::error::Error>>
 {
     let (sp, idp) = facades()?;
@@ -599,6 +644,40 @@ fn typed_facade_rejects_pending_peer_mismatch() -> Result<(), Box<dyn std::error
             assert_eq!(
                 actual.as_deref(),
                 Some("https://other-idp.example.com/metadata")
+            );
+            Ok(())
+        }
+        other => Err(format!("expected IssuerMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_rejects_response_with_wrong_sp_descriptor() -> Result<(), Box<dyn std::error::Error>>
+{
+    let exchange = start_receive_respond()?;
+    let other_sp = Saml::sp(
+        SpConfig::builder(EntityId::try_new("https://other-sp.example.com/metadata")?)
+            .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
+            .credentials(credentials())
+            .validation(SpValidationPolicy::strict())
+            .build()?,
+    )?;
+    let other_descriptor = SpDescriptor::from_metadata_xml(
+        other_sp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+
+    match exchange.idp.respond_sso(
+        &other_descriptor,
+        &exchange.received,
+        subject(),
+        RespondSso::post(),
+    ) {
+        Err(SamlError::IssuerMismatch { expected, actual }) => {
+            assert_eq!(expected, SP_ENTITY_ID);
+            assert_eq!(
+                actual.as_deref(),
+                Some("https://other-sp.example.com/metadata")
             );
             Ok(())
         }

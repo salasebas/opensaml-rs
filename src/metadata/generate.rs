@@ -12,6 +12,8 @@ pub struct Endpoint {
     pub binding: Binding,
     /// Endpoint URL.
     pub location: String,
+    /// ACS index for `AssertionConsumerService`; ignored for other endpoint kinds.
+    pub index: Option<u16>,
     /// Whether this is the default endpoint.
     pub is_default: bool,
 }
@@ -22,6 +24,7 @@ impl Endpoint {
         Self {
             binding,
             location: location.into(),
+            index: None,
             is_default: false,
         }
     }
@@ -101,12 +104,10 @@ fn write_name_id_formats(w: &mut MetadataWriter, formats: &[String], default_to_
     }
 }
 
-fn write_endpoint_attrs(w: &mut MetadataWriter, name: &str, e: &Endpoint, index: Option<usize>) {
-    let index_string;
+fn write_endpoint_attrs(w: &mut MetadataWriter, name: &str, e: &Endpoint, index: Option<String>) {
     let mut attrs = Vec::with_capacity(4);
-    if let Some(i) = index {
-        index_string = i.to_string();
-        attrs.push(("index", index_string.as_str()));
+    if let Some(index) = index.as_deref() {
+        attrs.push(("index", index));
     }
     if e.is_default {
         attrs.push(("isDefault", "true"));
@@ -124,7 +125,11 @@ fn write_single_logout(w: &mut MetadataWriter, endpoints: &[Endpoint]) {
 
 fn write_assertion_consumer_service(w: &mut MetadataWriter, endpoints: &[Endpoint]) {
     for (i, endpoint) in endpoints.iter().enumerate() {
-        write_endpoint_attrs(w, "AssertionConsumerService", endpoint, Some(i));
+        let index = endpoint
+            .index
+            .map(|index| index.to_string())
+            .unwrap_or_else(|| i.to_string());
+        write_endpoint_attrs(w, "AssertionConsumerService", endpoint, Some(index));
     }
 }
 
@@ -309,6 +314,7 @@ mod tests {
                 Endpoint {
                     binding: Binding::Post,
                     location: "https://sp.example.com/acs".into(),
+                    index: None,
                     is_default: true,
                 },
                 Endpoint::new(Binding::Redirect, "https://sp.example.com/acs-redirect"),
