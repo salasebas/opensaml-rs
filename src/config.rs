@@ -12,6 +12,8 @@ use crate::constants::{
 };
 use crate::entity::{EntitySetting, SignatureConfig};
 use crate::error::SamlError;
+#[cfg(feature = "crypto-bergshamra")]
+use crate::error::SignatureVerificationReason;
 use crate::metadata::{IdpMetadata, Metadata, SpMetadata};
 use crate::template::LoginResponseTemplate;
 use crate::xml::XmlLimits;
@@ -1169,10 +1171,13 @@ pub enum MetadataTrustPolicy<'a> {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(feature = "crypto-bergshamra"), allow(dead_code))]
 enum AppliedMetadataTrust {
     UnsignedForCompatibility,
-    SignedByPinnedCertificates,
+    SignedByPinnedCertificates {
+        signed_entity_descriptor_xml: String,
+    },
 }
 
 fn validate_entity_id_text(value: &str) -> Result<(), SamlError> {
@@ -1375,7 +1380,20 @@ impl IdpDescriptor {
 
     /// Whether this descriptor was verified with pinned signing certificates.
     pub fn was_verified_with_pinned_certificates(&self) -> bool {
-        self.trust == AppliedMetadataTrust::SignedByPinnedCertificates
+        matches!(
+            self.trust,
+            AppliedMetadataTrust::SignedByPinnedCertificates { .. }
+        )
+    }
+
+    /// Signed metadata descriptor XML when pinned metadata verification passed.
+    pub fn signed_entity_descriptor_xml(&self) -> Option<&str> {
+        match &self.trust {
+            AppliedMetadataTrust::SignedByPinnedCertificates {
+                signed_entity_descriptor_xml,
+            } => Some(signed_entity_descriptor_xml.as_str()),
+            AppliedMetadataTrust::UnsignedForCompatibility => None,
+        }
     }
 }
 
@@ -1450,7 +1468,20 @@ impl SpDescriptor {
 
     /// Whether this descriptor was verified with pinned signing certificates.
     pub fn was_verified_with_pinned_certificates(&self) -> bool {
-        self.trust == AppliedMetadataTrust::SignedByPinnedCertificates
+        matches!(
+            self.trust,
+            AppliedMetadataTrust::SignedByPinnedCertificates { .. }
+        )
+    }
+
+    /// Signed metadata descriptor XML when pinned metadata verification passed.
+    pub fn signed_entity_descriptor_xml(&self) -> Option<&str> {
+        match &self.trust {
+            AppliedMetadataTrust::SignedByPinnedCertificates {
+                signed_entity_descriptor_xml,
+            } => Some(signed_entity_descriptor_xml.as_str()),
+            AppliedMetadataTrust::UnsignedForCompatibility => None,
+        }
     }
 }
 
@@ -1528,10 +1559,19 @@ where
         .iter()
         .map(|certificate| certificate.as_str().to_string())
         .collect();
-    if metadata.verify_signature(&trusted_certificates)? {
-        return Ok(AppliedMetadataTrust::SignedByPinnedCertificates);
+    let verification = metadata
+        .verify_signature_detailed_with_limits(&trusted_certificates, XmlLimits::default())?;
+    if verification.verified() {
+        let signed_entity_descriptor_xml = verification
+            .into_signed_entity_descriptor_xml()
+            .ok_or(SamlError::SignedReferenceMismatch)?;
+        return Ok(AppliedMetadataTrust::SignedByPinnedCertificates {
+            signed_entity_descriptor_xml,
+        });
     }
-    Err(SamlError::FailedToVerifySignature)
+    Err(SamlError::SignatureVerification {
+        reason: SignatureVerificationReason::XmlSignature,
+    })
 }
 
 #[cfg(not(feature = "crypto-bergshamra"))]

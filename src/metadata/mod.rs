@@ -187,12 +187,24 @@ impl Metadata {
 
     /// Verify this metadata document's enveloped signature against trusted
     /// certificate(s) (federation trust anchor). Requires `crypto-bergshamra`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when XML parsing, certificate loading,
+    /// cryptographic verification, or signed `<EntityDescriptor>` coverage
+    /// checks fail.
     #[cfg(feature = "crypto-bergshamra")]
     pub fn verify_signature(&self, trusted_certificates: &[String]) -> Result<bool, SamlError> {
         self.verify_signature_with_limits(trusted_certificates, XmlLimits::default())
     }
 
     /// Verify this metadata document's signature with explicit XML parser limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when XML parsing, certificate loading,
+    /// cryptographic verification, or signed `<EntityDescriptor>` coverage
+    /// checks fail.
     #[cfg(feature = "crypto-bergshamra")]
     pub fn verify_signature_with_limits(
         &self,
@@ -200,6 +212,43 @@ impl Metadata {
         limits: XmlLimits,
     ) -> Result<bool, SamlError> {
         crate::crypto::verify_metadata_signature_with_limits(
+            &self.xml,
+            trusted_certificates,
+            limits,
+        )
+    }
+
+    /// Verify this metadata document's signature and preserve signed
+    /// `<EntityDescriptor>` coverage evidence using default XML parser limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when XML parsing, certificate loading,
+    /// cryptographic verification, transform policy, or signed
+    /// `<EntityDescriptor>` coverage checks fail.
+    #[cfg(feature = "crypto-bergshamra")]
+    pub fn verify_signature_detailed(
+        &self,
+        trusted_certificates: &[String],
+    ) -> Result<crate::crypto::MetadataSignatureVerification, SamlError> {
+        crate::crypto::verify_metadata_signature_detailed(&self.xml, trusted_certificates)
+    }
+
+    /// Verify this metadata document's signature and preserve signed
+    /// `<EntityDescriptor>` coverage evidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when XML parsing, certificate loading,
+    /// cryptographic verification, transform policy, or signed
+    /// `<EntityDescriptor>` coverage checks fail.
+    #[cfg(feature = "crypto-bergshamra")]
+    pub fn verify_signature_detailed_with_limits(
+        &self,
+        trusted_certificates: &[String],
+        limits: XmlLimits,
+    ) -> Result<crate::crypto::MetadataSignatureVerification, SamlError> {
+        crate::crypto::verify_metadata_signature_detailed_with_limits(
             &self.xml,
             trusted_certificates,
             limits,

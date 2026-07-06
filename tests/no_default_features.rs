@@ -10,7 +10,7 @@ use saml_rs::metadata::{Endpoint, IdpMetadata, IdpMetadataConfig, SpMetadataConf
 use saml_rs::xml::{extract, ExtractorField};
 use saml_rs::{
     AcsEndpoint, AssertionSignaturePolicy, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
-    EntityId, IdentityProvider, IdpConfig, IdpDescriptor, IdpValidationPolicy,
+    CertificatePem, EntityId, IdentityProvider, IdpConfig, IdpDescriptor, IdpValidationPolicy,
     LogoutSignaturePolicy, MessageSignaturePolicy, MetadataTrustPolicy, SamlError, ServiceProvider,
     SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, XmlEncryptionPolicy, XmlPolicy,
 };
@@ -117,6 +117,22 @@ fn typed_metadata_descriptors_parse_unsigned_metadata_without_default_crypto(
         sp_descriptor.entity_id().as_str(),
         "https://sp.example.com/metadata"
     );
+    Ok(())
+}
+
+#[test]
+fn typed_metadata_require_signature_is_unsupported_without_default_crypto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp_metadata_xml = idp(false)?.metadata_xml().to_string();
+    let cert = CertificatePem::new("placeholder");
+
+    assert_unsupported(IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        &idp_metadata_xml,
+        MetadataTrustPolicy::RequireSignature {
+            trusted_certificates: std::slice::from_ref(&cert),
+        },
+    ));
     Ok(())
 }
 
