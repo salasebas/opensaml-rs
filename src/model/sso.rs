@@ -232,6 +232,14 @@ impl SsoSession {
     /// This method is intended for typed inbound SSO facades. It should be
     /// called only after signature, issuer, audience, destination, recipient,
     /// `InResponseTo`, and time validation have already passed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::TimeWindowInvalid`] when no valid replay
+    /// expiration can be derived or the session is already expired. Returns
+    /// [`SamlError::ReplayDetected`] when any session replay key has already
+    /// been seen. Cache implementations may also return storage-specific
+    /// failures mapped to [`SamlError`].
     pub fn check_and_store_replay(
         &self,
         validation: &mut SamlValidationContext<'_>,

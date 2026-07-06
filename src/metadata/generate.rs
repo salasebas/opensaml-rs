@@ -278,6 +278,11 @@ pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
 }
 
 /// Generate IdP metadata XML, validating required config-driven metadata first.
+///
+/// # Errors
+///
+/// Returns [`SamlError::MissingMetadata`] when the config does not include at
+/// least one `SingleSignOnService` endpoint.
 pub fn try_generate_idp_metadata(cfg: &IdpMetadataConfig) -> Result<String, SamlError> {
     if !is_non_empty_array(&cfg.single_sign_on_service) {
         return Err(SamlError::MissingMetadata(

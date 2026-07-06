@@ -10,6 +10,12 @@
 //! The dependency-free config builders use strict typed defaults. Opt into
 //! compatibility policy by name when a legacy peer requires unsigned protocol
 //! messages.
+//! Where the compact flow examples below use
+//! [`ReplayPolicy::DisabledForCompatibility`] or unsigned metadata, treat those
+//! as explicit interoperability choices. Production-shaped inbound flows should
+//! use [`ReplayPolicy::RequireCache`] with a caller-owned [`ReplayCache`] and,
+//! when protocol timestamps are not enough for expiry,
+//! [`SamlValidationContext::with_replay_retention`].
 //!
 //! ```
 //! use saml_rs::{AcsEndpoint, EntityId, SpConfig, SpValidationPolicy};
@@ -222,9 +228,11 @@
 //! # Metadata trust
 //!
 //! Metadata trust is explicit and caller-pinned. [`MetadataTrustPolicy`] can
-//! accept unsigned metadata for compatibility or require a signature from
-//! caller-provided certificates; the crate does not treat the public web PKI CA
-//! store as SAML metadata trust.
+//! accept unsigned metadata for explicit legacy compatibility or require a
+//! signature from caller-provided certificates with
+//! [`MetadataTrustPolicy::RequireSignature`]. Prefer signed metadata with pinned
+//! certificates for production trust decisions; the crate does not treat the
+//! public web PKI CA store as SAML metadata trust.
 //!
 //! # Raw compatibility API
 //!
@@ -232,6 +240,11 @@
 //! helpers. Advanced callers should import [`raw::ServiceProvider`],
 //! [`raw::IdentityProvider`], [`raw::HttpRequest`], and [`raw::BindingContext`]
 //! from there rather than using root compatibility exports.
+//!
+//! Visible docs.rs modules and crate-root re-exports are the supported public
+//! documentation surface. The [`raw`] module is supported for compatibility;
+//! hidden modules are lower-level implementation or compatibility paths and
+//! should not be the first choice for new integrations.
 //!
 //! # Unsupported profiles
 //!
@@ -245,9 +258,10 @@
 //!
 //! XML cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
 //! message signatures) is delegated to `bergshamra` behind the
-//! `crypto-bergshamra` feature, which is on by default. Disable default features
-//! to build the crypto-free protocol layer; crypto operations then fail closed
-//! with [`SamlError::Unsupported`].
+//! `crypto-bergshamra` feature, which is on by default. Configure assertion
+//! encryption and XML-Enc compatibility exceptions through [`XmlEncryptionPolicy`].
+//! Disable default features to build the crypto-free protocol layer; crypto
+//! operations then fail closed with [`SamlError::Unsupported`].
 
 #![forbid(unsafe_code)]
 
@@ -304,9 +318,9 @@ pub use config::{
     SpDescriptor, SpMetadataConfig, SpValidationPolicy, TemplatePolicy, TransformAlgorithm,
     XmlEncryptionPolicy, XmlPolicy,
 };
-#[doc = "Compatibility export. Prefer `raw::EntitySetting` for low-level APIs."]
+#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::EntitySetting`."]
 pub use entity::EntitySetting;
-#[doc = "Compatibility export. Prefer `raw::IdentityProvider` for low-level APIs."]
+#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::IdentityProvider`."]
 pub use idp::IdentityProvider;
 #[cfg(feature = "crypto-bergshamra")]
 pub use metadata::MetadataSignatureVerification;
@@ -317,5 +331,5 @@ pub use model::{
     ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex, SsoResponse,
     SsoSession, Subject, SubjectConfirmation, MAX_RELAY_STATE_BYTES,
 };
-#[doc = "Compatibility export. Prefer `raw::ServiceProvider` for low-level APIs."]
+#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;

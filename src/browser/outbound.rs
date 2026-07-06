@@ -39,6 +39,45 @@ impl MessageField {
 }
 
 /// Typed outbound browser action.
+///
+/// # Examples
+///
+/// ```
+/// use saml_rs::{AuthnRequest, Outbound};
+/// # use saml_rs::raw::{Binding, BindingContext};
+/// #
+/// # fn redirect_context() -> BindingContext {
+/// #     BindingContext {
+/// #         id: "_request123".to_string(),
+/// #         context: "https://idp.example.com/sso?SAMLRequest=abc".to_string(),
+/// #         relay_state: None,
+/// #         entity_endpoint: "https://idp.example.com/sso".to_string(),
+/// #         binding: Binding::Redirect,
+/// #         request_type: "SAMLRequest",
+/// #         signature: None,
+/// #         sig_alg: None,
+/// #     }
+/// # }
+/// # fn post_context() -> BindingContext {
+/// #     BindingContext {
+/// #         id: "_request456".to_string(),
+/// #         context: "PHNhbWxwOkF1dGhuUmVxdWVzdA==".to_string(),
+/// #         relay_state: None,
+/// #         entity_endpoint: "https://idp.example.com/sso".to_string(),
+/// #         binding: Binding::Post,
+/// #         request_type: "SAMLRequest",
+/// #         signature: None,
+/// #         sig_alg: None,
+/// #     }
+/// # }
+///
+/// let redirect = Outbound::<AuthnRequest>::try_from(redirect_context())?;
+/// assert!(redirect.redirect_url()?.contains("SAMLRequest="));
+///
+/// let post = Outbound::<AuthnRequest>::try_from(post_context())?;
+/// assert_eq!(post.post_form()?.action().as_str(), "https://idp.example.com/sso");
+/// # Ok::<(), saml_rs::SamlError>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct Outbound<Message> {
     id: MessageId,

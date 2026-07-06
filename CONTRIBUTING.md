@@ -22,6 +22,8 @@ cargo fmt --all --check
 cargo clippy -p saml-rs --all-targets -- -D warnings
 cargo nextest run -p saml-rs
 cargo test -p saml-rs --doc
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --all-features --no-deps
+cargo test -p saml-rs --doc --no-default-features
 cargo check -p saml-rs --no-default-features
 ```
 

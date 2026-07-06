@@ -672,6 +672,26 @@ pub enum AssertionEncryptionPolicy {
 }
 
 /// XML encryption policy.
+///
+/// # Examples
+///
+/// Use typed configuration to request encrypted assertions in generated
+/// responses. This only configures policy; actual encryption uses the crate's
+/// XML-Enc backend and deployment credentials.
+///
+/// ```
+/// use saml_rs::{EntityId, IdpConfig, SsoEndpoint, XmlEncryptionPolicy, XmlPolicy};
+///
+/// let xml = XmlPolicy {
+///     encryption: XmlEncryptionPolicy::encrypt_assertions(),
+///     ..XmlPolicy::default()
+/// };
+/// let idp_builder = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+///     .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+///     .xml(xml);
+/// # let _ = idp_builder;
+/// # Ok::<(), saml_rs::SamlError>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct XmlEncryptionPolicy {
     /// Assertion encryption behavior.
@@ -709,6 +729,28 @@ impl XmlEncryptionPolicy {
 }
 
 /// XML parser, redirect decompression, clock, and XML encryption policy.
+///
+/// # Examples
+///
+/// Software RSA key-transport decryption is disabled by default because the
+/// bundled RustCrypto RSA backend, reached through `bergshamra` / `kryptering`,
+/// is affected by `RUSTSEC-2023-0071`. Enable it only as an explicit
+/// compatibility exception for a deployment that accepts that risk.
+///
+/// ```
+/// use saml_rs::{AcsEndpoint, EntityId, SpConfig, XmlEncryptionPolicy, XmlPolicy};
+///
+/// let xml = XmlPolicy {
+///     encryption: XmlEncryptionPolicy::default()
+///         .with_insecure_software_rsa_key_transport_decryption_allowed(),
+///     ..XmlPolicy::default()
+/// };
+/// let sp_builder = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+///     .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+///     .xml(xml);
+/// # let _ = sp_builder;
+/// # Ok::<(), saml_rs::SamlError>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct XmlPolicy {
     /// Clock drift tolerance `(not_before_ms, not_on_or_after_ms)`.
@@ -986,6 +1028,24 @@ impl SpConfigBuilder {
 }
 
 /// Typed Identity Provider configuration.
+///
+/// # Examples
+///
+/// The builder starts with strict validation defaults. Use compatibility
+/// policy explicitly when compiling or testing without the default crypto
+/// feature.
+///
+/// ```
+/// use saml_rs::{EntityId, IdpConfig, IdpValidationPolicy, SsoEndpoint};
+///
+/// let config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+///     .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+///     .validation(IdpValidationPolicy::compatibility())
+///     .build()?;
+///
+/// assert_eq!(config.entity_id.as_str(), "https://idp.example.com/metadata");
+/// # Ok::<(), saml_rs::SamlError>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct IdpConfig {
     /// Local IdP entity ID.
@@ -1156,6 +1216,29 @@ impl IdpConfigBuilder {
 ///
 /// SAML metadata trust is caller-pinned or federation-driven; this type does
 /// not use a public web PKI CA store by default.
+/// [`UnsignedForCompatibility`](Self::UnsignedForCompatibility) is for explicit
+/// legacy interoperability, not the preferred production trust model.
+///
+/// # Examples
+///
+/// ```no_run
+/// use saml_rs::{CertificatePem, EntityId, IdpDescriptor, MetadataTrustPolicy};
+///
+/// # fn load_metadata() -> String { unimplemented!() }
+/// # fn load_metadata_signing_cert() -> String { unimplemented!() }
+/// # fn run() -> Result<(), saml_rs::SamlError> {
+/// let cert = CertificatePem::new(load_metadata_signing_cert());
+/// let certificates = [cert];
+/// let idp = IdpDescriptor::from_metadata_xml_for(
+///     EntityId::try_new("https://idp.example.com/metadata")?,
+///     &load_metadata(),
+///     MetadataTrustPolicy::RequireSignature {
+///         trusted_certificates: &certificates,
+///     },
+/// )?;
+/// assert!(idp.was_verified_with_pinned_certificates());
+/// # Ok(()) }
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub enum MetadataTrustPolicy<'a> {
     /// Accept unsigned metadata for legacy interoperability.

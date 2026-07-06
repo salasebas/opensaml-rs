@@ -116,9 +116,59 @@ impl ReplayKey {
 ///
 /// Implementations should atomically reject duplicate keys and return
 /// [`SamlError::ReplayDetected`] for duplicate SAML messages.
+///
+/// # Examples
+///
+/// This is a minimal in-memory example for a single process. Applications
+/// should use shared durable storage when multiple processes handle SAML
+/// responses.
+///
+/// ```
+/// use std::collections::HashMap;
+///
+/// use saml_rs::{
+///     ReplayCache, ReplayKey, ReplayPolicy, SamlError, SamlValidationContext,
+/// };
+/// use time::{Duration, OffsetDateTime};
+///
+/// #[derive(Default)]
+/// struct MinimalReplayCache {
+///     seen: HashMap<String, OffsetDateTime>,
+/// }
+///
+/// impl ReplayCache for MinimalReplayCache {
+///     fn check_and_store(
+///         &mut self,
+///         key: ReplayKey,
+///         expires_at: OffsetDateTime,
+///     ) -> Result<(), SamlError> {
+///         let cache_key = key.cache_key();
+///         if self.seen.contains_key(&cache_key) {
+///             return Err(SamlError::ReplayDetected { key: cache_key });
+///         }
+///         self.seen.insert(cache_key, expires_at);
+///         Ok(())
+///     }
+/// }
+///
+/// let now = OffsetDateTime::now_utc();
+/// let mut cache = MinimalReplayCache::default();
+/// let validation = SamlValidationContext::new(
+///     now,
+///     ReplayPolicy::RequireCache(&mut cache),
+/// )
+/// .with_replay_retention(Duration::minutes(5));
+/// # let _ = validation;
+/// ```
 pub trait ReplayCache {
     /// Check whether `key` has already been seen, then store it until
     /// `expires_at` if it is new.
+    ///
+    /// # Errors
+    ///
+    /// Implementations should return [`SamlError::ReplayDetected`] for
+    /// duplicate keys. They may also return storage-specific failures mapped
+    /// to [`SamlError`] if cache access fails.
     fn check_and_store(
         &mut self,
         key: ReplayKey,

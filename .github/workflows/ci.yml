@@ -54,6 +54,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo check -p saml-rs --no-default-features
       - run: cargo test -p saml-rs --no-default-features --test no_default_features
+      - run: cargo test -p saml-rs --doc --no-default-features
 
   semver:
     name: Semver
@@ -90,6 +91,7 @@ jobs:
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
       - run: cargo nextest run -p ${{ matrix.package }}
       - run: cargo test -p ${{ matrix.package }} --doc
+      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p ${{ matrix.package }} --lib --all-features --no-deps
       - run: cargo check -p ${{ matrix.package }} --examples
       - run: cargo run -p ${{ matrix.package }} --example sso
       - run: cargo run -p ${{ matrix.package }} --example slo

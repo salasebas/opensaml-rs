@@ -21,6 +21,10 @@ include = [
     "/CHANGELOG.md",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lib]
 name = "saml_rs"
 path = "src/lib.rs"
@@ -42,7 +46,16 @@ bergshamra = { version = "0.6.3", optional = true }
 [lints.rust]
 unsafe_code = "forbid"
 
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+bare_urls = "deny"
+invalid_codeblock_attributes = "deny"
+invalid_rust_codeblocks = "deny"
+
 [lints.clippy]
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+empty_docs = "warn"
 panic = "warn"
 unwrap_used = "warn"
 expect_used = "warn"

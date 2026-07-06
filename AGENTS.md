@@ -53,6 +53,8 @@ also check:
 
 ```bash
 cargo test -p saml-rs --doc
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --all-features --no-deps
+cargo test -p saml-rs --doc --no-default-features
 cargo check -p saml-rs --no-default-features
 ```
 

@@ -58,6 +58,12 @@ impl AuthnRequest {
     }
 
     /// Check and store this AuthnRequest's replay key using caller cache state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::ReplayDetected`] when the request ID has already
+    /// been seen. Cache implementations may also return storage-specific
+    /// failures mapped to [`SamlError`].
     pub fn check_and_store_replay(
         &self,
         validation: &mut SamlValidationContext<'_>,

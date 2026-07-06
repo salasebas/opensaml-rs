@@ -225,6 +225,16 @@ fn unsigned_context(
 /// Build a `<LogoutRequest>` from `init` to `target`.
 ///
 /// `user` supplies the `<NameID>` and optional `<samlp:SessionIndex>`.
+///
+/// # Errors
+///
+/// Returns an error if `target_meta` has no SLO endpoint for `binding`,
+/// `binding` is unsupported, the configured logout template cannot represent
+/// the supplied subject, configured XML tag prefixes are invalid, default XML
+/// rendering fails, or Redirect DEFLATE encoding fails. When `want_signed` is
+/// true, missing or invalid signing keys/certificates, unavailable crypto
+/// support, XML signature construction, and detached-signature construction
+/// errors are propagated.
 pub fn create_logout_request(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -247,6 +257,11 @@ pub fn create_logout_request(
 }
 
 /// Like [`create_logout_request`] but uses `message_id` when provided.
+///
+/// # Errors
+///
+/// Returns the same errors as [`create_logout_request`]. Empty `message_id`
+/// values are ignored and replaced with a generated ID.
 #[allow(clippy::too_many_arguments)] // public API adds optional `message_id`
 pub fn create_logout_request_with_id(
     init_setting: &EntitySetting,
@@ -411,6 +426,15 @@ fn create_logout_request_for_subject_inner(
 }
 
 /// Build a `<LogoutResponse>` from `init` to `target`.
+///
+/// # Errors
+///
+/// Returns an error if `binding` is unsupported, `target_meta` has no SLO
+/// endpoint for `binding`, configured XML tag prefixes are invalid, default XML
+/// rendering fails, or Redirect DEFLATE encoding fails. When `want_signed` is
+/// true, missing or invalid signing keys/certificates, unavailable crypto
+/// support, XML signature construction, and detached-signature construction
+/// errors are propagated.
 pub fn create_logout_response(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -445,6 +469,11 @@ struct LogoutResponseInput<'a> {
 }
 
 /// Like [`create_logout_response`] but uses `message_id` when provided.
+///
+/// # Errors
+///
+/// Returns the same errors as [`create_logout_response`]. Empty `message_id`
+/// values are ignored and replaced with a generated ID.
 #[allow(clippy::too_many_arguments)] // public API adds optional `message_id`
 pub fn create_logout_response_with_id(
     init_setting: &EntitySetting,
@@ -606,6 +635,16 @@ fn validate_logout_response_in_response_to(
 }
 
 /// Parse a `<LogoutRequest>` from `from`.
+///
+/// # Errors
+///
+/// Returns an error if `binding` is unsupported, required binding parameters
+/// are missing, the SAML payload cannot be base64/DEFLATE decoded, XML parsing
+/// or extraction fails, the peer issuer does not match `from_meta`, or logout
+/// request signature validation fails when `self_setting` requires signed
+/// requests. Signature failures include missing signatures, untrusted signing
+/// certificates, invalid detached signatures, RelayState/signed-octet
+/// correlation failures, and XML signature validation errors.
 pub fn parse_logout_request(
     self_setting: &EntitySetting,
     from_meta: &Metadata,
@@ -710,6 +749,17 @@ fn parse_logout_response_inner(
 /// An empty caller-provided `request_id` is rejected as
 /// [`SamlError::InvalidInResponseTo`]. A non-empty `request_id` that does not
 /// match the SAML response returns [`SamlError::InResponseToMismatch`].
+///
+/// # Errors
+///
+/// Returns an error if `request_id` is empty, `binding` is unsupported,
+/// required binding parameters are missing, the SAML payload cannot be
+/// base64/DEFLATE decoded, XML parsing or extraction fails, the peer issuer
+/// does not match `from_meta`, `InResponseTo` does not match `request_id`, or
+/// logout response signature validation fails when `self_setting` requires
+/// signed responses. Signature failures include missing signatures, untrusted
+/// signing certificates, invalid detached signatures, RelayState/signed-octet
+/// correlation failures, and XML signature validation errors.
 pub fn parse_logout_response(
     self_setting: &EntitySetting,
     from_meta: &Metadata,
@@ -759,6 +809,17 @@ pub(crate) fn parse_logout_response_at(
 /// Prefer [`parse_logout_response`] for normal SLO handling. This exists for
 /// legacy interop and custom state machines that perform request correlation
 /// outside this crate.
+///
+/// # Errors
+///
+/// Returns an error if `binding` is unsupported, required binding parameters
+/// are missing, the SAML payload cannot be base64/DEFLATE decoded, XML parsing
+/// or extraction fails, the peer issuer does not match `from_meta`, or logout
+/// response signature validation fails when `self_setting` requires signed
+/// responses. Signature failures include missing signatures, untrusted signing
+/// certificates, invalid detached signatures, RelayState/signed-octet
+/// correlation failures, and XML signature validation errors. This function
+/// deliberately does not enforce `InResponseTo` correlation.
 pub fn parse_logout_response_without_request_id(
     self_setting: &EntitySetting,
     from_meta: &Metadata,
