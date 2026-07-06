@@ -15,11 +15,21 @@ pub struct IdpMetadata {
 
 impl IdpMetadata {
     /// Parse IdP metadata XML.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when XML parsing, parser resource limits, or
+    /// IdP-specific metadata extraction fails.
     pub fn from_xml(xml: &str) -> Result<Self, SamlError> {
         Self::from_xml_with_limits(xml, XmlLimits::default())
     }
 
     /// Parse IdP metadata XML with explicit XML parser resource limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when XML parsing, parser resource limits, or
+    /// IdP-specific metadata extraction fails.
     pub fn from_xml_with_limits(xml: &str, limits: XmlLimits) -> Result<Self, SamlError> {
         let extra = vec![
             ExtractorField::new(

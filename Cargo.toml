@@ -53,6 +53,9 @@ invalid_codeblock_attributes = "deny"
 invalid_rust_codeblocks = "deny"
 
 [lints.clippy]
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+empty_docs = "warn"
 panic = "warn"
 unwrap_used = "warn"
 expect_used = "warn"

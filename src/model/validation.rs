@@ -119,6 +119,12 @@ impl ReplayKey {
 pub trait ReplayCache {
     /// Check whether `key` has already been seen, then store it until
     /// `expires_at` if it is new.
+    ///
+    /// # Errors
+    ///
+    /// Implementations should return [`SamlError::ReplayDetected`] for
+    /// duplicate keys. They may also return storage-specific failures mapped
+    /// to [`SamlError`] if cache access fails.
     fn check_and_store(
         &mut self,
         key: ReplayKey,

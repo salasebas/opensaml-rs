@@ -80,11 +80,21 @@ impl Metadata {
     /// Parse `xml`, adding the role-specific `extra` extractor fields.
     ///
     /// Rejects documents carrying more than one top-level `<EntityDescriptor>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when XML parsing, parser resource limits,
+    /// extraction, or the single-`EntityDescriptor` check fails.
     pub fn parse(xml: &str, extra: Vec<ExtractorField>) -> Result<Self, SamlError> {
         Self::parse_with_limits(xml, extra, XmlLimits::default())
     }
 
     /// Parse `xml` with explicit XML parser resource limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when XML parsing, parser resource limits,
+    /// extraction, or the single-`EntityDescriptor` check fails.
     pub fn parse_with_limits(
         xml: &str,
         extra: Vec<ExtractorField>,
@@ -175,6 +185,10 @@ impl Metadata {
     }
 
     /// Write the metadata XML to `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::Error`] if the filesystem write fails.
     pub fn export_metadata(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
         std::fs::write(path, &self.xml)
     }

@@ -294,6 +294,12 @@ impl RespondSlo {
 
 impl Saml {
     /// Build a typed Service Provider facade.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the SP config cannot be converted into raw
+    /// settings or metadata, including missing metadata, missing keys, or
+    /// unsupported crypto configuration.
     pub fn sp(config: SpConfig) -> Result<Saml<Sp>, SamlError> {
         let setting = EntitySetting::try_from(&config)?;
         let raw_config = raw_sp_metadata_config(&config);
@@ -302,6 +308,12 @@ impl Saml {
     }
 
     /// Build a typed Identity Provider facade.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the IdP config cannot be converted into raw
+    /// settings or metadata, including missing metadata, missing keys, or
+    /// unsupported crypto configuration.
     pub fn idp(config: IdpConfig) -> Result<Saml<Idp>, SamlError> {
         let setting = EntitySetting::try_from(&config)?;
         let raw_config = raw_idp_metadata_config(&config);
@@ -322,6 +334,13 @@ impl Saml<Sp> {
     }
 
     /// Start SP-initiated Web SSO.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when relay state is invalid, the IdP metadata
+    /// cannot be parsed or trusted, the requested ACS is missing or conflicts
+    /// with the selected binding, or request creation fails because required
+    /// metadata, signing keys, or supported bindings are unavailable.
     ///
     /// # Examples
     ///
@@ -396,6 +415,14 @@ impl Saml<Sp> {
 
     /// Finish SP-initiated SSO using stored pending AuthnRequest state.
     ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the response does not match the pending
+    /// request, including issuer, binding, relay state, destination, recipient,
+    /// or `InResponseTo` mismatches; when XML, signature, certificate trust,
+    /// audience, or time-window validation fails; or when replay validation
+    /// returns `ReplayDetected` or `TimeWindowInvalid`.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -453,6 +480,14 @@ impl Saml<Sp> {
     }
 
     /// Accept an IdP-initiated SSO response explicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the browser binding is not valid for SSO
+    /// responses, the IdP metadata cannot be parsed or trusted, XML parsing or
+    /// signature verification fails, destination, recipient, audience, or time
+    /// validation fails, or replay validation returns `ReplayDetected` or
+    /// `TimeWindowInvalid`.
     pub fn accept_unsolicited_sso(
         &self,
         idp: &IdpDescriptor,
@@ -477,6 +512,12 @@ impl Saml<Sp> {
     }
 
     /// Start SP-initiated Single Logout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when relay state is invalid, IdP metadata cannot
+    /// be parsed, a compatible logout endpoint or signing key is missing, the
+    /// selected binding is unsupported, or logout request creation fails.
     pub fn start_slo(
         &self,
         idp: &IdpDescriptor,
@@ -495,6 +536,14 @@ impl Saml<Sp> {
     }
 
     /// Receive an IdP LogoutRequest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the browser input or relay state is invalid,
+    /// the binding is unsupported for logout, IdP metadata cannot be parsed,
+    /// XML parsing or signature/trust validation fails, the destination does
+    /// not match local metadata, or replay validation detects a duplicate or
+    /// expired message.
     pub fn receive_slo(
         &self,
         idp: &IdpDescriptor,
@@ -512,6 +561,12 @@ impl Saml<Sp> {
     }
 
     /// Respond to a received IdP LogoutRequest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when IdP metadata cannot be parsed, relay state is
+    /// invalid, a compatible logout endpoint or signing key is missing, the
+    /// selected binding is unsupported, or logout response creation fails.
     pub fn respond_slo(
         &self,
         idp: &IdpDescriptor,
@@ -529,6 +584,14 @@ impl Saml<Sp> {
     }
 
     /// Finish SP-initiated Single Logout using stored pending LogoutRequest state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the response does not match the pending
+    /// request, including issuer, binding, relay state, destination, or
+    /// `InResponseTo` mismatches; when IdP metadata cannot be parsed; when XML,
+    /// signature, trust, status, or time validation fails; or when replay
+    /// validation detects a duplicate or expired message.
     pub fn finish_slo(
         &self,
         idp: &IdpDescriptor,
@@ -561,6 +624,14 @@ impl Saml<Idp> {
     }
 
     /// Receive an SP AuthnRequest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when browser input or relay state is invalid, the
+    /// request binding is unsupported, SP metadata cannot be parsed, XML
+    /// parsing or signature/trust validation fails, the request destination
+    /// does not match local metadata, or replay validation detects a duplicate
+    /// or expired request.
     ///
     /// # Examples
     ///
@@ -626,6 +697,13 @@ impl Saml<Idp> {
     }
 
     /// Respond to a received SP AuthnRequest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the request issuer does not match the SP
+    /// descriptor, relay state is invalid, the request ACS selection conflicts
+    /// with the response binding or SP metadata, required metadata or signing
+    /// keys are missing, or response creation fails.
     pub fn respond_sso(
         &self,
         sp: &SpDescriptor,
@@ -638,6 +716,12 @@ impl Saml<Idp> {
     }
 
     /// Initiate IdP-initiated SSO.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when relay state is invalid, SP metadata cannot be
+    /// parsed, a compatible ACS endpoint or signing key is missing, the
+    /// selected binding is unsupported, or response creation fails.
     pub fn initiate_sso(
         &self,
         sp: &SpDescriptor,
@@ -648,6 +732,12 @@ impl Saml<Idp> {
     }
 
     /// Start IdP-initiated Single Logout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when relay state is invalid, SP metadata cannot be
+    /// parsed, a compatible logout endpoint or signing key is missing, the
+    /// selected binding is unsupported, or logout request creation fails.
     pub fn start_slo(
         &self,
         sp: &SpDescriptor,
@@ -666,6 +756,14 @@ impl Saml<Idp> {
     }
 
     /// Receive an SP LogoutRequest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the browser input or relay state is invalid,
+    /// the binding is unsupported for logout, SP metadata cannot be parsed, XML
+    /// parsing or signature/trust validation fails, the destination does not
+    /// match local metadata, or replay validation detects a duplicate or
+    /// expired message.
     ///
     /// # Examples
     ///
@@ -710,6 +808,12 @@ impl Saml<Idp> {
     }
 
     /// Respond to a received SP LogoutRequest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when SP metadata cannot be parsed, relay state is
+    /// invalid, a compatible logout endpoint or signing key is missing, the
+    /// selected binding is unsupported, or logout response creation fails.
     pub fn respond_slo(
         &self,
         sp: &SpDescriptor,
@@ -727,6 +831,14 @@ impl Saml<Idp> {
     }
 
     /// Finish IdP-initiated Single Logout using stored pending LogoutRequest state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the response does not match the pending
+    /// request, including issuer, binding, relay state, destination, or
+    /// `InResponseTo` mismatches; when SP metadata cannot be parsed; when XML,
+    /// signature, trust, status, or time validation fails; or when replay
+    /// validation detects a duplicate or expired message.
     pub fn finish_slo(
         &self,
         sp: &SpDescriptor,

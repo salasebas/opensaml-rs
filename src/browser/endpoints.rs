@@ -21,6 +21,11 @@ impl SsoEndpoint {
     }
 
     /// Create an HTTP-Redirect SSO endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if `url` fails [`EndpointUrl::try_new`]
+    /// validation.
     pub fn redirect(url: impl Into<String>) -> Result<Self, SamlError> {
         Ok(Self::new(
             SsoRequestBinding::Redirect,
@@ -29,6 +34,11 @@ impl SsoEndpoint {
     }
 
     /// Create an HTTP-POST SSO endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if `url` fails [`EndpointUrl::try_new`]
+    /// validation.
     pub fn post(url: impl Into<String>) -> Result<Self, SamlError> {
         Ok(Self::new(
             SsoRequestBinding::Post,
@@ -37,6 +47,11 @@ impl SsoEndpoint {
     }
 
     /// Create an HTTP-POST-SimpleSign SSO endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if `url` fails [`EndpointUrl::try_new`]
+    /// validation.
     pub fn simple_sign(url: impl Into<String>) -> Result<Self, SamlError> {
         Ok(Self::new(
             SsoRequestBinding::SimpleSign,
@@ -45,6 +60,11 @@ impl SsoEndpoint {
     }
 
     /// Narrow a raw metadata endpoint into an SSO endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if the raw binding is not valid for SSO requests
+    /// or if the endpoint location fails [`EndpointUrl::try_new`] validation.
     pub fn try_from_raw(endpoint: Endpoint) -> Result<Self, SamlError> {
         Ok(Self::new(
             SsoRequestBinding::try_from(endpoint.binding)?,
@@ -94,6 +114,11 @@ impl AcsEndpoint {
     }
 
     /// Create an HTTP-POST ACS endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if `url` fails [`EndpointUrl::try_new`]
+    /// validation.
     pub fn post(url: impl Into<String>) -> Result<Self, SamlError> {
         Ok(Self::new(
             SsoResponseBinding::Post,
@@ -102,6 +127,11 @@ impl AcsEndpoint {
     }
 
     /// Create an HTTP-POST-SimpleSign ACS endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if `url` fails [`EndpointUrl::try_new`]
+    /// validation.
     pub fn simple_sign(url: impl Into<String>) -> Result<Self, SamlError> {
         Ok(Self::new(
             SsoResponseBinding::SimpleSign,
@@ -127,6 +157,11 @@ impl AcsEndpoint {
     }
 
     /// Narrow a raw metadata endpoint into an ACS endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if the raw binding is not valid for SSO responses
+    /// or if the endpoint location fails [`EndpointUrl::try_new`] validation.
     pub fn try_from_raw(endpoint: Endpoint) -> Result<Self, SamlError> {
         Ok(Self {
             binding: SsoResponseBinding::try_from(endpoint.binding)?,
@@ -181,6 +216,11 @@ impl SloEndpoint {
     }
 
     /// Create an HTTP-Redirect SLO endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if `url` fails [`EndpointUrl::try_new`]
+    /// validation.
     pub fn redirect(url: impl Into<String>) -> Result<Self, SamlError> {
         Ok(Self::new(
             LogoutBinding::Redirect,
@@ -189,11 +229,21 @@ impl SloEndpoint {
     }
 
     /// Create an HTTP-POST SLO endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if `url` fails [`EndpointUrl::try_new`]
+    /// validation.
     pub fn post(url: impl Into<String>) -> Result<Self, SamlError> {
         Ok(Self::new(LogoutBinding::Post, EndpointUrl::try_new(url)?))
     }
 
     /// Create an HTTP-POST-SimpleSign SLO endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if `url` fails [`EndpointUrl::try_new`]
+    /// validation.
     pub fn simple_sign(url: impl Into<String>) -> Result<Self, SamlError> {
         Ok(Self::new(
             LogoutBinding::SimpleSign,
@@ -202,6 +252,11 @@ impl SloEndpoint {
     }
 
     /// Narrow a raw metadata endpoint into an SLO endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] if the raw binding is not valid for logout or if
+    /// the endpoint location fails [`EndpointUrl::try_new`] validation.
     pub fn try_from_raw(endpoint: Endpoint) -> Result<Self, SamlError> {
         Ok(Self::new(
             LogoutBinding::try_from(endpoint.binding)?,
