@@ -8,20 +8,18 @@ pub struct Received<Message> {
 }
 
 impl<Message> Received<Message> {
-    /// Create a received message wrapper.
+    /// Create a received message wrapper with absent RelayState.
     pub fn new(message: Message) -> Self {
         Self {
             message,
-            relay_state: RelayStateParam::Absent,
+            relay_state: RelayStateParam::absent(),
         }
     }
 
-    /// Create a received message wrapper preserving inbound RelayState.
-    pub fn with_relay_state(message: Message, relay_state: RelayStateParam) -> Self {
-        Self {
-            message,
-            relay_state,
-        }
+    /// Record the RelayState received with the browser message.
+    pub fn with_relay_state(mut self, relay_state: RelayStateParam) -> Self {
+        self.relay_state = relay_state;
+        self
     }
 
     /// Borrow the typed message.
@@ -29,7 +27,7 @@ impl<Message> Received<Message> {
         &self.message
     }
 
-    /// RelayState parameter received with the message.
+    /// RelayState received with the browser message.
     pub fn relay_state(&self) -> &RelayStateParam {
         &self.relay_state
     }

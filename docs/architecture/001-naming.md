@@ -1,7 +1,6 @@
 # Naming Checkpoint
 
-This document records the proposed names before implementation. Names here are
-not final until reviewed.
+This document records the reviewed public names used by the typed facade.
 
 ## Crate Names
 

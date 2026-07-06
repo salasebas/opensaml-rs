@@ -194,7 +194,6 @@ pub enum AuthnRequestValidationPolicy {
 
 pub enum LogoutSignaturePolicy {
     RequireSigned,
-    FollowPeerMetadata,
     AllowUnsignedForCompatibility,
 }
 
@@ -215,9 +214,6 @@ pub struct IdpValidationPolicy {
 
 Avoid bare boolean names for signature requirements and avoid names like
 `insecure(true)`. Compatibility exceptions should be visible in enum variants.
-`LogoutSignaturePolicy::FollowPeerMetadata` is valid typed config, but raw
-`EntitySetting` conversion returns `Unsupported` until peer descriptor context
-is available at that boundary.
 
 ## Descriptors
 

@@ -1,9 +1,8 @@
-# Typed API Architecture Draft
+# Typed API Architecture
 
-This directory captures the intended public API before implementation starts.
-It is the canonical architecture and naming draft for the typed API on the
-`advisor/typed-api-architecture` branch. Plans 011 through 021 should refine
-these files in place rather than create a parallel documentation location.
+This directory captures maintainer notes for the typed public API. Keep these
+files aligned with the implemented facade rather than treating them as a
+separate future design.
 
 The current crate package is `saml-rs`; Rust users import it as `saml_rs`.
 The current low-level flow API stays supported as raw compatibility while the
@@ -22,23 +21,6 @@ new typed API becomes the recommended path.
   validation context, clock, replay, RelayState, and metadata signature trust.
 - [007-raw-compatibility.md](007-raw-compatibility.md): how the current
   `flow`/`ServiceProvider`/`IdentityProvider` API remains available.
-
-## Implementation Order
-
-Recommended order:
-
-1. Finalize this naming checkpoint.
-2. Plan 011: create the typed facade and raw boundary.
-3. Plan 019: stabilize these architecture docs as durable maintainer notes.
-4. Plan 017: improve `SamlError`.
-5. Plan 012: add typed config and policies.
-6. Plan 018: add narrowed binding, endpoint, and tracker types.
-7. Plan 013: add browser/domain models.
-8. Plan 020: add caller-owned clock and replay validation context.
-9. Plan 021: add verified metadata trust boundary.
-10. Plan 014: add typed Web SSO facade.
-11. Plan 015: add typed Single Logout facade.
-12. Plan 016: update README, docs.rs, and examples.
 
 ## Design Goals
 
@@ -76,11 +58,8 @@ let started = sp_saml.start_sso(&idp_descriptor, StartSso::redirect())?;
 store_pending(started.pending.snapshot());
 send_to_browser(started.outbound);
 
-let validation = SamlValidationContext {
-    now,
-    clock_skew,
-    replay: ReplayPolicy::RequireCache(&mut replay_cache),
-};
+let validation = SamlValidationContext::new(now, ReplayPolicy::RequireCache(&mut replay_cache))
+    .with_clock_skew(clock_skew);
 
 let pending = Pending::<AuthnRequest>::from_snapshot(load_pending_snapshot())?;
 let session = sp_saml.finish_sso(

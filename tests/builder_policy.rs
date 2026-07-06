@@ -355,22 +355,6 @@ fn struct_literal_conversion_rejects_empty_entity_id() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn follow_peer_metadata_logout_policy_validates_until_raw_conversion(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut config = SpConfig::new(
-        EntityId::try_new("https://sp.example.com/metadata")?,
-        SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
-    );
-    config.validation.logout.requests = LogoutSignaturePolicy::FollowPeerMetadata;
-
-    config.validate()?;
-    let result = EntitySetting::try_from(&config);
-
-    assert!(matches!(result, Err(SamlError::Unsupported(_))));
-    Ok(())
-}
-
-#[test]
 fn sp_builder_rejects_signing_passphrase_without_signing_key(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let credentials = Credentials {

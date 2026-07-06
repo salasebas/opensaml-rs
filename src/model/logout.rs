@@ -17,7 +17,7 @@ pub struct LogoutSubject {
 }
 
 impl LogoutSubject {
-    /// Create logout subject data from a NameID and optional SessionIndex values.
+    /// Create logout subject data from a NameID and SessionIndex values.
     pub fn new(name_id: NameId, session_indexes: Vec<SessionIndex>) -> Self {
         Self {
             name_id,
@@ -30,9 +30,19 @@ impl LogoutSubject {
         Self::new(name_id, Vec::new())
     }
 
+    /// Create logout subject data with one SessionIndex.
+    pub fn with_session_index(name_id: NameId, session_index: SessionIndex) -> Self {
+        Self::new(name_id, vec![session_index])
+    }
+
     /// Subject NameID.
     pub fn name_id(&self) -> &NameId {
         &self.name_id
+    }
+
+    /// First SessionIndex to include in the logout request, when present.
+    pub fn session_index(&self) -> Option<&SessionIndex> {
+        self.session_indexes.first()
     }
 
     /// SessionIndex values to include in the logout request.

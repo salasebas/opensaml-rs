@@ -528,10 +528,6 @@ pub enum LogoutSignaturePolicy {
     /// Reject unsigned logout messages.
     #[default]
     RequireSigned,
-    /// Defer to peer metadata. Compatibility conversion to [`EntitySetting`]
-    /// returns [`SamlError::Unsupported`] because the raw setting has no peer
-    /// descriptor context.
-    FollowPeerMetadata,
     /// Accept unsigned logout messages for legacy interoperability.
     AllowUnsignedForCompatibility,
 }
@@ -1303,10 +1299,7 @@ fn logout_policy_requires_crypto(policy: LogoutPolicy) -> bool {
 
 #[cfg(not(feature = "crypto-bergshamra"))]
 fn logout_signature_policy_requires_crypto(policy: LogoutSignaturePolicy) -> bool {
-    matches!(
-        policy,
-        LogoutSignaturePolicy::RequireSigned | LogoutSignaturePolicy::FollowPeerMetadata
-    )
+    matches!(policy, LogoutSignaturePolicy::RequireSigned)
 }
 
 /// Typed IdP peer descriptor imported from metadata.
@@ -1505,9 +1498,6 @@ fn logout_signature_required(policy: LogoutSignaturePolicy) -> Result<bool, Saml
     match policy {
         LogoutSignaturePolicy::RequireSigned => Ok(true),
         LogoutSignaturePolicy::AllowUnsignedForCompatibility => Ok(false),
-        LogoutSignaturePolicy::FollowPeerMetadata => Err(SamlError::Unsupported(
-            "LogoutSignaturePolicy::FollowPeerMetadata requires peer descriptor context".into(),
-        )),
     }
 }
 

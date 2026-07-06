@@ -1,88 +1,91 @@
-//! End-to-end signed SSO: SP builds an `AuthnRequest`, the IdP parses it and
-//! issues a signed `Response`, and the SP validates it.
+//! End-to-end typed SSO: SP starts an `AuthnRequest`, the IdP receives it and
+//! issues a signed `Response`, and the SP finishes with a typed session.
 //!
 //! Run with: `cargo run -p saml-rs --example sso`
 //! (the `crypto-bergshamra` feature is on by default).
 
 #[cfg(feature = "crypto-bergshamra")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use saml_rs::constants::{signature_algorithm::RSA_SHA256, Binding};
-    use saml_rs::entity::{EntitySetting, User};
-    use saml_rs::flow::HttpRequest;
-    use saml_rs::idp::LoginResponseOptions;
-    use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
-    use saml_rs::{IdentityProvider, ServiceProvider};
+    use saml_rs::{
+        AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, IdpConfig,
+        IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId, PrivateKeyPem,
+        RelayStateParam, ReplayPolicy, RespondSso, Saml, SamlValidationContext, SpConfig,
+        SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse, StartSso, Subject,
+    };
+    use time::OffsetDateTime;
 
-    // A demo RSA keypair (test material; use real keys in production).
     let privkey = include_str!("../tests/fixtures/key/sp_privkey.pem");
     let cert = include_str!("../tests/fixtures/key/sp_signing_cert.cer");
-    let signing = || {
-        let mut setting = EntitySetting::default();
-        setting.private_key = Some(privkey.into());
-        setting.signing_cert = Some(cert.into());
-        setting.request_signature_algorithm = RSA_SHA256.into();
-        setting
+    let credentials = || Credentials {
+        signing_key: Some(PrivateKeyPem::new(privkey)),
+        signing_certificate: Some(CertificatePem::new(cert)),
+        ..Credentials::default()
+    };
+    let validation = || {
+        SamlValidationContext::new(
+            OffsetDateTime::now_utc(),
+            ReplayPolicy::DisabledForCompatibility,
+        )
     };
 
-    let idp = IdentityProvider::from_config(
-        &IdpMetadataConfig {
-            entity_id: "https://idp.example.com/metadata".into(),
-            signing_certs: vec![cert.into()],
-            want_authn_requests_signed: true,
-            single_sign_on_service: vec![Endpoint::new(
-                Binding::Post,
-                "https://idp.example.com/sso",
-            )],
-            ..Default::default()
-        },
-        signing(),
+    let sp = Saml::sp(
+        SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+            .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+            .credentials(credentials())
+            .validation(SpValidationPolicy::strict())
+            .build()?,
     )?;
-    let sp = ServiceProvider::from_config(
-        &SpMetadataConfig {
-            entity_id: "https://sp.example.com/metadata".into(),
-            authn_requests_signed: true,
-            want_assertions_signed: true,
-            signing_certs: vec![cert.into()],
-            assertion_consumer_service: vec![Endpoint::new(
-                Binding::Post,
-                "https://sp.example.com/acs",
-            )],
-            ..Default::default()
-        },
-        signing(),
+    let idp = Saml::idp(
+        IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+            .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+            .credentials(credentials())
+            .validation(IdpValidationPolicy::strict())
+            .build()?,
     )?;
 
-    // 1. SP creates a signed AuthnRequest (HTTP-POST).
-    let request = sp.create_login_request(&idp, Binding::Post, None)?;
-    println!("SP  -> AuthnRequest id = {}", request.id);
+    let sp_descriptor = SpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://sp.example.com/metadata")?,
+        sp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
 
-    // 2. IdP receives and validates the request.
-    let req = HttpRequest::post(vec![("SAMLRequest".into(), request.context.clone())]);
-    let parsed = idp.parse_login_request(&sp, Binding::Post, &req)?;
+    let relay_state = RelayStateParam::try_from_option(Some("demo-state".to_string()))?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post().relay_state(relay_state))?;
     println!(
-        "IdP <- request issuer  = {:?}",
-        parsed.extract.get_str("issuer")
+        "SP  -> AuthnRequest id = {}",
+        started.pending.request_id().as_str()
     );
 
-    // 3. IdP issues a signed Response bound to the request.
-    let response = idp.create_login_response(
-        &sp,
-        Binding::Post,
-        &User::new("alice@example.com"),
-        &LoginResponseOptions {
-            in_response_to: Some(request.id.as_str()),
-            ..Default::default()
-        },
+    let request = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(started.outbound.post_form()?.fields().to_vec()),
+        validation(),
+    )?;
+    println!(
+        "IdP <- request issuer  = {}",
+        request.message().issuer().as_str()
+    );
+
+    let response = idp.respond_sso(
+        &sp_descriptor,
+        &request,
+        Subject::new(NameId::new("alice@example.com", None), Vec::new()),
+        RespondSso::post(),
     )?;
 
-    // 4. SP validates signature, issuer, audience, time and InResponseTo.
-    let resp = HttpRequest::post(vec![("SAMLResponse".into(), response.context)]);
-    let result =
-        sp.parse_login_response_with_request_id(&idp, Binding::Post, &resp, &request.id)?;
-    println!(
-        "SP  <- authenticated   = {:?}",
-        result.extract.get_str("nameID")
+    let session = sp.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::post(response.post_form()?.fields().to_vec()),
+        validation(),
     );
+    let session = session?;
+    println!("SP  <- authenticated   = {}", session.name_id().value());
     Ok(())
 }
 

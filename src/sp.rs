@@ -58,19 +58,36 @@ struct AuthnRequestXml<'a> {
 #[derive(Debug, Clone, Copy)]
 enum LoginResponseCorrelation<'a> {
     Unsolicited,
-    MessageId {
-        request_id: &'a str,
-        expected_recipient: Option<&'a str>,
-    },
+    MessageId(&'a str),
 }
 
-/// Expected response correlation fields for a solicited login response.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ExpectedLoginResponse<'a> {
-    /// AuthnRequest ID that the response must reference.
-    pub(crate) request_id: &'a str,
-    /// ACS URL that Destination and bearer Recipient must target.
-    pub(crate) recipient: &'a str,
+pub(crate) struct LoginResponseParseOptions<'a> {
+    expected_recipient: Option<&'a str>,
+    now: Option<OffsetDateTime>,
+    clock_drifts: (i64, i64),
+}
+
+impl<'a> LoginResponseParseOptions<'a> {
+    fn compatibility(clock_drifts: (i64, i64)) -> Self {
+        Self {
+            expected_recipient: None,
+            now: None,
+            clock_drifts,
+        }
+    }
+
+    pub(crate) fn at(now: OffsetDateTime, clock_drifts: (i64, i64)) -> Self {
+        Self {
+            expected_recipient: None,
+            now: Some(now),
+            clock_drifts,
+        }
+    }
+
+    pub(crate) fn with_expected_recipient(mut self, expected_recipient: &'a str) -> Self {
+        self.expected_recipient = Some(expected_recipient);
+        self
+    }
 }
 
 fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
@@ -220,25 +237,6 @@ impl ServiceProvider {
         binding: Binding,
         options: &LoginRequestOptions<'_>,
     ) -> Result<BindingContext, SamlError> {
-        self.create_login_request_with_options_inner(idp, binding, options, false)
-    }
-
-    pub(crate) fn create_login_request_with_options_suppressing_default_relay_state(
-        &self,
-        idp: &IdentityProvider,
-        binding: Binding,
-        options: &LoginRequestOptions<'_>,
-    ) -> Result<BindingContext, SamlError> {
-        self.create_login_request_with_options_inner(idp, binding, options, true)
-    }
-
-    fn create_login_request_with_options_inner(
-        &self,
-        idp: &IdentityProvider,
-        binding: Binding,
-        options: &LoginRequestOptions<'_>,
-        suppress_default_relay_state: bool,
-    ) -> Result<BindingContext, SamlError> {
         if self.metadata.is_authn_request_signed() != idp.metadata.is_want_authn_requests_signed() {
             return Err(SamlError::Invalid(format!(
                 "ERR_METADATA_CONFLICT_REQUEST_SIGNED_FLAG: SP AuthnRequestsSigned={} but IdP WantAuthnRequestsSigned={}",
@@ -257,17 +255,11 @@ impl ServiceProvider {
             (None, _) => {
                 let uses_acs_index = options.assertion_consumer_service_index.is_some();
                 let response_binding = options.response_binding.unwrap_or(Binding::Post);
-                let acs_url = if uses_acs_index {
-                    None
-                } else {
-                    Some(
-                        self.metadata
-                            .get_assertion_consumer_service(response_binding)
-                            .ok_or_else(|| {
-                                SamlError::MissingMetadata("AssertionConsumerService".into())
-                            })?,
-                    )
-                };
+                let acs_url = (!uses_acs_index).then(|| {
+                    self.metadata
+                        .get_assertion_consumer_service(response_binding)
+                        .unwrap_or_default()
+                });
                 let protocol_binding =
                     (!uses_acs_index).then(|| response_binding.urn().to_string());
                 let acs_index = options
@@ -322,7 +314,6 @@ impl ServiceProvider {
         };
         let relay_state = match options.relay_state {
             Some(value) => Some(value.to_string()),
-            None if suppress_default_relay_state => None,
             None => {
                 (!self.setting.relay_state.is_empty()).then(|| self.setting.relay_state.clone())
             }
@@ -485,8 +476,7 @@ impl ServiceProvider {
             binding,
             request,
             LoginResponseCorrelation::Unsolicited,
-            None,
-            self.setting.clock_drifts,
+            LoginResponseParseOptions::compatibility(self.setting.clock_drifts),
         )
     }
 
@@ -503,8 +493,7 @@ impl ServiceProvider {
             binding,
             request,
             LoginResponseCorrelation::Unsolicited,
-            Some(now),
-            clock_drifts,
+            LoginResponseParseOptions::at(now, clock_drifts),
         )
     }
 
@@ -528,37 +517,28 @@ impl ServiceProvider {
             idp,
             binding,
             request,
-            LoginResponseCorrelation::MessageId {
-                request_id,
-                expected_recipient: None,
-            },
-            None,
-            self.setting.clock_drifts,
+            LoginResponseCorrelation::MessageId(request_id),
+            LoginResponseParseOptions::compatibility(self.setting.clock_drifts),
         )
     }
 
-    pub(crate) fn parse_login_response_with_request_id_and_recipient_at(
+    pub(crate) fn parse_login_response_with_request_id_at(
         &self,
         idp: &IdentityProvider,
         binding: Binding,
         request: &HttpRequest,
-        expected: ExpectedLoginResponse<'_>,
-        now: OffsetDateTime,
-        clock_drifts: (i64, i64),
+        request_id: &str,
+        options: LoginResponseParseOptions<'_>,
     ) -> Result<FlowResult, SamlError> {
-        if expected.request_id.is_empty() {
+        if request_id.is_empty() {
             return Err(SamlError::InvalidInResponseTo);
         }
         self.parse_login_response_inner(
             idp,
             binding,
             request,
-            LoginResponseCorrelation::MessageId {
-                request_id: expected.request_id,
-                expected_recipient: Some(expected.recipient),
-            },
-            Some(now),
-            clock_drifts,
+            LoginResponseCorrelation::MessageId(request_id),
+            options,
         )
     }
 
@@ -568,8 +548,7 @@ impl ServiceProvider {
         binding: Binding,
         request: &HttpRequest,
         correlation: LoginResponseCorrelation<'_>,
-        now: Option<OffsetDateTime>,
-        clock_drifts: (i64, i64),
+        options: LoginResponseParseOptions<'_>,
     ) -> Result<FlowResult, SamlError> {
         let signing_certs = idp.metadata.x509_certificates(CertUse::Signing);
         let decrypt_key = if self.setting.is_assertion_encrypted {
@@ -579,15 +558,10 @@ impl ServiceProvider {
         };
         let audience = self.entity_id();
         let expected_in_response_to = match correlation {
-            LoginResponseCorrelation::MessageId { request_id, .. } => Some(request_id),
+            LoginResponseCorrelation::MessageId(request_id) => Some(request_id),
             LoginResponseCorrelation::Unsolicited => None,
         };
-        let recipient = match match correlation {
-            LoginResponseCorrelation::MessageId {
-                expected_recipient, ..
-            } => expected_recipient,
-            LoginResponseCorrelation::Unsolicited => None,
-        } {
+        let recipient = match options.expected_recipient {
             Some(recipient) => recipient.to_string(),
             None => self
                 .metadata
@@ -606,8 +580,8 @@ impl ServiceProvider {
                 allow_insecure_software_rsa_key_transport_decryption: self
                     .setting
                     .allow_insecure_software_rsa_key_transport_decryption,
-                clock_drifts,
-                now,
+                clock_drifts: options.clock_drifts,
+                now: options.now,
                 redirect_inflate_max_bytes: self.setting.redirect_inflate_max_bytes,
                 xml_limits: self.setting.xml_limits,
                 expected_audience: self.setting.validate_audience.then_some(audience.as_str()),

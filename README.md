@@ -69,122 +69,127 @@ evaluate the implementation scope.
 
 ## Quick Start
 
-### Service Provider - Login Request
+The primary API is the typed `Saml` facade. Build local SP/IdP configuration
+with `SpConfig::builder` and `IdpConfig::builder`, import peer metadata into
+typed descriptors, and keep the returned `Pending<_>` value with your browser
+session while the SAML round trip is in flight.
 
-```rust
-use saml_rs::constants::Binding;
-use saml_rs::entity::EntitySetting;
-use saml_rs::metadata::{Endpoint, SpMetadataConfig};
-use saml_rs::ServiceProvider;
+### Runnable typed SSO
 
-let sp = ServiceProvider::from_config(
-    &SpMetadataConfig {
-        entity_id: "https://sp.example.com/metadata".into(),
-        assertion_consumer_service: vec![Endpoint::new(
-            Binding::Post,
-            "https://sp.example.com/acs",
-        )],
-        ..Default::default()
-    },
-    EntitySetting::default(),
-)?;
-
-// Binding::Redirect uses raw DEFLATE + query-string dispatch.
-let request = sp.create_login_request(&idp, Binding::Post, None)?;
-```
-
-### Identity Provider - Login Response
-
-```rust
-use saml_rs::constants::Binding;
-use saml_rs::entity::User;
-use saml_rs::flow::HttpRequest;
-use saml_rs::idp::LoginResponseOptions;
-
-let req = HttpRequest::post(vec![("SAMLRequest".into(), saml_request_b64)]);
-let parsed = idp.parse_login_request(&sp, Binding::Post, &req)?;
-
-let response = idp.create_login_response(
-    &sp,
-    Binding::Post,
-    &User::new("alice@example.com"),
-    &LoginResponseOptions {
-        in_response_to: parsed.extract.get_str("request.id"),
-        ..Default::default()
-    },
-)?;
-```
-
-### Service Provider - Consume Response
-
-```rust
-use saml_rs::constants::Binding;
-use saml_rs::flow::HttpRequest;
-
-let resp = HttpRequest::post(vec![("SAMLResponse".into(), saml_response_b64)]);
-
-let result = sp.parse_login_response_with_request_id(
-    &idp,
-    Binding::Post,
-    &resp,
-    &authn_request_id,
-)?;
-
-let name_id = result.extract.get_str("nameID");
-```
-
-### Metadata
-
-```rust
-use saml_rs::constants::Binding;
-use saml_rs::metadata::{generate_sp_metadata, IdpMetadata, SpMetadataConfig};
-
-let idp_meta = IdpMetadata::from_xml(idp_metadata_xml)?;
-let sso_url = idp_meta.get_single_sign_on_service(Binding::Redirect);
-
-let xml = generate_sp_metadata(&SpMetadataConfig {
-    entity_id: "https://sp.example.com/metadata".into(),
-    ..Default::default()
-});
-```
-
-### Single Logout
-
-```rust
-use saml_rs::constants::Binding;
-use saml_rs::entity::User;
-use saml_rs::flow::HttpRequest;
-use saml_rs::logout::{create_logout_request, parse_logout_response};
-
-let logout = create_logout_request(
-    &sp.setting,
-    &sp.metadata,
-    &idp.metadata,
-    Binding::Post,
-    &User::new("alice@example.com"),
-    None,
-    true,
-)?;
-
-let resp = HttpRequest::post(vec![("SAMLResponse".into(), saml_response_b64)]);
-let parsed = parse_logout_response(
-    &sp.setting,
-    &idp.metadata,
-    Binding::Post,
-    &resp,
-    &logout.id,
-)?;
-```
-
-### End-to-End Example
-
-A runnable signed SP -> IdP -> SP round trip:
+A signed SP -> IdP -> SP round trip is available as an executable example:
 
 ```sh
 cargo run -p saml-rs --example sso
 ```
 
 Source: [`examples/sso.rs`](examples/sso.rs).
+
+### Service Provider - start SSO
+
+```rust
+use saml_rs::{
+    AcsEndpoint, BrowserInput, CertificatePem, Credentials, EntityId, IdpDescriptor,
+    MetadataTrustPolicy, PrivateKeyPem, Saml, SpConfig, StartSso, SsoResponse,
+};
+
+let credentials = Credentials {
+    signing_key: Some(PrivateKeyPem::new(include_str!("sp-key.pem"))),
+    signing_certificate: Some(CertificatePem::new(include_str!("sp-cert.pem"))),
+    ..Credentials::default()
+};
+let sp = Saml::sp(
+    SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+        .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .credentials(credentials)
+        .build()?,
+)?;
+let idp = IdpDescriptor::from_metadata_xml_for(
+    EntityId::try_new("https://idp.example.com/metadata")?,
+    idp_metadata_xml,
+    MetadataTrustPolicy::UnsignedForCompatibility,
+)?;
+
+let started = sp.start_sso(&idp, StartSso::redirect())?;
+let redirect_url = started.outbound.redirect_url()?;
+
+// Store started.pending with the user's browser session. Later, in the ACS
+// handler, pass the posted fields back to the same SP facade:
+let session = sp.finish_sso(
+    &idp,
+    &started.pending,
+    BrowserInput::<SsoResponse>::post(form_fields),
+    validation,
+)?;
+let name_id = session.name_id().value();
+```
+
+### Identity Provider - receive and respond
+
+```rust
+use saml_rs::{
+    AuthnRequest, BrowserInput, NameId, RespondSso, Saml, SpDescriptor, Subject,
+};
+
+let request = idp.receive_sso(
+    &sp,
+    BrowserInput::<AuthnRequest>::post(request_fields),
+    validation,
+)?;
+let response = idp.respond_sso(
+    &sp,
+    &request,
+    Subject::new(NameId::new("alice@example.com", None), Vec::new()),
+    RespondSso::post(),
+)?;
+let response_fields = response.post_form()?.fields();
+```
+
+### Single Logout
+
+```rust
+use saml_rs::{BrowserInput, LogoutRequest, LogoutResponse, RespondSlo, StartSlo};
+
+if let Some(subject) = session.logout_subject() {
+    let logout = sp.start_slo(&idp, subject, StartSlo::post())?;
+
+    // Peer receives the LogoutRequest and emits a LogoutResponse.
+    let received = idp_saml.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(logout_request_fields),
+        validation_for_request,
+    )?;
+    let response = idp_saml.respond_slo(&sp_descriptor, &received, RespondSlo::post())?;
+
+    let completed = sp.finish_slo(
+        &idp,
+        &logout.pending,
+        BrowserInput::<LogoutResponse>::post(response.post_form()?.fields().to_vec()),
+        validation_for_response,
+    )?;
+    assert_eq!(completed.peer_entity_id(), idp.entity_id());
+}
+```
+
+### Metadata
+
+```rust
+use saml_rs::{EntityId, IdpDescriptor, MetadataTrustPolicy};
+
+let sp_metadata_xml = sp.metadata_xml();
+let idp = IdpDescriptor::from_metadata_xml_for(
+    EntityId::try_new("https://idp.example.com/metadata")?,
+    idp_metadata_xml,
+    MetadataTrustPolicy::UnsignedForCompatibility,
+)?;
+```
+
+### Advanced/raw compatibility
+
+The low-level compatibility API remains available under `saml_rs::raw` for
+callers that need direct access to `ServiceProvider`, `IdentityProvider`,
+`HttpRequest`, `BindingContext`, or protocol helper functions. New browser
+SSO/SLO integrations should start with `Saml`, typed descriptors, and the
+builder-backed config types shown above.
 
 ## Features
 

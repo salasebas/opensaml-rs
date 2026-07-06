@@ -1,8 +1,8 @@
 //! `saml-rs` - SAML 2.0 Service Provider and Identity Provider support.
 //!
-//! Start with [`Saml`] for planned high-level browser SSO/SLO APIs. The typed
-//! facade is the public contract for future browser flows, while the current
-//! low-level implementation remains available under [`raw`].
+//! Start with [`Saml`] for high-level browser SSO/SLO APIs. The typed facade is
+//! the public browser-flow contract, while the low-level compatibility
+//! implementation remains available under [`raw`].
 //!
 //! The [`raw`] module contains the compatibility API and protocol helpers:
 //! advanced callers should import [`raw::ServiceProvider`] and
@@ -43,7 +43,8 @@ pub mod validator;
 pub mod xml;
 
 pub use api::{
-    Idp, LogoutSigning, RespondSlo, RespondSso, Saml, SamlError, Sp, StartSlo, StartSso, Unknown,
+    ForceAuthn, Idp, LogoutSigning, RespondSlo, RespondSso, Saml, SamlError, Sp, StartSlo,
+    StartSso, Unknown,
 };
 pub use browser::{
     AcsEndpoint, BrowserInput, EndpointUrl, FormField, LogoutBinding, Outbound, Pending,
