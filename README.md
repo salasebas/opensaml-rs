@@ -85,104 +85,62 @@ The repository also includes a typed Single Logout walkthrough in
 [`examples/slo.rs`](examples/slo.rs) and a low-level compatibility walkthrough
 in [`examples/raw_compat.rs`](examples/raw_compat.rs).
 
-### Service Provider - start SSO
+The [crate-root docs](https://docs.rs/saml-rs/latest/saml_rs/) contain
+doctested fragments for the typed `Saml` facade, including
+[`Saml<Sp>::start_sso`](https://docs.rs/saml-rs/latest/saml_rs/struct.Saml.html#method.start_sso),
+[`Saml<Sp>::finish_sso`](https://docs.rs/saml-rs/latest/saml_rs/struct.Saml.html#method.finish_sso),
+[`Saml<Idp>::receive_sso`](https://docs.rs/saml-rs/latest/saml_rs/struct.Saml.html#method.receive_sso),
+and [`Saml<Sp>::finish_slo`](https://docs.rs/saml-rs/latest/saml_rs/struct.Saml.html#method.finish_slo).
+Those rustdoc snippets are compiled by `cargo test --doc`; the README stays as
+an entry point and links to the complete examples above.
 
-```rust
-use saml_rs::{
-    AcsEndpoint, BrowserInput, CertificatePem, Credentials, EntityId, IdpDescriptor,
-    MetadataTrustPolicy, PrivateKeyPem, Saml, SpConfig, StartSso, SsoResponse,
-};
+### Service Provider SSO flow
 
-let credentials = Credentials {
-    signing_key: Some(PrivateKeyPem::new(include_str!("sp-key.pem"))),
-    signing_certificate: Some(CertificatePem::new(include_str!("sp-cert.pem"))),
-    ..Credentials::default()
-};
-let sp = Saml::sp(
-    SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
-        .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
-        .credentials(credentials)
-        .build()?,
-)?;
-let idp = IdpDescriptor::from_metadata_xml_for(
-    EntityId::try_new("https://idp.example.com/metadata")?,
-    idp_metadata_xml,
-    MetadataTrustPolicy::UnsignedForCompatibility,
-)?;
+1. Build local SP state with `SpConfig::builder` and `Saml::sp`.
+2. Import peer IdP metadata into `IdpDescriptor`.
+3. Start SSO with `sp.start_sso(...)` and store `started.pending` with the
+   browser session.
+4. In the ACS handler, pass the posted response fields and the matching pending
+   value to `sp.finish_sso(...)`.
 
-let started = sp.start_sso(&idp, StartSso::redirect())?;
-let redirect_url = started.outbound.redirect_url()?;
-
-// Store started.pending with the user's browser session. Later, in the ACS
-// handler, pass the posted fields back to the same SP facade:
-let session = sp.finish_sso(
-    &idp,
-    &started.pending,
-    BrowserInput::<SsoResponse>::post(form_fields),
-    validation,
-)?;
-let name_id = session.name_id().value();
-```
+See [`examples/sso.rs`](examples/sso.rs) for a complete signed SP -> IdP -> SP
+round trip and the [doctested crate-root SSO
+fragment](https://docs.rs/saml-rs/latest/saml_rs/#sp-initiated-sso) for the
+compact API shape.
 
 ### Identity Provider - receive and respond
 
-```rust
-use saml_rs::{
-    AuthnRequest, BrowserInput, NameId, RespondSso, Saml, SpDescriptor, Subject,
-};
-
-let request = idp.receive_sso(
-    &sp,
-    BrowserInput::<AuthnRequest>::post(request_fields),
-    validation,
-)?;
-let response = idp.respond_sso(
-    &sp,
-    &request,
-    Subject::new(NameId::new("alice@example.com", None), Vec::new()),
-    RespondSso::post(),
-)?;
-let response_fields = response.post_form()?.fields();
-```
+The IdP side mirrors the SP flow: import peer SP metadata into `SpDescriptor`,
+parse an `AuthnRequest` with `idp.receive_sso(...)`, then produce a typed
+browser response with `idp.respond_sso(...)`. The complete path is exercised in
+[`examples/sso.rs`](examples/sso.rs), and the short rustdoc version is in the
+[Identity Provider flows](https://docs.rs/saml-rs/latest/saml_rs/#identity-provider-flows)
+crate-root section.
 
 ### Single Logout
 
-```rust
-use saml_rs::{BrowserInput, LogoutRequest, LogoutResponse, RespondSlo, StartSlo};
-
-if let Some(subject) = session.logout_subject() {
-    let logout = sp.start_slo(&idp, subject, StartSlo::post())?;
-
-    // Peer receives the LogoutRequest and emits a LogoutResponse.
-    let received = idp_saml.receive_slo(
-        &sp_descriptor,
-        BrowserInput::<LogoutRequest>::post(logout_request_fields),
-        validation_for_request,
-    )?;
-    let response = idp_saml.respond_slo(&sp_descriptor, &received, RespondSlo::post())?;
-
-    let completed = sp.finish_slo(
-        &idp,
-        &logout.pending,
-        BrowserInput::<LogoutResponse>::post(response.post_form()?.fields().to_vec()),
-        validation_for_response,
-    )?;
-    assert_eq!(completed.peer_entity_id(), idp.entity_id());
-}
-```
+Typed Single Logout starts from `session.logout_subject()`, stores the
+`PendingLogoutRequest`, and finishes only with the matching `LogoutResponse`.
+Peer-initiated logout uses `Received<LogoutRequest>` rather than free-form
+request ID strings. See [`examples/slo.rs`](examples/slo.rs) for the complete
+typed walkthrough and the [doctested SLO
+fragment](https://docs.rs/saml-rs/latest/saml_rs/#single-logout) for the compact
+shape.
 
 ### Metadata
 
-```rust
-use saml_rs::{EntityId, IdpDescriptor, MetadataTrustPolicy};
+Metadata trust is explicit. The rustdoc
+[Metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust)
+section describes production-shaped signed metadata validation with pinned
+certificates. `MetadataTrustPolicy::UnsignedForCompatibility` is available for
+legacy interoperability, but it is a compatibility exception rather than a
+production default.
 
-let sp_metadata_xml = sp.metadata_xml();
-let idp = IdpDescriptor::from_metadata_xml_for(
-    EntityId::try_new("https://idp.example.com/metadata")?,
-    idp_metadata_xml,
-    MetadataTrustPolicy::UnsignedForCompatibility,
-)?;
-```
+The compact rustdoc flow snippets use
+`ReplayPolicy::DisabledForCompatibility` only to keep examples dependency-free.
+Production inbound validation should use `ReplayPolicy::RequireCache` with a
+caller-owned replay cache and the retention guidance in
+[`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html).
 
 ### Advanced/raw compatibility
 
@@ -215,7 +173,8 @@ With `crypto-bergshamra` enabled:
 - XML signatures can be verified against metadata-declared keys.
 - Signed-reference placement checks help mitigate XML Signature Wrapping (XSW).
 - XML-Enc support is available, but software RSA key-transport decryption is
-  gated off by default and requires an explicit compatibility opt-in.
+  gated off by default and requires an explicit compatibility opt-in through
+  [`XmlEncryptionPolicy`](https://docs.rs/saml-rs/latest/saml_rs/struct.XmlEncryptionPolicy.html).
 
 ## Security
 
