@@ -42,7 +42,7 @@ pub mod util;
 pub mod validator;
 pub mod xml;
 
-pub use api::{Idp, Saml, SamlError, Sp, Unknown};
+pub use api::{Idp, RespondSso, Saml, SamlError, Sp, StartSso, Unknown};
 pub use browser::{
     AcsEndpoint, BrowserInput, EndpointUrl, FormField, LogoutBinding, Outbound, Pending,
     PendingAuthnRequest, PendingLogoutRequest, PendingSnapshot, PostForm, SloEndpoint, SsoEndpoint,

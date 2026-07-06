@@ -66,11 +66,17 @@ impl Default for ClockSkew {
 /// Replay cache key derived from a validated SAML message.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "public replay keys include the SAML identifier family in each variant"
+)]
 pub enum ReplayKey {
     /// SAML protocol response ID.
     ResponseId(MessageId),
     /// SAML assertion ID.
     AssertionId(AssertionId),
+    /// SAML protocol request ID.
+    RequestId(MessageId),
 }
 
 impl ReplayKey {
@@ -79,6 +85,7 @@ impl ReplayKey {
         match self {
             Self::ResponseId(_) => "response_id",
             Self::AssertionId(_) => "assertion_id",
+            Self::RequestId(_) => "request_id",
         }
     }
 
@@ -87,6 +94,7 @@ impl ReplayKey {
         match self {
             Self::ResponseId(id) => id.as_str(),
             Self::AssertionId(id) => id.as_str(),
+            Self::RequestId(id) => id.as_str(),
         }
     }
 
@@ -124,6 +132,7 @@ pub struct SamlValidationContext<'a> {
     now: OffsetDateTime,
     clock_skew: ClockSkew,
     replay: ReplayPolicy<'a>,
+    message_replay_expires_at: Option<OffsetDateTime>,
 }
 
 impl<'a> SamlValidationContext<'a> {
@@ -133,12 +142,20 @@ impl<'a> SamlValidationContext<'a> {
             now,
             clock_skew: ClockSkew::strict(),
             replay,
+            message_replay_expires_at: None,
         }
     }
 
     /// Set clock skew tolerance for SAML time windows.
     pub fn with_clock_skew(mut self, clock_skew: ClockSkew) -> Self {
         self.clock_skew = clock_skew;
+        self
+    }
+
+    /// Set replay-cache expiration for inbound messages that do not carry a
+    /// protocol `NotOnOrAfter`.
+    pub fn with_message_replay_expiration(mut self, expires_at: OffsetDateTime) -> Self {
+        self.message_replay_expires_at = Some(expires_at);
         self
     }
 
@@ -154,5 +171,9 @@ impl<'a> SamlValidationContext<'a> {
 
     pub(crate) fn replay_policy(&mut self) -> &mut ReplayPolicy<'a> {
         &mut self.replay
+    }
+
+    pub(crate) fn message_replay_expires_at(&self) -> Option<OffsetDateTime> {
+        self.message_replay_expires_at
     }
 }
