@@ -1,5 +1,5 @@
 [package]
-name = "saml-rs"
+name = "rustsaml"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
@@ -7,27 +7,14 @@ license = "MIT"
 repository = "https://github.com/salasebas/saml-rs"
 homepage = "https://github.com/salasebas/saml-rs"
 readme = "README.md"
-description = "Pure-Rust SAML 2.0 Service Provider and Identity Provider support."
+description = "Maintained compatibility re-export of saml-rs."
 keywords = ["saml", "sso", "xml", "authentication"]
 categories = ["authentication", "web-programming"]
 include = [
     "/Cargo.toml",
-    "/Cargo.lock",
     "/src/**",
     "/tests/**",
-    "/examples/**",
     "/README.md",
-    "/LICENSE",
-    "/CHANGELOG.md",
-]
-
-[workspace]
-resolver = "2"
-members = [
-    "crates/opensaml",
-    "crates/samlify",
-    "crates/rustsaml",
-    "crates/samlet",
 ]
 
 [package.metadata.docs.rs]
@@ -35,22 +22,15 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lib]
-name = "saml_rs"
+name = "rustsaml"
 path = "src/lib.rs"
 
 [features]
 default = ["crypto-bergshamra"]
-crypto-bergshamra = ["dep:bergshamra"]
+crypto-bergshamra = ["saml-rs/crypto-bergshamra"]
 
 [dependencies]
-base64 = "0.22"
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-quick-xml = "0.41"
-thiserror = "2"
-time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
-url = "2"
-uuid = { version = "1", default-features = false, features = ["v4"] }
-bergshamra = { version = "0.7.0", optional = true }
+saml-rs = { path = "../..", version = "0.2.0", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

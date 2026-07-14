@@ -96,6 +96,32 @@ jobs:
       - run: cargo run -p ${{ matrix.package }} --example sso
       - run: cargo run -p ${{ matrix.package }} --example slo
 
+  compatibility:
+    name: Compatibility ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Abort the whole matrix as soon as one package fails.
+      fail-fast: true
+      matrix:
+        package:
+          - opensaml
+          - samlify
+          - rustsaml
+          - samlet
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
+      - run: cargo nextest run -p ${{ matrix.package }}
+      - run: cargo test -p ${{ matrix.package }} --doc
+      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p ${{ matrix.package }} --lib --all-features --no-deps
+      - run: cargo check -p ${{ matrix.package }} --all-targets --no-default-features
+      - run: cargo nextest run -p ${{ matrix.package }} --no-default-features
+      - run: cargo test -p ${{ matrix.package }} --doc --no-default-features
+
   ci:
     name: CI
     runs-on: ubuntu-latest
@@ -105,6 +131,7 @@ jobs:
       - feature-check
       - semver
       - test
+      - compatibility
     if: always()
     steps:
       - name: Check required jobs

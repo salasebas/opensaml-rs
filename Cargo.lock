@@ -1430,6 +1430,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "opensaml"
+version = "0.2.0"
+dependencies = [
+ "saml-rs",
+]
+
+[[package]]
 name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1711,6 +1718,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustsaml"
+version = "0.2.0"
+dependencies = [
+ "saml-rs",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1737,6 +1751,20 @@ dependencies = [
  "time",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "samlet"
+version = "0.2.0"
+dependencies = [
+ "saml-rs",
+]
+
+[[package]]
+name = "samlify"
+version = "0.2.0"
+dependencies = [
+ "saml-rs",
 ]
 
 [[package]]
