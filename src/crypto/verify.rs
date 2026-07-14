@@ -29,6 +29,14 @@ fn has_child(node: &Node, name: &str) -> bool {
     node.children.iter().any(|c| c.local_name == name)
 }
 
+fn saml_signature_candidates(root: &Node) -> Vec<&Node> {
+    let mut signatures = children_named(root, "Signature");
+    for assertion in children_named(root, "Assertion") {
+        signatures.extend(children_named(assertion, "Signature"));
+    }
+    signatures
+}
+
 fn has_descendant(node: &Node, names: &[&str]) -> bool {
     node.children
         .iter()
@@ -280,10 +288,18 @@ fn is_external_reference(uri: &str) -> bool {
 }
 
 fn has_saml_xml_signature(root: &Node) -> bool {
-    has_child(root, "Signature")
-        || children_named(root, "Assertion")
-            .iter()
-            .any(|assertion| has_child(assertion, "Signature"))
+    !saml_signature_candidates(root).is_empty()
+}
+
+fn preflight_saml_reference_uris(signatures: &[&Node]) -> Result<(), SamlError> {
+    for signature in signatures {
+        for signed_info in children_named(signature, "SignedInfo") {
+            for reference in children_named(signed_info, "Reference") {
+                verified_target_from_uri(reference.attr("URI").unwrap_or_default())?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn has_xml_signature_with_limits(
@@ -348,9 +364,11 @@ pub fn verify_signature_with_limits(
     }
 
     // Candidate signatures: message-level (root > Signature) or assertion-level.
-    if !has_saml_xml_signature(root) {
+    let signature_candidates = saml_signature_candidates(root);
+    if signature_candidates.is_empty() {
         return Ok((false, None));
     }
+    preflight_saml_reference_uris(&signature_candidates)?;
 
     // If the message embeds a certificate, it must be one declared in metadata
     // (rolling-cert safety). Verification itself still uses only the metadata
@@ -379,7 +397,7 @@ pub fn verify_signature_with_limits(
         have_key = true;
         let mut manager = KeysManager::new();
         manager.add_key(key);
-        // Trust model (audited against bergshamra 0.6.3):
+        // Trust model (audited against bergshamra 0.7.0):
         // - Metadata certificates are pinned key material, not a public CA
         //   chain. Verification uses only the metadata-pinned key; inline
         //   KeyInfo (X509Certificate/KeyValue) is never imported as key
