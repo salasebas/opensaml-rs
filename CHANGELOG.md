@@ -9,6 +9,85 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.2.0](https://github.com/salasebas/opensaml-rs/compare/v0.1.4...v0.2.0) - 2026-07-14
+
+### Added
+
+- *(api)* add typed Single Logout facade ([#59](https://github.com/salasebas/opensaml-rs/pull/59))
+- *(api)* add typed Web SSO facade ([#58](https://github.com/salasebas/opensaml-rs/pull/58))
+- *(api)* add typed SAML validation context
+- *(api)* add typed config builders
+- *(api)* refine typed SAML API contracts
+- *(api)* add typed SAML browser and result models
+- *(api)* add typed SAML binding subsets
+- *(api)* add typed SAML configuration policies
+- *(api)* add typed Saml facade contract
+- *(opensaml)* support idp protocol assertion tag prefixes ([#28](https://github.com/salasebas/opensaml-rs/pull/28))
+- *(opensaml)* add authn request options
+- *(opensaml)* align IdP metadata ordering behavior
+- *(opensaml)* support rsa pss sha256 signatures
+
+### Fixed
+
+- *(crypto)* preflight SAML reference URIs ([#65](https://github.com/salasebas/opensaml-rs/pull/65))
+- *(sp)* fail on missing response ACS metadata
+- *(api)* repair typed browser model invariants
+- *(deps)* update crypto-bigint to 0.7.5 ([#48](https://github.com/salasebas/opensaml-rs/pull/48))
+- *(deps)* upgrade bergshamra to 0.6.3 ([#47](https://github.com/salasebas/opensaml-rs/pull/47))
+- *(deps)* upgrade quick-xml to 0.41 ([#43](https://github.com/salasebas/opensaml-rs/pull/43))
+- *(opensaml)* include SimpleSign fields in POST forms
+- *(opensaml)* render login response attributes structurally
+- fix login attribute metadata escaping ([#36](https://github.com/salasebas/opensaml-rs/pull/36))
+- reject request-bound unsolicited SSO ([#35](https://github.com/salasebas/opensaml-rs/pull/35))
+- fix metadata xml escaping ([#32](https://github.com/salasebas/opensaml-rs/pull/32))
+- *(opensaml)* limit redirect base64 decode ([#30](https://github.com/salasebas/opensaml-rs/pull/30))
+- *(opensaml)* render optional logout session index
+- *(security)* bound XML parsing before authentication
+- gate XML-Enc software RSA decryption
+- *(opensaml)* escape SAML template values
+- *(opensaml)* validate logout request issuer
+- *(opensaml)* escape SAML attribute values
+- *(opensaml)* validate SAML response destination
+- *(opensaml)* require logout response correlation
+- *(opensaml)* bind detached SAML signatures to consumed fields
+- *(opensaml)* validate bearer subject confirmation
+- *(opensaml)* require AuthnRequest root signature coverage
+- *(opensaml)* validate AuthnRequest issuer
+- *(opensaml)* [**breaking**] limit HTTP-Redirect DEFLATE output
+- *(opensaml)* require explicit SAML response correlation
+- *(opensaml)* require metadata signature root coverage
+- *(security)* bind extracted SAML content to verified reference
+
+### Other
+
+- *(deps)* bump bergshamra in the cargo-xml-crypto group ([#63](https://github.com/salasebas/opensaml-rs/pull/63))
+- split large modules
+- document docs.rs publication surface
+- *(api)* document the typed Saml facade
+- *(api)* verify builder typed user journeys
+- [codex] Preserve signed metadata coverage in typed descriptors ([#57](https://github.com/salasebas/opensaml-rs/pull/57))
+- *(error)* add semantic SAML validation errors
+- [codex] Rebrand workspace as single saml-rs crate
+- *(deps)* bump time in the cargo-maintenance group ([#46](https://github.com/salasebas/opensaml-rs/pull/46))
+- [codex] split cargo dependency update lanes ([#44](https://github.com/salasebas/opensaml-rs/pull/44))
+- *(opensaml)* pin crypto upgrade regressions ([#45](https://github.com/salasebas/opensaml-rs/pull/45))
+- [codex] render default login responses structurally ([#42](https://github.com/salasebas/opensaml-rs/pull/42))
+- [codex] validate crypto XML template inputs ([#41](https://github.com/salasebas/opensaml-rs/pull/41))
+- *(opensaml)* render default logout messages structurally ([#39](https://github.com/salasebas/opensaml-rs/pull/39))
+- *(opensaml)* render default authn requests structurally ([#40](https://github.com/salasebas/opensaml-rs/pull/40))
+- *(readme)* clarify current SAML profile scope
+- *(deps)* bump the github-actions group with 2 updates ([#34](https://github.com/salasebas/opensaml-rs/pull/34))
+- *(deps)* bump the cargo-dependencies group with 2 updates ([#33](https://github.com/salasebas/opensaml-rs/pull/33))
+- add validated POST binding form variant ([#31](https://github.com/salasebas/opensaml-rs/pull/31))
+- update agent guidance ([#29](https://github.com/salasebas/opensaml-rs/pull/29))
+- Merge pull request #27 from salasebas/advisor/002-authn-request-options
+- remove tracked parity notes
+- include agent files in worktrees
+- refresh README and upstream samlify reference ([#22](https://github.com/salasebas/opensaml-rs/pull/22))
+- fix release-plz push authentication
+- add path-based PR labels
+- add release-plz workflow
+
 ### Changed
 
 - Renamed the primary package from `opensaml` to `saml-rs`; Rust imports now use
