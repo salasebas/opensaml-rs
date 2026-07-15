@@ -318,6 +318,32 @@ fn hardening_audience_validation_opt_out() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn hardening_audience_restrictions_reject_when_missing() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_audience_restrictions(&sp, &[])?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(SamlError::AudienceMismatch { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn hardening_audience_restrictions_reject_empty_group() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_audience_restrictions(&sp, &[&[]])?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(SamlError::AudienceMismatch { .. })
+    ));
+    Ok(())
+}
+
+#[test]
 fn hardening_audience_restrictions_require_every_group_to_match(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sp = sp_with("https://sp.example.com/metadata", signing());
