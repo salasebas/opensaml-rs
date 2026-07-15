@@ -195,6 +195,26 @@ fn push_child(stack: &mut [Node], roots: &mut Vec<Node>, node: Node) {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ParseMode {
+    Document,
+    Roots,
+}
+
+fn is_xml_whitespace(text: &str) -> bool {
+    text.bytes()
+        .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+}
+
+fn reject_non_document_content(mode: ParseMode) -> Result<(), SamlError> {
+    match mode {
+        ParseMode::Document => Err(SamlError::Xml(
+            "content is not allowed outside the document element".into(),
+        )),
+        ParseMode::Roots => Ok(()),
+    }
+}
+
 fn push_general_ref(node: &mut Node, e: BytesRef, limits: XmlLimits) -> Result<(), SamlError> {
     if let Some(ch) = e
         .resolve_char_ref()
@@ -212,17 +232,21 @@ fn push_general_ref(node: &mut Node, e: BytesRef, limits: XmlLimits) -> Result<(
     Ok(())
 }
 
-/// Parse `xml` into a [`Document`].
+/// Parse `xml` into a well-formed [`Document`] with one document element.
 pub fn parse(xml: &str) -> Result<Document, SamlError> {
     parse_with_limits(xml, XmlLimits::default())
 }
 
-/// Parse `xml` into a [`Document`] with explicit resource limits.
+/// Parse `xml` into a well-formed [`Document`] with explicit resource limits.
 pub fn parse_with_limits(xml: &str, limits: XmlLimits) -> Result<Document, SamlError> {
-    let root = parse_roots_with_limits(xml, limits)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| SamlError::Xml("no document element".into()))?;
+    let mut roots = parse_roots_inner(xml, limits, ParseMode::Document)?;
+    let root = match roots.len() {
+        0 => return Err(SamlError::Xml("no document element".into())),
+        1 => roots
+            .pop()
+            .ok_or_else(|| SamlError::Xml("no document element".into()))?,
+        _ => return Err(SamlError::Xml("multiple document elements".into())),
+    };
     Ok(Document { root })
 }
 
@@ -233,6 +257,14 @@ pub fn parse_roots(xml: &str) -> Result<Vec<Node>, SamlError> {
 
 /// Parse every top-level element with explicit resource limits.
 pub fn parse_roots_with_limits(xml: &str, limits: XmlLimits) -> Result<Vec<Node>, SamlError> {
+    parse_roots_inner(xml, limits, ParseMode::Roots)
+}
+
+fn parse_roots_inner(
+    xml: &str,
+    limits: XmlLimits,
+    mode: ParseMode,
+) -> Result<Vec<Node>, SamlError> {
     limits.check_input_bytes(xml.len())?;
     let mut reader = Reader::from_str(xml);
     let bytes = xml.as_bytes();
@@ -281,9 +313,11 @@ pub fn parse_roots_with_limits(xml: &str, limits: XmlLimits) -> Result<Vec<Node>
                 }
             }
             Event::Text(e) => {
+                let text = e.decode().map_err(|err| SamlError::Xml(err.to_string()))?;
                 if let Some(top) = stack.last_mut() {
-                    let txt = e.decode().map_err(|err| SamlError::Xml(err.to_string()))?;
-                    checked_append_text(&mut top.text, &txt, limits)?;
+                    checked_append_text(&mut top.text, &text, limits)?;
+                } else if !is_xml_whitespace(&text) {
+                    reject_non_document_content(mode)?;
                 }
             }
             Event::CData(e) => {
@@ -291,11 +325,15 @@ pub fn parse_roots_with_limits(xml: &str, limits: XmlLimits) -> Result<Vec<Node>
                     let inner = e.into_inner();
                     let text = String::from_utf8_lossy(&inner);
                     checked_append_text(&mut top.text, &text, limits)?;
+                } else {
+                    reject_non_document_content(mode)?;
                 }
             }
             Event::GeneralRef(e) => {
                 if let Some(top) = stack.last_mut() {
                     push_general_ref(top, e, limits)?;
+                } else {
+                    reject_non_document_content(mode)?;
                 }
             }
             // Hardening (adapted from openauth-saml): reject DTDs so the parser
@@ -337,6 +375,64 @@ mod tests {
 
         assert_eq!(doc.root.attr("value"), Some("one & two"));
         assert_eq!(doc.root.children[0].text, "three < four");
+        Ok(())
+    }
+
+    #[test]
+    fn parse_rejects_multiple_document_elements() {
+        let result = parse("<Root/><Second/>");
+
+        assert!(matches!(result, Err(SamlError::Xml(_))));
+    }
+
+    #[test]
+    fn parse_rejects_text_before_document_element() {
+        let result = parse("outside<Root/>");
+
+        assert!(matches!(result, Err(SamlError::Xml(_))));
+    }
+
+    #[test]
+    fn parse_rejects_text_after_document_element() {
+        let result = parse("<Root/>outside");
+
+        assert!(matches!(result, Err(SamlError::Xml(_))));
+    }
+
+    #[test]
+    fn parse_rejects_cdata_outside_document_element() {
+        let result = parse("<Root/><![CDATA[outside]]>");
+
+        assert!(matches!(result, Err(SamlError::Xml(_))));
+    }
+
+    #[test]
+    fn parse_rejects_reference_outside_document_element() {
+        let result = parse("<Root/>&amp;");
+
+        assert!(matches!(result, Err(SamlError::Xml(_))));
+    }
+
+    #[test]
+    fn parse_accepts_xml_misc_around_document_element() -> Result<(), SamlError> {
+        let xml = concat!(
+            "<?xml version=\"1.0\"?>\n",
+            "<!-- before --><?before allowed?>\n",
+            "<Root/>\n",
+            "<?after allowed?><!-- after -->",
+        );
+
+        let document = parse(xml)?;
+
+        assert_eq!(document.root.local_name, "Root");
+        Ok(())
+    }
+
+    #[test]
+    fn parse_roots_preserves_multiple_root_collection() -> Result<(), SamlError> {
+        let roots = parse_roots("<Root/><Second/>")?;
+
+        assert_eq!(roots.len(), 2);
         Ok(())
     }
 
