@@ -22,6 +22,12 @@ saml-rs = "0.1"
 The project now publishes one crate: `saml-rs`. The Rust import path is
 `saml_rs`.
 
+## Upgrading
+
+`saml-rs` is currently pre-1.0, so minor releases may contain breaking API or
+behavior changes. Before updating across minor versions, review the
+[migration guides](docs/migrations/README.md).
+
 ## Why saml-rs?
 
 `saml-rs` is aimed at applications that need SAML SP/IdP flows without a C XML
