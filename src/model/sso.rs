@@ -1,7 +1,7 @@
 use super::attributes::Attributes;
 use super::extract::{
-    attributes_from_extract, authn_session_from_extract, entity_ids_from_value,
-    name_id_format_from_uri, optional_instant, optional_request_id, required_str,
+    attributes_from_extract, authn_session_from_extract, conditions_instants,
+    entity_ids_from_value, name_id_format_from_uri, optional_request_id, required_str,
     subject_confirmations_from_extract,
 };
 use super::identifiers::{AssertionId, MessageId, SamlInstant};
@@ -351,8 +351,7 @@ impl TryFrom<FlowResult> for SsoSession {
         let attributes = attributes_from_extract(&raw_flow.extract);
         let authn_session = authn_session_from_extract(&raw_flow.extract)?;
         let audience = entity_ids_from_value(raw_flow.extract.get("audience"))?;
-        let not_before = optional_instant(&raw_flow.extract, "conditions.notBefore")?;
-        let not_on_or_after = optional_instant(&raw_flow.extract, "conditions.notOnOrAfter")?;
+        let (not_before, not_on_or_after) = conditions_instants(&raw_flow.extract)?;
         let sig_alg = raw_flow.sig_alg.clone();
         Ok(Self {
             response_id,

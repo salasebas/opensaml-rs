@@ -15,7 +15,7 @@ use crate::constants::transform_algorithm;
 use crate::error::{ReferenceResolutionReason, SamlError, SignatureVerificationReason};
 use crate::util::normalize_cert_string;
 use crate::xml::dom::{self, Node, XmlLimits};
-use bergshamra::{verify, DsigContext, KeysManager, VerifiedReference, VerifyResult};
+use bergshamra::{verify, verify_all, DsigContext, KeysManager, VerifiedReference, VerifyResult};
 use std::collections::HashSet;
 
 fn children_named<'a>(node: &'a Node, name: &str) -> Vec<&'a Node> {
@@ -280,6 +280,17 @@ fn verified_content(
     Ok(None)
 }
 
+fn assertion_is_directly_covered(root: &Node, targets: &[VerifiedTarget]) -> bool {
+    if root.local_name == "Assertion" {
+        return target_matches_node(targets, root);
+    }
+    if root.local_name.contains("Response") {
+        let assertions = children_named(root, "Assertion");
+        return assertions.len() == 1 && id_target_matches_node(targets, assertions[0]);
+    }
+    false
+}
+
 /// True for a signed `<Reference>` URI that is not same-document (i.e. not a
 /// `#id` fragment or the whole document). Such references can pull external or
 /// local-file content into the verified set and are rejected for SAML.
@@ -440,6 +451,122 @@ pub fn verify_signature_with_limits(
     match last_err {
         Some(err) if !tried_invalid => Err(err),
         _ => Ok((false, None)),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SignatureVerification {
+    verified: bool,
+    signed_content: Option<String>,
+    assertion_directly_covered: bool,
+}
+
+impl SignatureVerification {
+    pub(crate) fn verified(&self) -> bool {
+        self.verified
+    }
+
+    pub(crate) fn assertion_directly_covered(&self) -> bool {
+        self.assertion_directly_covered
+    }
+
+    pub(crate) fn into_signed_content(self) -> Option<String> {
+        self.signed_content
+    }
+}
+
+pub(crate) fn verify_signatures_detailed_with_limits(
+    xml: &str,
+    metadata_certs: &[String],
+    limits: XmlLimits,
+) -> Result<SignatureVerification, SamlError> {
+    let doc = dom::parse_with_limits(xml, limits)?;
+    let root = &doc.root;
+
+    if root.local_name.contains("Response") && wrapping_detected(root) {
+        return Err(SamlError::PotentialWrappingAttack);
+    }
+
+    let mut seen_ids = HashSet::new();
+    if duplicate_saml_id(root, &mut seen_ids).is_some() {
+        return Err(SamlError::PotentialWrappingAttack);
+    }
+
+    let signature_candidates = saml_signature_candidates(root);
+    if signature_candidates.is_empty() {
+        return Ok(SignatureVerification {
+            verified: false,
+            signed_content: None,
+            assertion_directly_covered: false,
+        });
+    }
+    preflight_saml_reference_uris(&signature_candidates)?;
+
+    if let Some(inline) = inline_signature_cert(root, false) {
+        let inline = normalize_cert_string(&inline);
+        if !metadata_certs.is_empty()
+            && !metadata_certs
+                .iter()
+                .any(|c| normalize_cert_string(c) == inline)
+        {
+            return Err(SamlError::CertificateMismatch);
+        }
+    }
+
+    let mut have_key = false;
+    let mut tried_invalid = false;
+    let mut last_err: Option<SamlError> = None;
+    let mut first_signature_verified = false;
+    let mut targets = Vec::new();
+    for cert in metadata_certs {
+        let key = match load_certificate(cert) {
+            Ok(key) => key,
+            Err(_) => continue,
+        };
+        have_key = true;
+        let mut manager = KeysManager::new();
+        manager.add_key(key);
+        let ctx = DsigContext::new(manager)
+            .with_trusted_keys_only(true)
+            .with_strict_verification(true)
+            .with_hmac_min_out_len(160)
+            .with_insecure(true);
+        match verify_all(&ctx, xml) {
+            Ok(results) => {
+                first_signature_verified |=
+                    matches!(results.first(), Some(VerifyResult::Valid { .. }));
+                for result in results {
+                    match result {
+                        VerifyResult::Valid {
+                            signature_node: _,
+                            references,
+                            ..
+                        } => targets.extend(verified_targets(&references)?),
+                        VerifyResult::Invalid { .. } => tried_invalid = true,
+                    }
+                }
+            }
+            Err(error) => last_err = Some(SamlError::Crypto(error.to_string())),
+        }
+    }
+    if !have_key {
+        return Err(SamlError::NoTrustedCertificate);
+    }
+    if first_signature_verified && !targets.is_empty() {
+        let assertion_directly_covered = assertion_is_directly_covered(root, &targets);
+        return Ok(SignatureVerification {
+            verified: true,
+            signed_content: verified_content(root, xml, &targets)?,
+            assertion_directly_covered,
+        });
+    }
+    match last_err {
+        Some(error) if !tried_invalid => Err(error),
+        _ => Ok(SignatureVerification {
+            verified: false,
+            signed_content: None,
+            assertion_directly_covered: false,
+        }),
     }
 }
 
@@ -794,6 +921,40 @@ mod tests {
     }
 
     #[test]
+    fn detailed_verification_rejects_invalid_first_signature_before_later_assertion_coverage(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let result = verify_signatures_detailed_with_limits(
+            &response_with_first_invalid_signature()?,
+            &[IDP_CERT.to_string()],
+            XmlLimits::default(),
+        )?;
+        assert!(!result.verified());
+        Ok(())
+    }
+
+    #[test]
+    fn detailed_verification_aggregates_rolling_cert_coverage_after_first_signature_verifies(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let response_key = load_private_key(SP_PRIVKEY, None)?;
+        let signed_response_and_assertion = construct_saml_signature(
+            RESPONSE_SIGNED,
+            true,
+            &response_key,
+            SP_SIGNING_CERT,
+            RSA_SHA256,
+            &[],
+            None,
+        )?;
+        let result = verify_signatures_detailed_with_limits(
+            &signed_response_and_assertion,
+            &[SP_SIGNING_CERT.to_string(), IDP_CERT.to_string()],
+            XmlLimits::default(),
+        )?;
+        assert!(result.verified() && result.assertion_directly_covered());
+        Ok(())
+    }
+
+    #[test]
     fn signed_cid_reference_is_rejected_before_content_extraction(
     ) -> Result<(), Box<dyn std::error::Error>> {
         assert_reference_resolution(
@@ -831,14 +992,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_wrapping_attack() -> Result<(), Box<dyn std::error::Error>> {
-        // attack_response_signed.xml hides a forged assertion via XSW; it must not
-        // produce a trusted (verified, Some(content)) result.
+    fn rejects_multi_root_wrapping_attack_before_signature_verification(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // attack_response_signed.xml places a forged NameID before the signed
+        // response. Reject the multi-root document before signature processing.
         match verify_signature(ATTACK, &[IDP_CERT.to_string()]) {
-            Err(SamlError::PotentialWrappingAttack) => Ok(()),
-            Ok((false, _)) => Ok(()),
-            Ok((true, _)) => Err("XSW response must not verify".into()),
-            Err(other) => Err(format!("unexpected error: {other:?}").into()),
+            Err(SamlError::Xml(message)) if message == "multiple document elements" => Ok(()),
+            other => Err(format!("expected multi-root XML rejection, got {other:?}").into()),
         }
     }
 

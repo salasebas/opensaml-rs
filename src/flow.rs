@@ -12,7 +12,7 @@ use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
 #[cfg(feature = "crypto-bergshamra")]
 use crate::model::RelayStateParam;
 use crate::util::Value;
-use crate::validator::{check_status_with_limits, verify_time_at};
+use crate::validator::{check_status_with_limits, conditions_time_bounds, verify_time_at};
 use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
 use time::OffsetDateTime;
 
@@ -142,6 +142,12 @@ impl FlowOptions<'_> {
     fn validation_now(&self) -> OffsetDateTime {
         self.now.unwrap_or_else(OffsetDateTime::now_utc)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AssertionSignatureRequirement {
+    Compatible,
+    Direct,
 }
 
 /// Result of a successful flow.
@@ -351,6 +357,47 @@ fn required_xml_signature_failed(signature_present: bool) -> SamlError {
     }
 }
 
+#[cfg(feature = "crypto-bergshamra")]
+fn verify_embedded_signature(
+    xml: &str,
+    opts: &FlowOptions<'_>,
+    assertion_signature: AssertionSignatureRequirement,
+) -> Result<(bool, Option<String>, bool), SamlError> {
+    use crate::crypto::verify::{
+        verify_signature_with_limits, verify_signatures_detailed_with_limits,
+    };
+
+    match assertion_signature {
+        AssertionSignatureRequirement::Compatible => {
+            let (verified, signed_content) =
+                verify_signature_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
+            Ok((verified, signed_content, false))
+        }
+        AssertionSignatureRequirement::Direct => {
+            let verification =
+                verify_signatures_detailed_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
+            let verified = verification.verified();
+            let assertion_directly_covered = verification.assertion_directly_covered();
+            Ok((
+                verified,
+                verification.into_signed_content(),
+                assertion_directly_covered,
+            ))
+        }
+    }
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn require_direct_assertion_coverage(
+    assertion_signature: AssertionSignatureRequirement,
+    assertion_directly_covered: bool,
+) -> Result<(), SamlError> {
+    if assertion_signature == AssertionSignatureRequirement::Direct && !assertion_directly_covered {
+        return Err(SamlError::AssertionSignatureRequired);
+    }
+    Ok(())
+}
+
 /// Verify and optionally decrypt the message, returning the authenticated
 /// `(saml_content, assertion)`. Requires `crypto-bergshamra`.
 #[cfg(feature = "crypto-bergshamra")]
@@ -358,18 +405,18 @@ fn verify_and_prepare(
     xml: &str,
     parser_type: ParserType,
     opts: &FlowOptions<'_>,
+    assertion_signature: AssertionSignatureRequirement,
 ) -> Result<(String, Option<String>), SamlError> {
     use crate::crypto::{
         decrypt_assertion_with_limits,
         enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
         keys::load_private_key,
         verify::has_xml_signature_with_limits,
-        verify_signature_with_limits,
     };
 
     let signature_present = has_xml_signature_with_limits(xml, opts.xml_limits)?;
-    let (verified, verified_node) =
-        verify_signature_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
+    let (verified, verified_node, assertion_directly_covered) =
+        verify_embedded_signature(xml, opts, assertion_signature)?;
     let decrypt_required = opts.decrypt_key.is_some();
     if decrypt_required && !opts.allow_insecure_software_rsa_key_transport_decryption {
         return Err(software_rsa_decryption_disabled());
@@ -390,23 +437,49 @@ fn verify_and_prepare(
                 decrypt_options,
                 opts.xml_limits,
             )?;
+            if assertion_signature == AssertionSignatureRequirement::Direct {
+                let decrypted_signature_present =
+                    has_xml_signature_with_limits(&assertion, opts.xml_limits)?;
+                let (decrypted_verified, _, decrypted_assertion_covered) =
+                    verify_embedded_signature(&assertion, opts, assertion_signature)?;
+                if !decrypted_verified {
+                    return Err(required_xml_signature_failed(decrypted_signature_present));
+                }
+                require_direct_assertion_coverage(
+                    assertion_signature,
+                    decrypted_assertion_covered,
+                )?;
+            }
             return Ok((content, Some(assertion)));
         }
     }
     if decrypt_required && !verified {
         // encrypted-then-signed: decrypt first, then verify the result.
-        let (content, _) =
+        let (content, assertion) =
             decrypt_assertion_with_limits(xml, &load_key()?, decrypt_options, opts.xml_limits)?;
-        let signature_present = has_xml_signature_with_limits(&content, opts.xml_limits)?;
-        let (re_verified, re_node) =
-            verify_signature_with_limits(&content, opts.signing_certs, opts.xml_limits)?;
+        let verification_xml = if assertion_signature == AssertionSignatureRequirement::Direct {
+            assertion.as_str()
+        } else {
+            content.as_str()
+        };
+        let signature_present = has_xml_signature_with_limits(verification_xml, opts.xml_limits)?;
+        let (re_verified, re_node, re_assertion_directly_covered) =
+            verify_embedded_signature(verification_xml, opts, assertion_signature)?;
         return if re_verified {
-            Ok((content, re_node))
+            require_direct_assertion_coverage(assertion_signature, re_assertion_directly_covered)?;
+            let verified_assertion = if assertion_signature == AssertionSignatureRequirement::Direct
+            {
+                Some(assertion)
+            } else {
+                re_node
+            };
+            Ok((content, verified_assertion))
         } else {
             Err(required_xml_signature_failed(signature_present))
         };
     }
     if verified {
+        require_direct_assertion_coverage(assertion_signature, assertion_directly_covered)?;
         if matches!(
             parser_type,
             ParserType::SamlRequest | ParserType::LogoutRequest | ParserType::LogoutResponse
@@ -424,6 +497,7 @@ fn verify_and_prepare(
     _xml: &str,
     _parser_type: ParserType,
     _opts: &FlowOptions<'_>,
+    _assertion_signature: AssertionSignatureRequirement,
 ) -> Result<(String, Option<String>), SamlError> {
     Err(SamlError::Unsupported(
         "signature verification requires feature crypto-bergshamra".into(),
@@ -693,19 +767,16 @@ fn validate_context(
                 });
             }
         }
-        if let Some(conditions) = extracted.get("conditions") {
-            let not_before = conditions.get_str("notBefore");
-            let not_on_or_after = conditions.get_str("notOnOrAfter");
-            if !verify_time_at(
-                not_before,
-                not_on_or_after,
-                opts.clock_drifts,
-                opts.validation_now(),
-            ) {
-                return Err(SamlError::TimeWindowInvalid {
-                    field: TimeWindowField::Conditions,
-                });
-            }
+        let (not_before, not_on_or_after) = conditions_time_bounds(extracted)?;
+        if !verify_time_at(
+            not_before,
+            not_on_or_after,
+            opts.clock_drifts,
+            opts.validation_now(),
+        ) {
+            return Err(SamlError::TimeWindowInvalid {
+                field: TimeWindowField::Conditions,
+            });
         }
     }
     Ok(())
@@ -715,6 +786,7 @@ fn flow_inner(
     opts: &FlowOptions<'_>,
     request: &HttpRequest,
     expected_recipient: Option<&str>,
+    assertion_signature: AssertionSignatureRequirement,
 ) -> Result<FlowResult, SamlError> {
     let binding = opts
         .binding
@@ -737,15 +809,23 @@ fn flow_inner(
         match binding {
             Binding::Redirect | Binding::SimpleSign => {
                 let sig_alg = verify_detached(binding, parser_type, request, opts, &xml)?;
-                let assertion = if parser_type == ParserType::SamlResponse {
-                    assertion_shortcut(&xml, opts.xml_limits)?
+                let (saml_content, assertion) = if parser_type == ParserType::SamlResponse
+                    && assertion_signature == AssertionSignatureRequirement::Direct
+                {
+                    verify_and_prepare(&xml, parser_type, opts, assertion_signature)?
                 } else {
-                    None
+                    let assertion = if parser_type == ParserType::SamlResponse {
+                        assertion_shortcut(&xml, opts.xml_limits)?
+                    } else {
+                        None
+                    };
+                    (xml, assertion)
                 };
-                (xml, assertion, Some(sig_alg))
+                (saml_content, assertion, Some(sig_alg))
             }
             _ => {
-                let (content, assertion) = verify_and_prepare(&xml, parser_type, opts)?;
+                let (content, assertion) =
+                    verify_and_prepare(&xml, parser_type, opts, assertion_signature)?;
                 (content, assertion, None)
             }
         }
@@ -777,13 +857,19 @@ fn flow_inner(
 
 /// Run the inbound flow described by `opts` against `request`.
 pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult, SamlError> {
-    flow_inner(opts, request, None)
+    flow_inner(
+        opts,
+        request,
+        None,
+        AssertionSignatureRequirement::Compatible,
+    )
 }
 
 pub(crate) fn flow_with_expected_recipient(
     opts: &FlowOptions<'_>,
     request: &HttpRequest,
     expected_recipient: &str,
+    assertion_signature: AssertionSignatureRequirement,
 ) -> Result<FlowResult, SamlError> {
-    flow_inner(opts, request, Some(expected_recipient))
+    flow_inner(opts, request, Some(expected_recipient), assertion_signature)
 }
