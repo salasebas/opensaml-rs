@@ -1,6 +1,9 @@
 #![cfg(feature = "crypto-bergshamra")]
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 
 use saml_rs::binding::{base64_decode, deflate_raw_decode};
 use saml_rs::error::TimeWindowField;
@@ -13,7 +16,6 @@ use saml_rs::{
     SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse,
     SsoResponseBinding, StartSso, Subject,
 };
-use time::{Duration, OffsetDateTime};
 use url::Url;
 
 const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
@@ -51,15 +53,11 @@ const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
 
 #[derive(Default)]
 struct MemoryReplayCache {
-    seen: HashMap<String, OffsetDateTime>,
+    seen: HashMap<String, SystemTime>,
 }
 
 impl ReplayCache for MemoryReplayCache {
-    fn check_and_store(
-        &mut self,
-        key: ReplayKey,
-        expires_at: OffsetDateTime,
-    ) -> Result<(), SamlError> {
+    fn check_and_store(&mut self, key: ReplayKey, expires_at: SystemTime) -> Result<(), SamlError> {
         let cache_key = key.cache_key();
         if self.seen.contains_key(&cache_key) {
             return Err(SamlError::ReplayDetected { key: cache_key });
@@ -148,15 +146,12 @@ fn subject() -> Subject {
 }
 
 fn validation() -> SamlValidationContext<'static> {
-    SamlValidationContext::new(
-        OffsetDateTime::now_utc(),
-        ReplayPolicy::DisabledForCompatibility,
-    )
+    SamlValidationContext::new(SystemTime::now(), ReplayPolicy::DisabledForCompatibility)
 }
 
 fn validation_with_cache(cache: &mut dyn ReplayCache) -> SamlValidationContext<'_> {
-    SamlValidationContext::new(OffsetDateTime::now_utc(), ReplayPolicy::RequireCache(cache))
-        .with_replay_retention(Duration::minutes(5))
+    SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(cache))
+        .with_replay_retention(Duration::from_secs(5 * 60))
 }
 
 fn post_fields<Message>(outbound: &Outbound<Message>) -> Result<Vec<FormField>, SamlError> {
@@ -471,10 +466,8 @@ fn typed_facade_receive_sso_requires_replay_retention_for_authn_request(
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
     let mut cache = MemoryReplayCache::default();
-    let validation = SamlValidationContext::new(
-        OffsetDateTime::now_utc(),
-        ReplayPolicy::RequireCache(&mut cache),
-    );
+    let validation =
+        SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(&mut cache));
 
     match idp.receive_sso(
         &sp_descriptor,

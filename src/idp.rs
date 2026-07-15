@@ -529,7 +529,7 @@ impl IdentityProvider {
                 decrypt_key_pass: None,
                 allow_insecure_software_rsa_key_transport_decryption: false,
                 clock_drifts,
-                now,
+                now: now.map(Into::into),
                 redirect_inflate_max_bytes: self.setting.redirect_inflate_max_bytes,
                 xml_limits: self.setting.xml_limits,
                 expected_audience: None,

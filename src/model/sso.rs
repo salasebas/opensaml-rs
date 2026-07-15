@@ -262,7 +262,7 @@ impl SsoSession {
         &self,
         validation: &mut SamlValidationContext<'_>,
     ) -> Result<(), SamlError> {
-        let validation_now = validation.now();
+        let validation_now = validation.now_offset();
         let not_on_or_after_skew_ms = validation.clock_skew().not_on_or_after_millis();
         match validation.replay_policy() {
             ReplayPolicy::DisabledForCompatibility => Ok(()),
@@ -270,7 +270,7 @@ impl SsoSession {
                 let expires_at = self.replay_expires_at(validation_now, not_on_or_after_skew_ms)?;
                 let keys = self.replay_keys();
                 for key in keys {
-                    cache.check_and_store(key, expires_at)?;
+                    cache.check_and_store(key, expires_at.into())?;
                 }
                 Ok(())
             }

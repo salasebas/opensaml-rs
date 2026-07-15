@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::SystemTime};
 
 use saml_rs::binding::base64_encode;
 use saml_rs::constants::{Binding, ParserType};
@@ -14,15 +14,11 @@ const RESPONSE: &str = include_str!("fixtures/response.xml");
 
 #[derive(Default)]
 struct MemoryReplayCache {
-    seen: HashMap<String, OffsetDateTime>,
+    seen: HashMap<String, SystemTime>,
 }
 
 impl ReplayCache for MemoryReplayCache {
-    fn check_and_store(
-        &mut self,
-        key: ReplayKey,
-        expires_at: OffsetDateTime,
-    ) -> Result<(), SamlError> {
+    fn check_and_store(&mut self, key: ReplayKey, expires_at: SystemTime) -> Result<(), SamlError> {
         let cache_key = key.cache_key();
         if self.seen.contains_key(&cache_key) {
             return Err(SamlError::ReplayDetected { key: cache_key });
@@ -32,8 +28,8 @@ impl ReplayCache for MemoryReplayCache {
     }
 }
 
-fn instant(value: &str) -> Result<OffsetDateTime, time::error::Parse> {
-    OffsetDateTime::parse(value, &Rfc3339)
+fn instant(value: &str) -> Result<SystemTime, time::error::Parse> {
+    OffsetDateTime::parse(value, &Rfc3339).map(SystemTime::from)
 }
 
 fn response_request(xml: &str) -> HttpRequest {

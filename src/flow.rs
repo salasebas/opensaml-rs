@@ -17,6 +17,7 @@ use crate::validator::{check_status_with_limits, conditions_time_bounds, verify_
 use crate::xml::{
     extract_with_limits, fields, validate_protocol_profile, ExtractorField, XmlLimits,
 };
+use std::time::SystemTime;
 use time::{Duration, OffsetDateTime};
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
@@ -113,7 +114,7 @@ pub struct FlowOptions<'a> {
     pub clock_drifts: (i64, i64),
     /// Validation instant. `None` keeps raw compatibility behavior by reading
     /// the process clock during validation.
-    pub now: Option<OffsetDateTime>,
+    pub now: Option<SystemTime>,
     /// Expected `<Audience>` (this SP's entity ID); `None` skips the check.
     pub expected_audience: Option<&'a str>,
     /// Expected `InResponseTo` (originating request ID); `None` skips the check.
@@ -143,7 +144,9 @@ impl<'a> Default for FlowOptions<'a> {
 
 impl FlowOptions<'_> {
     fn validation_now(&self) -> OffsetDateTime {
-        self.now.unwrap_or_else(OffsetDateTime::now_utc)
+        self.now
+            .map(OffsetDateTime::from)
+            .unwrap_or_else(OffsetDateTime::now_utc)
     }
 }
 

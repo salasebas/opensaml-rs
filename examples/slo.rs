@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SloEndpoint, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse,
         StartSlo, StartSso, Subject,
     };
-    use time::OffsetDateTime;
+    use std::time::SystemTime;
 
     let privkey = include_str!("../tests/fixtures/key/sp_privkey.pem");
     let cert = include_str!("../tests/fixtures/key/sp_signing_cert.cer");
@@ -21,12 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         signing_certificate: Some(CertificatePem::new(cert)),
         ..Credentials::default()
     };
-    let validation = || {
-        SamlValidationContext::new(
-            OffsetDateTime::now_utc(),
-            ReplayPolicy::DisabledForCompatibility,
-        )
-    };
+    let validation =
+        || SamlValidationContext::new(SystemTime::now(), ReplayPolicy::DisabledForCompatibility);
 
     let sp = Saml::sp(
         SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
