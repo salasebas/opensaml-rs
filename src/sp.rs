@@ -6,7 +6,10 @@ use crate::entity::{
     generate_id, now_iso8601, BindingContext, CustomTagReplacement, EntitySetting,
 };
 use crate::error::SamlError;
-use crate::flow::{flow_with_expected_recipient, FlowOptions, FlowResult, HttpRequest};
+use crate::flow::{
+    flow_with_expected_recipient, AssertionSignatureRequirement, FlowOptions, FlowResult,
+    HttpRequest,
+};
 use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
 use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
@@ -656,6 +659,11 @@ impl ServiceProvider {
             },
             request,
             recipient.as_str(),
+            if self.setting.want_assertions_signed {
+                AssertionSignatureRequirement::Direct
+            } else {
+                AssertionSignatureRequirement::Compatible
+            },
         )?;
         if matches!(correlation, LoginResponseCorrelation::Unsolicited)
             && result

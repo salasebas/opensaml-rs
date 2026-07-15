@@ -755,6 +755,46 @@ fn send_signed_message(binding: Binding) -> Result<(), Box<dyn std::error::Error
 fn flow_conformance_send_signed_message_post() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_message(Binding::Post)
 }
+
+#[test]
+fn flow_conformance_strict_assertion_signature_rejects_response_only_post(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let compatibility_sp = sp(false, false);
+    let strict_sp = sp(true, false);
+    let ctx = idp.create_login_response(
+        &compatibility_sp,
+        Binding::Post,
+        &User::new("response-only@example.com"),
+        &opts("_r"),
+    )?;
+
+    match parse_response_with_request_id(&strict_sp, &idp, Binding::Post, &ctx, "_r") {
+        Err(SamlError::AssertionSignatureRequired) => Ok(()),
+        other => Err(format!("expected AssertionSignatureRequired, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn flow_conformance_compatible_assertion_signature_accepts_response_only_post(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let sp = sp(false, false);
+    let ctx = idp.create_login_response(
+        &sp,
+        Binding::Post,
+        &User::new("response-only@example.com"),
+        &opts("_r"),
+    )?;
+
+    let parsed = parse_response_with_request_id(&sp, &idp, Binding::Post, &ctx, "_r")?;
+    assert_eq!(
+        parsed.extract.get_str("nameID"),
+        Some("response-only@example.com")
+    );
+    Ok(())
+}
+
 #[test]
 fn flow_conformance_send_signed_message_redirect() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_message(Binding::Redirect)
