@@ -831,14 +831,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_wrapping_attack() -> Result<(), Box<dyn std::error::Error>> {
-        // attack_response_signed.xml hides a forged assertion via XSW; it must not
-        // produce a trusted (verified, Some(content)) result.
+    fn rejects_multi_root_wrapping_attack_before_signature_verification(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // attack_response_signed.xml places a forged NameID before the signed
+        // response. Reject the multi-root document before signature processing.
         match verify_signature(ATTACK, &[IDP_CERT.to_string()]) {
-            Err(SamlError::PotentialWrappingAttack) => Ok(()),
-            Ok((false, _)) => Ok(()),
-            Ok((true, _)) => Err("XSW response must not verify".into()),
-            Err(other) => Err(format!("unexpected error: {other:?}").into()),
+            Err(SamlError::Xml(message)) if message == "multiple document elements" => Ok(()),
+            other => Err(format!("expected multi-root XML rejection, got {other:?}").into()),
         }
     }
 

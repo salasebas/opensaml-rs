@@ -143,16 +143,14 @@ fn xsw_reference_must_cover_returned_assertion() -> Result<(), Box<dyn std::erro
     }
 }
 
-/// Assertion/Signature smuggled under `SubjectConfirmationData` is rejected.
+/// A forged top-level element before the signed response is rejected as a
+/// malformed XML document before signature verification.
 #[test]
-fn xsw_subjectconfirmation_wrapping_rejected() -> Result<(), Box<dyn std::error::Error>> {
+fn xsw_multi_root_wrapping_rejected_before_signature_verification(
+) -> Result<(), Box<dyn std::error::Error>> {
     match verify_signature(ATTACK, &[CERT.to_string()]) {
-        Err(SamlError::PotentialWrappingAttack) => Ok(()),
-        Ok((false, _)) => Ok(()),
-        Ok((true, content)) => {
-            assert!(!content.unwrap_or_default().contains("attacker"));
-            Ok(())
-        }
+        Err(SamlError::Xml(message)) if message == "multiple document elements" => Ok(()),
+        Ok(result) => Err(format!("multi-root wrapper must not verify: {result:?}").into()),
         Err(other) => Err(format!("unexpected error: {other:?}").into()),
     }
 }
