@@ -1,0 +1,314 @@
+use saml_rs::binding::base64_encode;
+use saml_rs::constants::{Binding, ParserType};
+use saml_rs::flow::{flow, FlowOptions, HttpRequest};
+use saml_rs::SamlError;
+
+#[cfg(feature = "crypto-bergshamra")]
+use saml_rs::constants::{
+    data_encryption_algorithm::AES_256, key_encryption_algorithm::RSA_OAEP_MGF1P,
+};
+#[cfg(feature = "crypto-bergshamra")]
+use saml_rs::crypto::encrypt_assertion;
+
+const PROTOCOL_NS: &str = "urn:oasis:names:tc:SAML:2.0:protocol";
+const ASSERTION_NS: &str = "urn:oasis:names:tc:SAML:2.0:assertion";
+#[cfg(feature = "crypto-bergshamra")]
+const PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
+#[cfg(feature = "crypto-bergshamra")]
+const CERTIFICATE: &str = include_str!("fixtures/key/sp_signing_cert.cer");
+
+fn run_flow(xml: &str, parser_type: ParserType) -> Result<(), SamlError> {
+    let request = HttpRequest::post(vec![(
+        parser_type.query_param().to_string(),
+        base64_encode(xml.as_bytes()),
+    )]);
+    let mut options = FlowOptions::default();
+    options.binding = Some(Binding::Post);
+    options.parser_type = Some(parser_type);
+    flow(&options, &request).map(|_| ())
+}
+
+fn expect_profile_rejection(
+    xml: &str,
+    parser_type: ParserType,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match run_flow(xml, parser_type) {
+        Err(SamlError::ProtocolProfile(_)) => Ok(()),
+        Err(other) => Err(format!("expected ProtocolProfile, got {other:?}").into()),
+        Ok(()) => Err("expected SAML profile rejection".into()),
+    }
+}
+
+fn response_xml(protocol_ns: &str, assertion_ns: &str, version: &str) -> String {
+    format!(
+        r#"<p:Response xmlns:p="{protocol_ns}" xmlns:a="{assertion_ns}" ID="_response" {version}>
+<p:Status><p:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></p:Status>
+<a:Assertion ID="_assertion" Version="2.0">
+<a:Subject><a:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><a:SubjectConfirmationData NotOnOrAfter="2999-01-01T00:00:00Z"/></a:SubjectConfirmation></a:Subject>
+</a:Assertion>
+</p:Response>"#
+    )
+}
+
+#[test]
+fn canonical_prefixes_are_accepted() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"")
+        .replace("p:", "samlp:")
+        .replace("xmlns:p", "xmlns:samlp")
+        .replace("a:", "saml:")
+        .replace("xmlns:a", "xmlns:saml");
+    run_flow(&xml, ParserType::SamlResponse)?;
+    Ok(())
+}
+
+#[test]
+fn alternate_prefixes_with_oasis_namespaces_are_accepted() -> Result<(), Box<dyn std::error::Error>>
+{
+    let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"");
+    run_flow(&xml, ParserType::SamlResponse)?;
+    Ok(())
+}
+
+#[test]
+fn default_protocol_namespace_is_accepted() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = format!(r#"<AuthnRequest xmlns="{PROTOCOL_NS}" ID="_request" Version="2.0"/>"#);
+    run_flow(&xml, ParserType::SamlRequest)?;
+    Ok(())
+}
+
+#[test]
+fn foreign_root_namespace_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = format!(
+        r#"<x:AuthnRequest xmlns:x="urn:example:foreign" xmlns:a="{ASSERTION_NS}" ID="_request" Version="2.0"><a:Issuer>https://sp.example.test</a:Issuer></x:AuthnRequest>"#
+    );
+    expect_profile_rejection(&xml, ParserType::SamlRequest)
+}
+
+#[test]
+fn unbound_root_prefix_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = r#"<p:AuthnRequest ID="_request" Version="2.0"/>"#;
+    expect_profile_rejection(xml, ParserType::SamlRequest)
+}
+
+#[test]
+fn foreign_assertion_namespace_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml(PROTOCOL_NS, "urn:example:foreign", "Version=\"2.0\"");
+    expect_profile_rejection(&xml, ParserType::SamlResponse)
+}
+
+#[test]
+fn wrong_assertion_version_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"").replace(
+        "ID=\"_assertion\" Version=\"2.0\"",
+        "ID=\"_assertion\" Version=\"1.0\"",
+    );
+    expect_profile_rejection(&xml, ParserType::SamlResponse)
+}
+
+#[test]
+fn missing_assertion_version_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"")
+        .replace("ID=\"_assertion\" Version=\"2.0\"", "ID=\"_assertion\"");
+    expect_profile_rejection(&xml, ParserType::SamlResponse)
+}
+
+#[test]
+fn foreign_status_namespace_is_rejected_before_status_consumption(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"")
+        .replace("<p:Status>", "<x:Status xmlns:x=\"urn:example:foreign\">")
+        .replace("</p:Status>", "</x:Status>");
+    expect_profile_rejection(&xml, ParserType::SamlResponse)
+}
+
+#[test]
+fn foreign_signature_namespaces_are_rejected_before_signature_selection(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response_signature = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"").replace(
+        "<p:Status>",
+        "<x:Signature xmlns:x=\"urn:example:foreign\"/><p:Status>",
+    );
+    expect_profile_rejection(&response_signature, ParserType::SamlResponse)?;
+
+    let assertion_signature = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"").replace(
+        "<a:Subject>",
+        "<x:Signature xmlns:x=\"urn:example:foreign\"/><a:Subject>",
+    );
+    expect_profile_rejection(&assertion_signature, ParserType::SamlResponse)
+}
+
+#[test]
+fn foreign_encrypted_data_namespace_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = format!(
+        r#"<p:Response xmlns:p="{PROTOCOL_NS}" xmlns:a="{ASSERTION_NS}" ID="_response" Version="2.0"><p:Status><p:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></p:Status><a:EncryptedAssertion><x:EncryptedData xmlns:x="urn:example:foreign"/></a:EncryptedAssertion></p:Response>"#
+    );
+    expect_profile_rejection(&xml, ParserType::SamlResponse)
+}
+
+#[test]
+fn namespaced_required_attribute_aliases_are_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let root_version = format!(
+        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" x:Version="2.0"/>"#
+    );
+    expect_profile_rejection(&root_version, ParserType::SamlRequest)?;
+
+    let root_id = format!(
+        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" x:ID="_request" Version="2.0"/>"#
+    );
+    expect_profile_rejection(&root_id, ParserType::SamlRequest)?;
+
+    let assertion_id = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"").replace(
+        "<a:Assertion ID=\"_assertion\"",
+        "<a:Assertion xmlns:x=\"urn:example:foreign\" x:ID=\"_assertion\"",
+    );
+    expect_profile_rejection(&assertion_id, ParserType::SamlResponse)
+}
+
+#[test]
+fn namespaced_consumed_attribute_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = format!(
+        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" Version="2.0" x:Destination="https://idp.example.test"/>"#
+    );
+    expect_profile_rejection(&xml, ParserType::SamlRequest)
+}
+
+#[test]
+fn foreign_extension_name_collisions_are_not_consumed() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"").replace(
+        "<p:Status>",
+        "<p:Extensions><x:Extension xmlns:x=\"urn:example:extension\"><x:Status/><x:Signature/><x:Assertion/></x:Extension></p:Extensions><p:Status>",
+    );
+    run_flow(&xml, ParserType::SamlResponse)?;
+    Ok(())
+}
+
+#[test]
+fn all_parser_roots_require_version_2() -> Result<(), Box<dyn std::error::Error>> {
+    let cases = [
+        (
+            ParserType::SamlRequest,
+            format!(r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0"/>"#),
+        ),
+        (
+            ParserType::SamlResponse,
+            response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"1.0\""),
+        ),
+        (
+            ParserType::LogoutRequest,
+            format!(r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0"/>"#),
+        ),
+        (
+            ParserType::LogoutResponse,
+            format!(r#"<p:LogoutResponse xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0"/>"#),
+        ),
+    ];
+    for (parser_type, xml) in cases {
+        expect_profile_rejection(&xml, parser_type)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn all_parser_roots_accept_version_2() -> Result<(), Box<dyn std::error::Error>> {
+    let cases = [
+        (
+            ParserType::SamlRequest,
+            format!(r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0"/>"#),
+        ),
+        (
+            ParserType::SamlResponse,
+            response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\""),
+        ),
+        (
+            ParserType::LogoutRequest,
+            format!(r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0"/>"#),
+        ),
+        (
+            ParserType::LogoutResponse,
+            format!(
+                r#"<p:LogoutResponse xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0"><p:Status><p:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></p:Status></p:LogoutResponse>"#
+            ),
+        ),
+    ];
+    for (parser_type, xml) in cases {
+        run_flow(&xml, parser_type)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+#[test]
+fn decrypted_assertion_is_revalidated_before_signature_selection(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let wrong_version = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"").replace(
+        "ID=\"_assertion\" Version=\"2.0\"",
+        "ID=\"_assertion\" Version=\"1.0\"",
+    );
+    let encrypted = encrypt_assertion(&wrong_version, CERTIFICATE, AES_256, RSA_OAEP_MGF1P, "a")?;
+    let request = HttpRequest::post(vec![(
+        "SAMLResponse".into(),
+        base64_encode(encrypted.as_bytes()),
+    )]);
+    let mut options = FlowOptions::default();
+    options.binding = Some(Binding::Post);
+    options.parser_type = Some(ParserType::SamlResponse);
+    options.check_signature = true;
+    options.decrypt_key = Some(PRIVATE_KEY);
+    options.allow_insecure_software_rsa_key_transport_decryption = true;
+
+    match flow(&options, &request) {
+        Err(SamlError::ProtocolProfile(_)) => Ok(()),
+        other => Err(format!("expected post-decryption ProtocolProfile, got {other:?}").into()),
+    }
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+#[test]
+fn decrypted_assertion_honors_xml_depth_limit_before_profile(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let nested_extension = format!(
+        "<x:Extension xmlns:x=\"urn:example:extension\">{}<x:Leaf/>{}</x:Extension>",
+        "<x:Extension>".repeat(20),
+        "</x:Extension>".repeat(20),
+    );
+    let plaintext = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"")
+        .replace("<a:Subject>", &format!("{nested_extension}<a:Subject>"));
+    let encrypted = encrypt_assertion(&plaintext, CERTIFICATE, AES_256, RSA_OAEP_MGF1P, "a")?;
+    let request = HttpRequest::post(vec![(
+        "SAMLResponse".into(),
+        base64_encode(encrypted.as_bytes()),
+    )]);
+    let mut options = FlowOptions::default();
+    options.binding = Some(Binding::Post);
+    options.parser_type = Some(ParserType::SamlResponse);
+    options.check_signature = true;
+    options.xml_limits.max_depth = 12;
+
+    match flow(&options, &request) {
+        Err(SamlError::SignatureMissing) => {}
+        other => {
+            return Err(
+                format!("expected encrypted envelope to pass limits, got {other:?}").into(),
+            );
+        }
+    }
+
+    options.decrypt_key = Some(PRIVATE_KEY);
+    options.allow_insecure_software_rsa_key_transport_decryption = true;
+    match flow(&options, &request) {
+        Err(SamlError::Invalid(message)) if message.contains("max XML depth") => Ok(()),
+        other => Err(format!("expected decrypted max-depth rejection, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn wrong_root_version_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"1.0\"");
+    expect_profile_rejection(&xml, ParserType::SamlResponse)
+}
+
+#[test]
+fn missing_root_version_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "");
+    expect_profile_rejection(&xml, ParserType::SamlResponse)
+}
