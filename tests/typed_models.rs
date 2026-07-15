@@ -963,6 +963,33 @@ fn typed_models_sso_session_without_assertion_id_fails_closed() {
 }
 
 #[test]
+fn typed_models_sso_session_rejects_repeated_conditions_shape() {
+    let condition = || value_object(vec![("notOnOrAfter", value_str("2026-07-04T13:00:00Z"))]);
+    let flow = FlowResult {
+        saml_content: "<samlp:Response/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "response",
+                value_object(vec![("id", value_str("_response123"))]),
+            ),
+            (
+                "assertion",
+                value_object(vec![("id", value_str("_assertion123"))]),
+            ),
+            ("issuer", value_str("https://idp.example.com/metadata")),
+            ("nameID", value_str("alice@example.com")),
+            ("conditions", Value::Array(vec![condition(), condition()])),
+        ]),
+    };
+
+    assert!(matches!(
+        SsoSession::try_from(flow),
+        Err(SamlError::Invalid(message)) if message.contains("Conditions")
+    ));
+}
+
+#[test]
 fn typed_models_sso_session_rejects_malformed_assertion_id() {
     let flow = FlowResult {
         saml_content: "<samlp:Response/>".to_string(),
