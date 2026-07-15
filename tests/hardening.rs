@@ -65,6 +65,77 @@ fn response_for(sp: &ServiceProvider) -> String {
         .context
 }
 
+fn response_for_audience_restrictions(
+    sp: &ServiceProvider,
+    audience_restrictions: &[&[&str]],
+) -> Result<String, SamlError> {
+    let idp = idp();
+    let audience_restrictions = audience_restrictions
+        .iter()
+        .map(|audiences| {
+            let audiences = audiences
+                .iter()
+                .map(|audience| format!("<saml:Audience>{audience}</saml:Audience>"))
+                .collect::<String>();
+            format!("<saml:AudienceRestriction>{audiences}</saml:AudienceRestriction>")
+        })
+        .collect::<String>();
+    let cb = |template: &str| {
+        let id = "_response_audience_restrictions".to_string();
+        let now = iso8601_offset(-60);
+        let later = iso8601_offset(300);
+        let prepared = template.replacen(
+            "<saml:AudienceRestriction><saml:Audience>{Audience}</saml:Audience></saml:AudienceRestriction>",
+            &audience_restrictions,
+            1,
+        );
+        assert_ne!(
+            prepared, template,
+            "grouped audience tests must replace the template audience restriction"
+        );
+        let xml = replace_tags_by_value(
+            &prepared,
+            &[
+                ("ID", id.clone()),
+                ("AssertionID", "_assertion_audience_restrictions".into()),
+                ("Destination", "https://sp/acs".into()),
+                ("SubjectRecipient", "https://sp/acs".into()),
+                ("AssertionConsumerServiceURL", "https://sp/acs".into()),
+                ("Audience", "https://sp.example.com/metadata".into()),
+                ("Issuer", "https://idp.example.com/metadata".into()),
+                ("IssueInstant", now.clone()),
+                (
+                    "StatusCode",
+                    "urn:oasis:names:tc:SAML:2.0:status:Success".into(),
+                ),
+                ("ConditionsNotBefore", now),
+                ("ConditionsNotOnOrAfter", later.clone()),
+                ("SubjectConfirmationDataNotOnOrAfter", later),
+                (
+                    "NameIDFormat",
+                    "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress".into(),
+                ),
+                ("NameID", "a@example.com".into()),
+                ("InResponseTo", "_req1".into()),
+                ("AuthnStatement", String::new()),
+            ],
+        );
+        (id, xml)
+    };
+    Ok(idp
+        .create_login_response(
+            sp,
+            Binding::Post,
+            &User::new("a@example.com"),
+            &LoginResponseOptions {
+                in_response_to: Some("_req1"),
+                custom: Some(&cb),
+                ..Default::default()
+            },
+        )?
+        .context)
+}
+
 struct SubjectConfirmationCase<'a> {
     method: &'a str,
     recipient: &'a str,
@@ -243,6 +314,89 @@ fn hardening_audience_validation_opt_out() -> Result<(), Box<dyn std::error::Err
     let req = HttpRequest::post(vec![("SAMLResponse".into(), response_for(&sp1))]);
     // With audience validation disabled, sp2 accepts it (signature still checked).
     sp2.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1")?;
+    Ok(())
+}
+
+#[test]
+fn hardening_audience_restrictions_reject_when_missing() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_audience_restrictions(&sp, &[])?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(SamlError::AudienceMismatch { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn hardening_audience_restrictions_reject_empty_group() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_audience_restrictions(&sp, &[&[]])?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(SamlError::AudienceMismatch { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn hardening_audience_restrictions_require_every_group_to_match(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_audience_restrictions(
+        &sp,
+        &[
+            &["https://wrong.example.com/metadata"],
+            &["https://sp.example.com/metadata"],
+        ],
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+
+    assert!(matches!(
+        sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1"),
+        Err(SamlError::AudienceMismatch { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn hardening_audience_restrictions_accept_any_matching_audience_within_group(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_audience_restrictions(
+        &sp,
+        &[&[
+            "https://wrong.example.com/metadata",
+            "https://sp.example.com/metadata",
+        ]],
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+
+    sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1")?;
+    Ok(())
+}
+
+#[test]
+fn hardening_audience_restrictions_accept_when_every_group_matches(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with("https://sp.example.com/metadata", signing());
+    let response = response_for_audience_restrictions(
+        &sp,
+        &[
+            &["https://sp.example.com/metadata"],
+            &[
+                "https://wrong.example.com/metadata",
+                "https://sp.example.com/metadata",
+            ],
+        ],
+    )?;
+    let req = HttpRequest::post(vec![("SAMLResponse".into(), response)]);
+
+    sp.parse_login_response_with_request_id(&idp(), Binding::Post, &req, "_req1")?;
     Ok(())
 }
 

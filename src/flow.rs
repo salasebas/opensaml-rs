@@ -557,11 +557,54 @@ fn verify_detached(
     ))
 }
 
-fn audience_contains(extracted: &Value, expected: &str) -> bool {
-    match extracted.get("audience") {
-        Some(Value::Str(s)) => s == expected,
-        Some(Value::Array(items)) => items.iter().any(|v| v.as_str() == Some(expected)),
+fn audience_restriction_contains(
+    audience_restriction: &str,
+    expected: &str,
+    limits: XmlLimits,
+) -> Result<bool, SamlError> {
+    let field = ExtractorField::new("audience", &["AudienceRestriction", "Audience"]);
+    let extracted =
+        extract_with_limits(audience_restriction, std::slice::from_ref(&field), limits)?;
+    Ok(match extracted.get("audience") {
+        Some(Value::Str(audience)) => audience == expected,
+        Some(Value::Array(audiences)) => audiences
+            .iter()
+            .any(|audience| audience.as_str() == Some(expected)),
         _ => false,
+    })
+}
+
+fn audience_restrictions_contain(
+    assertion: Option<&str>,
+    expected: &str,
+    limits: XmlLimits,
+) -> Result<bool, SamlError> {
+    let Some(assertion) = assertion else {
+        return Ok(false);
+    };
+    let field = ExtractorField::new(
+        "audienceRestriction",
+        &["Assertion", "Conditions", "AudienceRestriction"],
+    )
+    .with_context();
+    let extracted = extract_with_limits(assertion, std::slice::from_ref(&field), limits)?;
+
+    match extracted.get("audienceRestriction") {
+        Some(Value::Str(audience_restriction)) => {
+            audience_restriction_contains(audience_restriction, expected, limits)
+        }
+        Some(Value::Array(audience_restrictions)) if !audience_restrictions.is_empty() => {
+            for audience_restriction in audience_restrictions {
+                let Some(audience_restriction) = audience_restriction.as_str() else {
+                    return Ok(false);
+                };
+                if !audience_restriction_contains(audience_restriction, expected, limits)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -669,6 +712,7 @@ fn validate_response_destination(
 
 fn validate_context(
     parser_type: ParserType,
+    assertion: Option<&str>,
     extracted: &Value,
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
@@ -704,7 +748,7 @@ fn validate_context(
         validate_response_destination(extracted, expected_recipient)?;
         validate_subject_confirmation(extracted, opts, expected_recipient)?;
         if let Some(expected) = opts.expected_audience {
-            if !audience_contains(extracted, expected) {
+            if !audience_restrictions_contain(assertion, expected, opts.xml_limits)? {
                 return Err(SamlError::AudienceMismatch {
                     expected: expected.to_string(),
                 });
@@ -796,7 +840,13 @@ fn flow_inner(
 
     let fields = default_fields(parser_type, assertion.as_deref())?;
     let extracted = extract_with_limits(&saml_content, &fields, opts.xml_limits)?;
-    validate_context(parser_type, &extracted, opts, expected_recipient)?;
+    validate_context(
+        parser_type,
+        assertion.as_deref(),
+        &extracted,
+        opts,
+        expected_recipient,
+    )?;
 
     Ok(FlowResult {
         saml_content,
