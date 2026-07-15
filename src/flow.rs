@@ -12,7 +12,7 @@ use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
 #[cfg(feature = "crypto-bergshamra")]
 use crate::model::RelayStateParam;
 use crate::util::Value;
-use crate::validator::{check_status_with_limits, verify_time_at};
+use crate::validator::{check_status_with_limits, conditions_time_bounds, verify_time_at};
 use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
 use time::OffsetDateTime;
 
@@ -723,19 +723,16 @@ fn validate_context(
                 });
             }
         }
-        if let Some(conditions) = extracted.get("conditions") {
-            let not_before = conditions.get_str("notBefore");
-            let not_on_or_after = conditions.get_str("notOnOrAfter");
-            if !verify_time_at(
-                not_before,
-                not_on_or_after,
-                opts.clock_drifts,
-                opts.validation_now(),
-            ) {
-                return Err(SamlError::TimeWindowInvalid {
-                    field: TimeWindowField::Conditions,
-                });
-            }
+        let (not_before, not_on_or_after) = conditions_time_bounds(extracted)?;
+        if !verify_time_at(
+            not_before,
+            not_on_or_after,
+            opts.clock_drifts,
+            opts.validation_now(),
+        ) {
+            return Err(SamlError::TimeWindowInvalid {
+                field: TimeWindowField::Conditions,
+            });
         }
     }
     Ok(())

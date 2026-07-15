@@ -2,6 +2,7 @@
 
 use crate::constants::{status_code, ParserType};
 use crate::error::SamlError;
+use crate::util::Value;
 use crate::xml::{extract_with_limits, fields, XmlLimits};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
@@ -52,6 +53,22 @@ pub(crate) fn verify_time_at(
             (Some(b), Some(a)) => b + nb_drift <= now && now < a + na_drift,
             _ => false,
         },
+    }
+}
+
+pub(crate) fn conditions_time_bounds(
+    extracted: &Value,
+) -> Result<(Option<&str>, Option<&str>), SamlError> {
+    match extracted.get("conditions") {
+        None => Ok((None, None)),
+        Some(Value::Array(items)) if items.is_empty() => Ok((None, None)),
+        Some(conditions @ Value::Object(_)) => Ok((
+            conditions.get_str("notBefore"),
+            conditions.get_str("notOnOrAfter"),
+        )),
+        Some(Value::Array(_) | Value::Null | Value::Str(_)) => Err(SamlError::Invalid(
+            "Assertion Conditions must be absent or occur exactly once".into(),
+        )),
     }
 }
 
@@ -109,6 +126,14 @@ mod tests {
         assert!(!verify_time(Some("2999-01-01T00:00:00Z"), None, (0, 0)));
         // unparseable fails closed
         assert!(!verify_time(Some("not-a-date"), None, (0, 0)));
+    }
+
+    #[test]
+    fn absent_conditions_remain_unbounded() -> Result<(), Box<dyn std::error::Error>> {
+        let extracted = Value::Object(vec![("conditions".into(), Value::Array(Vec::new()))]);
+
+        assert_eq!(conditions_time_bounds(&extracted)?, (None, None));
+        Ok(())
     }
 
     #[test]

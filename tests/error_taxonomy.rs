@@ -26,6 +26,7 @@ struct ResponseShape {
     subject_confirmation_not_on_or_after: String,
     conditions_not_before: String,
     conditions_not_on_or_after: String,
+    additional_conditions: String,
     authn_statement: String,
 }
 
@@ -42,6 +43,7 @@ impl Default for ResponseShape {
             subject_confirmation_not_on_or_after: later.clone(),
             conditions_not_before: now,
             conditions_not_on_or_after: later,
+            additional_conditions: String::new(),
             authn_statement: String::new(),
         }
     }
@@ -95,7 +97,11 @@ fn response_xml(template: &str, shape: &ResponseShape) -> String {
         "Recipient=\"{SubjectRecipient}\" InResponseTo=\"{SubjectInResponseTo}\"",
         1,
     );
-    let prepared = prepared.replacen("{AuthnStatement}", &shape.authn_statement, 1);
+    let prepared = prepared.replacen(
+        "{AuthnStatement}",
+        &format!("{}{}", shape.additional_conditions, shape.authn_statement),
+        1,
+    );
     replace_tags_by_value(
         &prepared,
         &[
@@ -306,6 +312,23 @@ fn error_taxonomy_expired_conditions_return_conditions_time_window(
             field: TimeWindowField::Conditions,
         }) => Ok(()),
         other => Err(format!("expected Conditions time window failure, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn error_taxonomy_signed_repeated_conditions_are_rejected() -> Result<(), Box<dyn std::error::Error>>
+{
+    let response = signed_response(&ResponseShape {
+        additional_conditions: format!(
+            "<saml:Conditions NotOnOrAfter=\"{}\"/>",
+            iso8601_offset(-300)
+        ),
+        ..Default::default()
+    })?;
+
+    match parse_response(response, "_request123") {
+        Err(SamlError::Invalid(message)) if message.contains("Conditions") => Ok(()),
+        other => Err(format!("expected repeated Conditions rejection, got {other:?}").into()),
     }
 }
 

@@ -7,6 +7,7 @@ use crate::config::{EntityId, NameIdFormat};
 use crate::constants::name_id_format;
 use crate::error::SamlError;
 use crate::util::Value;
+use crate::validator::conditions_time_bounds;
 
 pub(super) fn required_str<'a>(extract: &'a Value, path: &str) -> Result<&'a str, SamlError> {
     extract
@@ -48,6 +49,16 @@ pub(super) fn optional_instant(
     path: &str,
 ) -> Result<Option<SamlInstant>, SamlError> {
     extract.get_str(path).map(SamlInstant::try_new).transpose()
+}
+
+pub(super) fn conditions_instants(
+    extract: &Value,
+) -> Result<(Option<SamlInstant>, Option<SamlInstant>), SamlError> {
+    let (not_before, not_on_or_after) = conditions_time_bounds(extract)?;
+    Ok((
+        not_before.map(SamlInstant::try_new).transpose()?,
+        not_on_or_after.map(SamlInstant::try_new).transpose()?,
+    ))
 }
 
 pub(super) fn name_id_policy_from_extract(
