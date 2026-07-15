@@ -248,9 +248,12 @@ fn sso_session() -> Result<SsoSession, SamlError> {
             ("nameID", value_str("alice@example.com")),
             (
                 "sessionIndex",
-                value_object(vec![
-                    ("sessionIndex", value_str("_session123")),
-                    ("authnInstant", value_str("2026-07-04T12:00:00Z")),
+                Value::Array(vec![
+                    value_object(vec![
+                        ("sessionIndex", value_str("_session123")),
+                        ("authnInstant", value_str("2026-07-04T12:00:00Z")),
+                    ]),
+                    value_object(vec![("sessionIndex", value_str("_session456"))]),
                 ]),
             ),
         ]),
@@ -368,8 +371,12 @@ fn typed_slo_subject_can_come_from_sso_session() -> Result<(), Box<dyn std::erro
 
     assert_eq!(subject.name_id().value(), "alice@example.com");
     assert_eq!(
-        subject.session_index().map(SessionIndex::as_str),
-        Some("_session123")
+        subject
+            .session_indexes()
+            .iter()
+            .map(SessionIndex::as_str)
+            .collect::<Vec<_>>(),
+        vec!["_session123", "_session456"]
     );
     Ok(())
 }

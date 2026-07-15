@@ -44,13 +44,6 @@ pub(super) fn optional_u16(extract: &Value, path: &str) -> Result<Option<u16>, S
         .transpose()
 }
 
-pub(super) fn optional_instant(
-    extract: &Value,
-    path: &str,
-) -> Result<Option<SamlInstant>, SamlError> {
-    extract.get_str(path).map(SamlInstant::try_new).transpose()
-}
-
 pub(super) fn conditions_instants(
     extract: &Value,
 ) -> Result<(Option<SamlInstant>, Option<SamlInstant>), SamlError> {
@@ -139,18 +132,68 @@ pub(super) fn subject_confirmations_from_extract(extract: &Value) -> Vec<Subject
     }
 }
 
-pub(super) fn authn_session_from_extract(extract: &Value) -> Result<AuthnSession, SamlError> {
-    let session_index = extract
-        .get_str("sessionIndex.sessionIndex")
-        .map(SessionIndex::try_new)
-        .transpose()?;
-    let authn_instant = optional_instant(extract, "sessionIndex.authnInstant")?;
-    let not_on_or_after = optional_instant(extract, "sessionIndex.sessionNotOnOrAfter")?;
-    Ok(AuthnSession::new(
-        session_index,
-        authn_instant,
-        not_on_or_after,
-    ))
+fn authn_statement_values(extract: &Value) -> Result<Vec<&Value>, SamlError> {
+    match extract.get("sessionIndex") {
+        Some(value @ Value::Object(_)) => Ok(vec![value]),
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| match value {
+                Value::Object(_) => Ok(value),
+                Value::Null | Value::Str(_) | Value::Array(_) => Err(SamlError::Invalid(
+                    "extracted AuthnStatement array must contain only objects".into(),
+                )),
+            })
+            .collect(),
+        Some(Value::Str(_)) => Err(SamlError::Invalid(
+            "extracted AuthnStatement must be an object or array of objects".into(),
+        )),
+        Some(Value::Null) | None => Ok(Vec::new()),
+    }
+}
+
+fn optional_authn_statement_str<'a>(
+    statement: &'a Value,
+    field: &str,
+) -> Result<Option<&'a str>, SamlError> {
+    match statement.get(field) {
+        Some(Value::Str(value)) => Ok(Some(value)),
+        Some(Value::Null) | None => Ok(None),
+        Some(Value::Array(_) | Value::Object(_)) => Err(SamlError::Invalid(format!(
+            "extracted AuthnStatement {field} must be a string"
+        ))),
+    }
+}
+
+pub(crate) fn authn_statement_not_on_or_after_values(
+    extract: &Value,
+) -> Result<Vec<&str>, SamlError> {
+    authn_statement_values(extract)?
+        .into_iter()
+        .map(|statement| optional_authn_statement_str(statement, "sessionNotOnOrAfter"))
+        .filter_map(Result::transpose)
+        .collect()
+}
+
+pub(super) fn authn_sessions_from_extract(extract: &Value) -> Result<Vec<AuthnSession>, SamlError> {
+    authn_statement_values(extract)?
+        .into_iter()
+        .map(|statement| {
+            let session_index = optional_authn_statement_str(statement, "sessionIndex")?
+                .map(SessionIndex::try_new)
+                .transpose()?;
+            let authn_instant = optional_authn_statement_str(statement, "authnInstant")?
+                .map(SamlInstant::try_new)
+                .transpose()?;
+            let not_on_or_after = optional_authn_statement_str(statement, "sessionNotOnOrAfter")?
+                .map(SamlInstant::try_new)
+                .transpose()?;
+            Ok(AuthnSession::new(
+                session_index,
+                authn_instant,
+                not_on_or_after,
+            ))
+        })
+        .collect()
 }
 
 pub(super) fn entity_ids_from_value(value: Option<&Value>) -> Result<Vec<EntityId>, SamlError> {

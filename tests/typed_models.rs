@@ -697,6 +697,29 @@ fn value_str(value: &str) -> Value {
     Value::Str(value.to_string())
 }
 
+fn minimal_sso_flow(authn_statements: Option<Value>) -> FlowResult {
+    let mut extract = value_object(vec![
+        (
+            "response",
+            value_object(vec![("id", value_str("_response123"))]),
+        ),
+        (
+            "assertion",
+            value_object(vec![("id", value_str("_assertion123"))]),
+        ),
+        ("issuer", value_str("https://idp.example.com/metadata")),
+        ("nameID", value_str("alice@example.com")),
+    ]);
+    if let Some(authn_statements) = authn_statements {
+        extract.insert("sessionIndex", authn_statements);
+    }
+    FlowResult {
+        saml_content: "<samlp:Response/>".to_string(),
+        sig_alg: None,
+        extract,
+    }
+}
+
 #[test]
 fn typed_models_authn_request_from_flow_result_exposes_typed_fields(
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -939,6 +962,98 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
     );
     assert_eq!(session.sig_alg(), Some("sig-alg"));
     Ok(())
+}
+
+#[test]
+fn typed_models_sso_session_preserves_repeated_authn_statements_in_order(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let flow = minimal_sso_flow(Some(Value::Array(vec![
+        value_object(vec![
+            ("sessionIndex", value_str("_session1")),
+            ("authnInstant", value_str("2026-07-04T12:00:00Z")),
+            ("sessionNotOnOrAfter", value_str("2026-07-04T13:00:00Z")),
+        ]),
+        value_object(vec![
+            ("sessionIndex", value_str("_session2")),
+            ("authnInstant", value_str("2026-07-04T12:05:00Z")),
+            ("sessionNotOnOrAfter", value_str("2026-07-04T12:30:00Z")),
+        ]),
+    ])));
+
+    let session = SsoSession::try_from(flow)?;
+    let tuples = session
+        .authn_sessions()
+        .iter()
+        .map(|authn| {
+            (
+                authn.session_index().map(|value| value.as_str()),
+                authn.authn_instant().map(SamlInstant::as_str),
+                authn.not_on_or_after().map(SamlInstant::as_str),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        tuples,
+        vec![
+            (
+                Some("_session1"),
+                Some("2026-07-04T12:00:00Z"),
+                Some("2026-07-04T13:00:00Z")
+            ),
+            (
+                Some("_session2"),
+                Some("2026-07-04T12:05:00Z"),
+                Some("2026-07-04T12:30:00Z")
+            ),
+        ]
+    );
+    assert_eq!(
+        session
+            .authn_session()
+            .session_index()
+            .map(|value| value.as_str()),
+        Some("_session1")
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_models_sso_session_without_authn_statements_has_empty_views(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let missing = SsoSession::try_from(minimal_sso_flow(None))?;
+    let empty_array = SsoSession::try_from(minimal_sso_flow(Some(Value::Array(Vec::new()))))?;
+
+    assert!(missing.authn_sessions().is_empty());
+    assert!(missing.authn_session().session_index().is_none());
+    assert!(missing.authn_session().authn_instant().is_none());
+    assert!(missing.authn_session().not_on_or_after().is_none());
+    assert!(empty_array.authn_sessions().is_empty());
+    assert!(empty_array.authn_session().session_index().is_none());
+    Ok(())
+}
+
+#[test]
+fn typed_models_sso_session_rejects_non_object_authn_statement_member() {
+    let flow = minimal_sso_flow(Some(Value::Array(vec![
+        value_object(vec![("sessionIndex", value_str("_session1"))]),
+        value_str("not-an-object"),
+    ])));
+
+    assert!(matches!(
+        SsoSession::try_from(flow),
+        Err(SamlError::Invalid(_))
+    ));
+}
+
+#[test]
+fn typed_models_sso_session_rejects_scalar_authn_statement_shape() {
+    let flow = minimal_sso_flow(Some(value_str("not-an-object")));
+
+    assert!(matches!(
+        SsoSession::try_from(flow),
+        Err(SamlError::Invalid(_))
+    ));
 }
 
 #[test]

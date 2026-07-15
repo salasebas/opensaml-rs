@@ -214,6 +214,29 @@ fn typed_validation_context_expired_session_not_on_or_after_uses_fixed_clock(
 }
 
 #[test]
+fn typed_validation_context_repeated_session_applies_skew_after_raw_minimum(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = xml_with_late_subject_and_conditions()
+        .replace(
+            "SessionNotOnOrAfter=\"2024-07-17T09:01:48Z\"",
+            "SessionNotOnOrAfter=\"2024-12-31T23:59:30Z\"",
+        )
+        .replacen(
+            "</saml:AuthnStatement>",
+            "</saml:AuthnStatement><saml:AuthnStatement AuthnInstant=\"2024-12-31T23:00:00Z\" SessionNotOnOrAfter=\"2025-01-01T00:10:00Z\" SessionIndex=\"_later\"/>",
+            1,
+        );
+    let validation = SamlValidationContext::new(
+        instant("2025-01-01T00:00:00Z")?,
+        ReplayPolicy::DisabledForCompatibility,
+    )
+    .with_clock_skew(ClockSkew::strict().with_not_on_or_after_millis(60_000));
+
+    parse_response_at(&xml, &validation)?;
+    Ok(())
+}
+
+#[test]
 fn typed_validation_context_not_yet_valid_condition_uses_fixed_clock(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let validation = SamlValidationContext::new(
@@ -411,6 +434,70 @@ fn typed_validation_context_replay_expiration_uses_session_not_on_or_after(
         Some(&instant("2026-07-04T13:30:00Z")?)
     );
     Ok(())
+}
+
+#[test]
+fn typed_validation_context_replay_expiration_uses_earliest_authn_statement(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut flow = session_flow();
+    remove_extract_keys(&mut flow, &["conditions", "subjectConfirmation"]);
+    flow.extract.insert(
+        "sessionIndex",
+        Value::Array(vec![
+            value_object(vec![
+                ("sessionIndex", value_str("_later")),
+                ("sessionNotOnOrAfter", value_str("2026-07-04T13:30:00Z")),
+            ]),
+            value_object(vec![
+                ("sessionIndex", value_str("_earlier")),
+                ("sessionNotOnOrAfter", value_str("2026-07-04T12:30:00Z")),
+            ]),
+        ]),
+    );
+    let session = SsoSession::try_from(flow)?;
+    let mut cache = MemoryReplayCache::default();
+    let mut validation = SamlValidationContext::new(
+        instant("2026-07-04T12:05:00Z")?,
+        ReplayPolicy::RequireCache(&mut cache),
+    );
+
+    session.check_and_store_replay(&mut validation)?;
+    assert_eq!(
+        cache.seen.get("response_id:_response123"),
+        Some(&instant("2026-07-04T12:30:00Z")?)
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_validation_context_malformed_authn_statement_expiration_fails_replay_closed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut flow = session_flow();
+    remove_extract_keys(&mut flow, &["conditions", "subjectConfirmation"]);
+    flow.extract.insert(
+        "sessionIndex",
+        Value::Array(vec![
+            value_object(vec![(
+                "sessionNotOnOrAfter",
+                value_str("2026-07-04T13:30:00Z"),
+            )]),
+            value_object(vec![("sessionNotOnOrAfter", value_str("not-a-time"))]),
+        ]),
+    );
+    let session = SsoSession::try_from(flow)?;
+    let mut cache = MemoryReplayCache::default();
+    let mut validation = SamlValidationContext::new(
+        instant("2026-07-04T12:05:00Z")?,
+        ReplayPolicy::RequireCache(&mut cache),
+    );
+
+    match session.check_and_store_replay(&mut validation) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::ReplayExpiration);
+            Ok(())
+        }
+        other => Err(format!("expected ReplayExpiration failure, got {other:?}").into()),
+    }
 }
 
 #[test]
