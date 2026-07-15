@@ -14,7 +14,9 @@ use crate::model::RelayStateParam;
 use crate::model::{authn_statement_not_on_or_after_values, earliest_authn_session_expiration};
 use crate::util::Value;
 use crate::validator::{check_status_with_limits, conditions_time_bounds, verify_time_at};
-use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
+use crate::xml::{
+    extract_with_limits, fields, validate_protocol_profile, ExtractorField, XmlLimits,
+};
 use time::{Duration, OffsetDateTime};
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
@@ -438,6 +440,8 @@ fn verify_and_prepare(
                 decrypt_options,
                 opts.xml_limits,
             )?;
+            is_valid_xml_with_limits(&content, opts.xml_limits)?;
+            validate_protocol_profile(&content, parser_type, opts.xml_limits)?;
             if assertion_signature == AssertionSignatureRequirement::Direct {
                 let decrypted_signature_present =
                     has_xml_signature_with_limits(&assertion, opts.xml_limits)?;
@@ -458,6 +462,8 @@ fn verify_and_prepare(
         // encrypted-then-signed: decrypt first, then verify the result.
         let (content, assertion) =
             decrypt_assertion_with_limits(xml, &load_key()?, decrypt_options, opts.xml_limits)?;
+        is_valid_xml_with_limits(&content, opts.xml_limits)?;
+        validate_protocol_profile(&content, parser_type, opts.xml_limits)?;
         let verification_xml = if assertion_signature == AssertionSignatureRequirement::Direct {
             assertion.as_str()
         } else {
@@ -806,6 +812,7 @@ fn flow_inner(
         opts.xml_limits,
     )?;
     is_valid_xml_with_limits(&xml, opts.xml_limits)?;
+    validate_protocol_profile(&xml, parser_type, opts.xml_limits)?;
     check_status_with_limits(&xml, parser_type, opts.xml_limits)?;
 
     let (saml_content, assertion, sig_alg) = if opts.check_signature {
