@@ -11,10 +11,11 @@ use crate::error::SignatureVerificationReason;
 use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
 #[cfg(feature = "crypto-bergshamra")]
 use crate::model::RelayStateParam;
+use crate::model::{authn_statement_not_on_or_after_values, earliest_authn_session_expiration};
 use crate::util::Value;
 use crate::validator::{check_status_with_limits, conditions_time_bounds, verify_time_at};
 use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
@@ -754,14 +755,16 @@ fn validate_context(
                 });
             }
         }
-        if let Some(session_not_on_or_after) = extracted.get_str("sessionIndex.sessionNotOnOrAfter")
+        let session_bounds = authn_statement_not_on_or_after_values(extracted)?;
+        if let Some(raw_expiration) =
+            earliest_authn_session_expiration(session_bounds, TimeWindowField::SessionNotOnOrAfter)?
         {
-            if !verify_time_at(
-                None,
-                Some(session_not_on_or_after),
-                opts.clock_drifts,
-                opts.validation_now(),
-            ) {
+            let expiration = raw_expiration
+                .checked_add(Duration::milliseconds(opts.clock_drifts.1))
+                .ok_or(SamlError::TimeWindowInvalid {
+                    field: TimeWindowField::SessionNotOnOrAfter,
+                })?;
+            if opts.validation_now() >= expiration {
                 return Err(SamlError::TimeWindowInvalid {
                     field: TimeWindowField::SessionNotOnOrAfter,
                 });

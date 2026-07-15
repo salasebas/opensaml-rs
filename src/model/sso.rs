@@ -1,13 +1,16 @@
 use super::attributes::Attributes;
 use super::extract::{
-    attributes_from_extract, authn_session_from_extract, conditions_instants,
+    attributes_from_extract, authn_sessions_from_extract, conditions_instants,
     entity_ids_from_value, name_id_format_from_uri, optional_request_id, required_str,
     subject_confirmations_from_extract,
 };
 use super::identifiers::{AssertionId, MessageId, SamlInstant};
-use super::session::AuthnSession;
+use super::session::{AuthnSession, EMPTY_AUTHN_SESSION};
 use super::subject::{NameId, Subject};
-use super::{LogoutSubject, ReplayKey, ReplayPolicy, SamlValidationContext};
+use super::{
+    earliest_authn_session_expiration, LogoutSubject, ReplayKey, ReplayPolicy,
+    SamlValidationContext,
+};
 use crate::config::EntityId;
 use crate::error::{SamlError, TimeWindowField};
 use crate::raw::FlowResult;
@@ -107,7 +110,7 @@ pub struct SsoSession {
     in_response_to: Option<MessageId>,
     subject: Subject,
     attributes: Attributes,
-    authn_session: AuthnSession,
+    authn_sessions: Vec<AuthnSession>,
     audience: Vec<EntityId>,
     not_before: Option<SamlInstant>,
     not_on_or_after: Option<SamlInstant>,
@@ -151,9 +154,19 @@ impl SsoSession {
         &self.attributes
     }
 
-    /// AuthnStatement session data.
+    /// Legacy singular view of `AuthnStatement` session data.
+    ///
+    /// This compatibility accessor returns the first statement in document
+    /// order. For assertions containing multiple statements, use
+    /// [`Self::authn_sessions`]. When no statement is present, it returns an
+    /// immutable empty [`AuthnSession`].
     pub fn authn_session(&self) -> &AuthnSession {
-        &self.authn_session
+        self.authn_sessions.first().unwrap_or(&EMPTY_AUTHN_SESSION)
+    }
+
+    /// Every `AuthnStatement` session tuple in XML document order.
+    pub fn authn_sessions(&self) -> &[AuthnSession] {
+        &self.authn_sessions
     }
 
     /// Audience restrictions.
@@ -187,6 +200,9 @@ impl SsoSession {
 
     /// Subject data suitable for issuing Single Logout.
     ///
+    /// Every present `SessionIndex` is included in `AuthnStatement` document
+    /// order.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -211,10 +227,10 @@ impl SsoSession {
             return None;
         }
         let session_indexes = self
-            .authn_session
-            .session_index()
+            .authn_sessions
+            .iter()
+            .filter_map(AuthnSession::session_index)
             .cloned()
-            .into_iter()
             .collect();
         Some(LogoutSubject::new(self.name_id().clone(), session_indexes))
     }
@@ -236,7 +252,9 @@ impl SsoSession {
     /// # Errors
     ///
     /// Returns [`SamlError::TimeWindowInvalid`] when no valid replay
-    /// expiration can be derived or the session is already expired. Returns
+    /// expiration can be derived or the session is already expired. Replay
+    /// expiration uses the earliest upper bound across Conditions, bearer
+    /// SubjectConfirmation data, and every `AuthnStatement`. Returns
     /// [`SamlError::ReplayDetected`] when any session replay key has already
     /// been seen. Cache implementations may also return storage-specific
     /// failures mapped to [`SamlError`].
@@ -273,20 +291,30 @@ impl SsoSession {
         if let Some(instant) = self.not_on_or_after() {
             candidates.push(parse_replay_expiration(instant.as_str())?);
         }
-        if let Some(instant) = self.authn_session().not_on_or_after() {
-            candidates.push(parse_replay_expiration(instant.as_str())?);
+        if let Some(instant) = earliest_authn_session_expiration(
+            self.authn_sessions
+                .iter()
+                .filter_map(AuthnSession::not_on_or_after)
+                .map(SamlInstant::as_str),
+            REPLAY_EXPIRATION_FIELD,
+        )? {
+            candidates.push(instant);
         }
         if let Some(instant) = self.bearer_subject_confirmation_expires_at()? {
             candidates.push(instant);
         }
 
-        let expires_at = candidates
+        let raw_expires_at = candidates
             .into_iter()
             .min()
             .ok_or(SamlError::TimeWindowInvalid {
                 field: REPLAY_EXPIRATION_FIELD,
-            })?
-            + Duration::milliseconds(not_on_or_after_skew_ms);
+            })?;
+        let expires_at = raw_expires_at
+            .checked_add(Duration::milliseconds(not_on_or_after_skew_ms))
+            .ok_or(SamlError::TimeWindowInvalid {
+                field: REPLAY_EXPIRATION_FIELD,
+            })?;
         if validation_now >= expires_at {
             return Err(SamlError::TimeWindowInvalid {
                 field: REPLAY_EXPIRATION_FIELD,
@@ -349,7 +377,7 @@ impl TryFrom<FlowResult> for SsoSession {
             subject_confirmations_from_extract(&raw_flow.extract),
         );
         let attributes = attributes_from_extract(&raw_flow.extract);
-        let authn_session = authn_session_from_extract(&raw_flow.extract)?;
+        let authn_sessions = authn_sessions_from_extract(&raw_flow.extract)?;
         let audience = entity_ids_from_value(raw_flow.extract.get("audience"))?;
         let (not_before, not_on_or_after) = conditions_instants(&raw_flow.extract)?;
         let sig_alg = raw_flow.sig_alg.clone();
@@ -360,7 +388,7 @@ impl TryFrom<FlowResult> for SsoSession {
             in_response_to,
             subject,
             attributes,
-            authn_session,
+            authn_sessions,
             audience,
             not_before,
             not_on_or_after,

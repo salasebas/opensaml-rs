@@ -300,6 +300,70 @@ fn error_taxonomy_expired_session_returns_session_not_on_or_after_time_window(
 }
 
 #[test]
+fn error_taxonomy_repeated_session_uses_earliest_expiration(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = iso8601_offset(-60);
+    let expired = iso8601_offset(-300);
+    let future = iso8601_offset(300);
+    let response = signed_response(&ResponseShape {
+        authn_statement: format!(
+            "<saml:AuthnStatement AuthnInstant=\"{now}\" SessionNotOnOrAfter=\"{future}\" SessionIndex=\"_future\"/><saml:AuthnStatement AuthnInstant=\"{now}\" SessionNotOnOrAfter=\"{expired}\" SessionIndex=\"_expired\"/>"
+        ),
+        ..Default::default()
+    })?;
+
+    match parse_response(response, "_request123") {
+        Err(SamlError::TimeWindowInvalid {
+            field: TimeWindowField::SessionNotOnOrAfter,
+        }) => Ok(()),
+        other => Err(format!(
+            "expected earliest repeated SessionNotOnOrAfter to fail, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn error_taxonomy_repeated_future_sessions_are_accepted() -> Result<(), Box<dyn std::error::Error>>
+{
+    let now = iso8601_offset(-60);
+    let first_future = iso8601_offset(300);
+    let second_future = iso8601_offset(600);
+    let response = signed_response(&ResponseShape {
+        authn_statement: format!(
+            "<saml:AuthnStatement AuthnInstant=\"{now}\" SessionNotOnOrAfter=\"{first_future}\" SessionIndex=\"_first\"/><saml:AuthnStatement AuthnInstant=\"{now}\" SessionNotOnOrAfter=\"{second_future}\" SessionIndex=\"_second\"/>"
+        ),
+        ..Default::default()
+    })?;
+
+    parse_response(response, "_request123")?;
+    Ok(())
+}
+
+#[test]
+fn error_taxonomy_repeated_session_malformed_expiration_fails_closed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = iso8601_offset(-60);
+    let future = iso8601_offset(300);
+    let response = signed_response(&ResponseShape {
+        authn_statement: format!(
+            "<saml:AuthnStatement AuthnInstant=\"{now}\" SessionNotOnOrAfter=\"{future}\" SessionIndex=\"_valid\"/><saml:AuthnStatement AuthnInstant=\"{now}\" SessionNotOnOrAfter=\"not-a-time\" SessionIndex=\"_malformed\"/>"
+        ),
+        ..Default::default()
+    })?;
+
+    match parse_response(response, "_request123") {
+        Err(SamlError::TimeWindowInvalid {
+            field: TimeWindowField::SessionNotOnOrAfter,
+        }) => Ok(()),
+        other => Err(format!(
+            "expected malformed repeated SessionNotOnOrAfter to fail, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
 fn error_taxonomy_expired_conditions_return_conditions_time_window(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let response = signed_response(&ResponseShape {

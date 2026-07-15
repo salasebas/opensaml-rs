@@ -9,6 +9,14 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+### Added
+
+- *(api)* expose every `AuthnStatement` session tuple in XML order
+
+### Fixed
+
+- *(sp)* honor the earliest `SessionNotOnOrAfter` across repeated `AuthnStatement` values
+
 ## [0.2.0](https://github.com/salasebas/opensaml-rs/compare/v0.1.4...v0.2.0) - 2026-07-14
 
 ### Added
