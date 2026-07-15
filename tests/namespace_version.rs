@@ -175,8 +175,8 @@ fn namespaced_consumed_attribute_is_rejected() -> Result<(), Box<dyn std::error:
 #[test]
 fn foreign_extension_name_collisions_are_not_consumed() -> Result<(), Box<dyn std::error::Error>> {
     let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"").replace(
-        "<a:Assertion",
-        "<x:Extension xmlns:x=\"urn:example:extension\"><x:Status/><x:Signature/><x:Assertion/></x:Extension><a:Assertion",
+        "<p:Status>",
+        "<p:Extensions><x:Extension xmlns:x=\"urn:example:extension\"><x:Status/><x:Signature/><x:Assertion/></x:Extension></p:Extensions><p:Status>",
     );
     run_flow(&xml, ParserType::SamlResponse)?;
     Ok(())

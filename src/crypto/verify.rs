@@ -321,16 +321,19 @@ pub(crate) fn has_xml_signature_with_limits(
     Ok(has_saml_xml_signature(&doc.root))
 }
 
-/// First `<X509Certificate>` text found inside a `<Signature>` (the cert the
-/// sender embedded in the message), if any.
-fn inline_signature_cert(node: &Node, in_signature: bool) -> Option<String> {
-    let in_signature = in_signature || node.local_name == "Signature";
-    if in_signature && node.local_name == "X509Certificate" && !node.text.is_empty() {
-        return Some(node.text.clone());
+/// First `<X509Certificate>` text found inside a candidate `<Signature>` (the
+/// cert the sender embedded in the message), if any.
+fn inline_signature_cert(signatures: &[&Node]) -> Option<String> {
+    fn descendant_cert(node: &Node) -> Option<String> {
+        if node.local_name == "X509Certificate" && !node.text.is_empty() {
+            return Some(node.text.clone());
+        }
+        node.children.iter().find_map(descendant_cert)
     }
-    node.children
+
+    signatures
         .iter()
-        .find_map(|c| inline_signature_cert(c, in_signature))
+        .find_map(|signature| descendant_cert(signature))
 }
 
 /// Verify the XML-DSig signature(s) of `xml` against `metadata_certs`.
@@ -384,7 +387,7 @@ pub fn verify_signature_with_limits(
     // If the message embeds a certificate, it must be one declared in metadata
     // (rolling-cert safety). Verification itself still uses only the metadata
     // certs.
-    if let Some(inline) = inline_signature_cert(root, false) {
+    if let Some(inline) = inline_signature_cert(&signature_candidates) {
         let inline = normalize_cert_string(&inline);
         if !metadata_certs.is_empty()
             && !metadata_certs
@@ -502,7 +505,7 @@ pub(crate) fn verify_signatures_detailed_with_limits(
     }
     preflight_saml_reference_uris(&signature_candidates)?;
 
-    if let Some(inline) = inline_signature_cert(root, false) {
+    if let Some(inline) = inline_signature_cert(&signature_candidates) {
         let inline = normalize_cert_string(&inline);
         if !metadata_certs.is_empty()
             && !metadata_certs
@@ -808,6 +811,25 @@ mod tests {
     const SP_CERT: &str = include_str!("../../tests/fixtures/key/sp_cert.cer");
     const SP_SIGNING_CERT: &str = include_str!("../../tests/fixtures/key/sp_signing_cert.cer");
 
+    fn signed_response_with_foreign_extension_certificate(
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let response = RESPONSE.replacen(
+            "<samlp:Status>",
+            r#"<samlp:Extensions><x:Signature xmlns:x="urn:example:extension"><x:X509Certificate>attacker</x:X509Certificate></x:Signature></samlp:Extensions><samlp:Status>"#,
+            1,
+        );
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        Ok(construct_saml_signature(
+            &response,
+            false,
+            &key,
+            SP_SIGNING_CERT,
+            RSA_SHA256,
+            &[],
+            None,
+        )?)
+    }
+
     fn response_with_first_invalid_signature() -> Result<String, Box<dyn std::error::Error>> {
         let cert = normalize_cert_string(IDP_CERT);
         let digest = digest_for_signature(RSA_SHA256).ok_or("unknown digest")?;
@@ -897,6 +919,31 @@ mod tests {
         assert!(content
             .ok_or("expected signed assertion")?
             .contains("Assertion"));
+        Ok(())
+    }
+
+    #[test]
+    fn foreign_extension_certificate_is_not_treated_as_signature_key_info(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let signed = signed_response_with_foreign_extension_certificate()?;
+        let (verified, content) = verify_signature(&signed, &[SP_SIGNING_CERT.to_string()])?;
+        assert!(verified);
+        assert!(content
+            .ok_or("expected signed assertion")?
+            .contains("Assertion"));
+        Ok(())
+    }
+
+    #[test]
+    fn detailed_verification_ignores_foreign_extension_certificate(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let signed = signed_response_with_foreign_extension_certificate()?;
+        let result = verify_signatures_detailed_with_limits(
+            &signed,
+            &[SP_SIGNING_CERT.to_string()],
+            XmlLimits::default(),
+        )?;
+        assert!(result.verified() && result.assertion_directly_covered());
         Ok(())
     }
 
