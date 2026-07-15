@@ -242,6 +242,9 @@ pub enum SamlError {
     /// Verified signed reference does not cover the consumed payload.
     #[error("signed reference does not cover consumed payload")]
     SignedReferenceMismatch,
+    /// Assertion-signature policy requires direct coverage of the consumed assertion.
+    #[error("consumed assertion is not directly covered by a trusted XML signature")]
+    AssertionSignatureRequired,
 
     // Metadata / trust validation.
     /// No trusted certificate could be selected for verification.
