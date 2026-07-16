@@ -139,7 +139,8 @@ pub enum SamlError {
     /// Input failed validation.
     #[error("invalid input: {0}")]
     Invalid(String),
-    /// Inbound XML does not satisfy the SAML 2.0 protocol QName or version profile.
+    /// Inbound XML violates SAML protocol requirements such as QName, version,
+    /// required attributes, or their lexical forms.
     #[error("SAML protocol profile violation: {0}")]
     ProtocolProfile(String),
 

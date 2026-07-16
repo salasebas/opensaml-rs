@@ -24,6 +24,7 @@ fn run_flow_with_binding(
     xml: &str,
     parser_type: ParserType,
     binding: Binding,
+    check_signature: bool,
 ) -> Result<(), SamlError> {
     let encoded = match binding {
         Binding::Redirect => base64_encode(&deflate_raw_encode(xml.as_bytes())?),
@@ -39,11 +40,12 @@ fn run_flow_with_binding(
     let mut options = FlowOptions::default();
     options.binding = Some(binding);
     options.parser_type = Some(parser_type);
+    options.check_signature = check_signature;
     flow(&options, &request).map(|_| ())
 }
 
 fn run_flow(xml: &str, parser_type: ParserType) -> Result<(), SamlError> {
-    run_flow_with_binding(xml, parser_type, Binding::Post)
+    run_flow_with_binding(xml, parser_type, Binding::Post, false)
 }
 
 fn expect_profile_rejection(
@@ -78,7 +80,7 @@ fn expect_profile_rejection_with_binding_and_context(
     binding: Binding,
     context: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match run_flow_with_binding(xml, parser_type, binding) {
+    match run_flow_with_binding(xml, parser_type, binding, true) {
         Err(SamlError::ProtocolProfile(message)) if message.contains(context) => Ok(()),
         Err(SamlError::ProtocolProfile(message)) => {
             Err(format!("expected {context} context, got {message:?}").into())
@@ -137,7 +139,7 @@ fn default_protocol_namespace_is_accepted() -> Result<(), Box<dyn std::error::Er
 }
 
 #[test]
-fn authn_request_issue_instant_validation_runs_for_supported_bindings(
+fn authn_request_issue_instant_validation_precedes_signature_handling_for_supported_bindings(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let cases = [
         (authn_request_xml(None), MISSING_ISSUE_INSTANT_CONTEXT),
@@ -230,15 +232,16 @@ fn authn_request_issue_instant_collapses_surrounding_xml_schema_whitespace(
 #[test]
 fn foreign_root_namespace_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let xml = format!(
-        r#"<x:AuthnRequest xmlns:x="urn:example:foreign" xmlns:a="{ASSERTION_NS}" ID="_request" Version="2.0"><a:Issuer>https://sp.example.test</a:Issuer></x:AuthnRequest>"#
+        r#"<x:AuthnRequest xmlns:x="urn:example:foreign" xmlns:a="{ASSERTION_NS}" ID="_request" Version="2.0" IssueInstant="2024-01-01T00:00:00Z"><a:Issuer>https://sp.example.test</a:Issuer></x:AuthnRequest>"#
     );
-    expect_profile_rejection(&xml, ParserType::SamlRequest)
+    expect_profile_rejection_with_context(&xml, ParserType::SamlRequest, "expected root")
 }
 
 #[test]
 fn unbound_root_prefix_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
-    let xml = r#"<p:AuthnRequest ID="_request" Version="2.0"/>"#;
-    expect_profile_rejection(xml, ParserType::SamlRequest)
+    let xml =
+        r#"<p:AuthnRequest ID="_request" Version="2.0" IssueInstant="2024-01-01T00:00:00Z"/>"#;
+    expect_profile_rejection_with_context(xml, ParserType::SamlRequest, "expected root")
 }
 
 #[test]
@@ -299,28 +302,56 @@ fn foreign_encrypted_data_namespace_is_rejected() -> Result<(), Box<dyn std::err
 #[test]
 fn namespaced_required_attribute_aliases_are_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let root_version = format!(
-        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" x:Version="2.0"/>"#
+        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" x:Version="2.0" IssueInstant="2024-01-01T00:00:00Z"/>"#
     );
-    expect_profile_rejection(&root_version, ParserType::SamlRequest)?;
+    expect_profile_rejection_with_context(
+        &root_version,
+        ParserType::SamlRequest,
+        "attribute Version on AuthnRequest must be unqualified",
+    )?;
 
     let root_id = format!(
-        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" x:ID="_request" Version="2.0"/>"#
+        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" x:ID="_request" Version="2.0" IssueInstant="2024-01-01T00:00:00Z"/>"#
     );
-    expect_profile_rejection(&root_id, ParserType::SamlRequest)?;
+    expect_profile_rejection_with_context(
+        &root_id,
+        ParserType::SamlRequest,
+        "attribute ID on AuthnRequest must be unqualified",
+    )?;
 
     let assertion_id = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"").replace(
         "<a:Assertion ID=\"_assertion\"",
         "<a:Assertion xmlns:x=\"urn:example:foreign\" x:ID=\"_assertion\"",
     );
-    expect_profile_rejection(&assertion_id, ParserType::SamlResponse)
+    expect_profile_rejection_with_context(
+        &assertion_id,
+        ParserType::SamlResponse,
+        "attribute ID on Assertion must be unqualified",
+    )
 }
 
 #[test]
 fn namespaced_consumed_attribute_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let xml = format!(
-        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" Version="2.0" x:Destination="https://idp.example.test"/>"#
+        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" Version="2.0" IssueInstant="2024-01-01T00:00:00Z" x:Destination="https://idp.example.test"/>"#
     );
-    expect_profile_rejection(&xml, ParserType::SamlRequest)
+    expect_profile_rejection_with_context(
+        &xml,
+        ParserType::SamlRequest,
+        "attribute Destination on AuthnRequest must be unqualified",
+    )
+}
+
+#[test]
+fn qualified_issue_instant_collision_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let xml = format!(
+        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" Version="2.0" IssueInstant="2024-01-01T00:00:00Z" x:IssueInstant="2024-01-02T00:00:00Z"/>"#
+    );
+    expect_profile_rejection_with_context(
+        &xml,
+        ParserType::SamlRequest,
+        "attribute IssueInstant on AuthnRequest must be unqualified",
+    )
 }
 
 #[test]

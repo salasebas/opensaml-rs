@@ -154,8 +154,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_fractional_and_whitespace_forms() {
+    fn rejects_invalid_lexical_and_whitespace_forms() {
         for value in [
+            "2024-01-01T00:00:00",
+            "+2024-01-01T00:00:00Z",
             "2024-01-01T00:00:00.Z",
             "2024-01-01T00:00:00.\u{0661}Z",
             "2024-01-01T00:00:00.1suffixZ",
