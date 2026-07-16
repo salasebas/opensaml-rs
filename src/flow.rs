@@ -143,10 +143,11 @@ impl<'a> Default for FlowOptions<'a> {
 }
 
 impl FlowOptions<'_> {
-    fn validation_now(&self) -> OffsetDateTime {
-        self.now
-            .map(OffsetDateTime::from)
-            .unwrap_or_else(OffsetDateTime::now_utc)
+    fn validation_now(&self) -> Result<OffsetDateTime, SamlError> {
+        self.now.map_or_else(
+            || Ok(OffsetDateTime::now_utc()),
+            crate::validator::offset_datetime_from_system_time,
+        )
     }
 }
 
@@ -662,7 +663,7 @@ fn check_bearer_subject_confirmation(
         None,
         Some(not_on_or_after),
         opts.clock_drifts,
-        opts.validation_now(),
+        opts.validation_now()?,
     ) {
         return Ok(SubjectConfirmationCheck::Invalid(
             SubjectConfirmationReason::TimeWindowInvalid,
@@ -773,7 +774,7 @@ fn validate_context(
                 .ok_or(SamlError::TimeWindowInvalid {
                     field: TimeWindowField::SessionNotOnOrAfter,
                 })?;
-            if opts.validation_now() >= expiration {
+            if opts.validation_now()? >= expiration {
                 return Err(SamlError::TimeWindowInvalid {
                     field: TimeWindowField::SessionNotOnOrAfter,
                 });
@@ -784,7 +785,7 @@ fn validate_context(
             not_before,
             not_on_or_after,
             opts.clock_drifts,
-            opts.validation_now(),
+            opts.validation_now()?,
         ) {
             return Err(SamlError::TimeWindowInvalid {
                 field: TimeWindowField::Conditions,

@@ -17,7 +17,7 @@ use crate::template::{
 mod login_response;
 
 use login_response::{render_default_login_response, LoginResponseXml};
-use time::OffsetDateTime;
+use std::time::SystemTime;
 
 /// Optional inputs for [`IdentityProvider::create_login_response`].
 #[derive(Default)]
@@ -501,7 +501,7 @@ impl IdentityProvider {
         sp: &ServiceProvider,
         binding: Binding,
         request: &HttpRequest,
-        now: OffsetDateTime,
+        now: SystemTime,
         clock_drifts: (i64, i64),
     ) -> Result<FlowResult, SamlError> {
         self.parse_login_request_at_inner(sp, binding, request, Some(now), clock_drifts)
@@ -512,7 +512,7 @@ impl IdentityProvider {
         sp: &ServiceProvider,
         binding: Binding,
         request: &HttpRequest,
-        now: Option<OffsetDateTime>,
+        now: Option<SystemTime>,
         clock_drifts: (i64, i64),
     ) -> Result<FlowResult, SamlError> {
         let signing_certs = sp
@@ -529,7 +529,7 @@ impl IdentityProvider {
                 decrypt_key_pass: None,
                 allow_insecure_software_rsa_key_transport_decryption: false,
                 clock_drifts,
-                now: now.map(Into::into),
+                now,
                 redirect_inflate_max_bytes: self.setting.redirect_inflate_max_bytes,
                 xml_limits: self.setting.xml_limits,
                 expected_audience: None,

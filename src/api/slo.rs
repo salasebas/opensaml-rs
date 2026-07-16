@@ -413,7 +413,7 @@ fn receive_slo_impl(
         peer_metadata,
         binding.as_binding(),
         &request,
-        validation.now_offset(),
+        validation.now(),
         validation.clock_skew().as_millis(),
     )?;
     let logout = LogoutRequest::try_from(flow)?;
@@ -464,7 +464,7 @@ fn finish_slo_impl(
         pending.response_binding().as_binding(),
         &request,
         pending.id().as_str(),
-        validation.now_offset(),
+        validation.now(),
         validation.clock_skew().as_millis(),
     )?;
     let response = LogoutResponse::try_from(flow)?;

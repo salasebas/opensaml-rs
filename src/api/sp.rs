@@ -157,7 +157,7 @@ impl Saml<Sp> {
                 &request,
                 pending.request_id().as_str(),
                 LoginResponseParseOptions::at(
-                    validation.now_offset(),
+                    validation.now(),
                     validation.clock_skew().as_millis(),
                 )
                 .with_expected_recipient(pending.acs().location().as_str()),
@@ -191,7 +191,7 @@ impl Saml<Sp> {
                 &raw_idp,
                 binding.as_binding(),
                 &request,
-                validation.now_offset(),
+                validation.now(),
                 validation.clock_skew().as_millis(),
             )?;
         let session = SsoSession::try_from(flow)?;

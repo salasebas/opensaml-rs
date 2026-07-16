@@ -74,7 +74,7 @@ impl Saml<Idp> {
             &raw_sp,
             binding.as_binding(),
             &request,
-            validation.now_offset(),
+            validation.now(),
             validation.clock_skew().as_millis(),
         )?;
         let authn = AuthnRequest::try_from(flow)?;

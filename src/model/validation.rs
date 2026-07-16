@@ -183,7 +183,7 @@ pub enum ReplayPolicy<'a> {
 
 /// Caller-owned validation context for typed inbound SAML messages.
 pub struct SamlValidationContext<'a> {
-    now: OffsetDateTime,
+    now: SystemTime,
     clock_skew: ClockSkew,
     replay: ReplayPolicy<'a>,
     replay_retention: Option<Duration>,
@@ -193,7 +193,7 @@ impl<'a> SamlValidationContext<'a> {
     /// Build a validation context with strict clock skew.
     pub fn new(now: SystemTime, replay: ReplayPolicy<'a>) -> Self {
         Self {
-            now: now.into(),
+            now,
             clock_skew: ClockSkew::strict(),
             replay,
             replay_retention: None,
@@ -215,7 +215,7 @@ impl<'a> SamlValidationContext<'a> {
 
     /// Validation instant supplied by the caller.
     pub fn now(&self) -> SystemTime {
-        self.now.into()
+        self.now
     }
 
     /// Clock skew applied to time-window checks.
@@ -228,8 +228,8 @@ impl<'a> SamlValidationContext<'a> {
         self.replay_retention
     }
 
-    pub(crate) fn now_offset(&self) -> OffsetDateTime {
-        self.now
+    pub(crate) fn now_offset(&self) -> Result<OffsetDateTime, SamlError> {
+        crate::validator::offset_datetime_from_system_time(self.now)
     }
 
     pub(crate) fn replay_policy(&mut self) -> &mut ReplayPolicy<'a> {
@@ -261,7 +261,7 @@ impl<'a> SamlValidationContext<'a> {
                 field: crate::error::TimeWindowField::ReplayExpiration,
             });
         }
-        SystemTime::from(self.now)
+        self.now
             .checked_add(retention)
             .ok_or(SamlError::TimeWindowInvalid {
                 field: crate::error::TimeWindowField::ReplayExpiration,
