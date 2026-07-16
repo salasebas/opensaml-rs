@@ -10,9 +10,9 @@ use saml_rs::error::TimeWindowField;
 use saml_rs::raw::Binding;
 use saml_rs::{
     AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, ForceAuthn,
-    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MessageSignaturePolicy,
-    MetadataTrustPolicy, NameId, NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot,
-    PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso,
+    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId,
+    NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
+    RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, ResponseSignaturePolicy,
     Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
     SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject,
 };
@@ -76,8 +76,17 @@ fn credentials() -> Credentials {
 }
 
 fn sp_config() -> Result<SpConfig, SamlError> {
+    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
+        .acs_endpoint(AcsEndpoint::simple_sign(SP_ACS_SIMPLESIGN)?)
+        .credentials(credentials())
+        .validation(SpValidationPolicy::strict())
+        .build()
+}
+
+fn response_signature_required_sp_config() -> Result<SpConfig, SamlError> {
     let validation = SpValidationPolicy {
-        messages: MessageSignaturePolicy::AllowUnsignedForCompatibility,
+        responses: ResponseSignaturePolicy::RequireSigned,
         ..SpValidationPolicy::strict()
     };
     SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
@@ -85,15 +94,6 @@ fn sp_config() -> Result<SpConfig, SamlError> {
         .acs_endpoint(AcsEndpoint::simple_sign(SP_ACS_SIMPLESIGN)?)
         .credentials(credentials())
         .validation(validation)
-        .build()
-}
-
-fn strict_sp_config() -> Result<SpConfig, SamlError> {
-    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
-        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
-        .acs_endpoint(AcsEndpoint::simple_sign(SP_ACS_SIMPLESIGN)?)
-        .credentials(credentials())
-        .validation(SpValidationPolicy::strict())
         .build()
 }
 
@@ -705,9 +705,9 @@ fn typed_facade_runs_sp_initiated_sso() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
-fn typed_strict_sp_rejects_metadata_only_idp_assertion_only_post(
+fn typed_required_response_signature_rejects_assertion_only_post(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = Saml::sp(strict_sp_config()?)?;
+    let sp = Saml::sp(response_signature_required_sp_config()?)?;
     let idp = Saml::idp(idp_config()?)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
@@ -727,6 +727,35 @@ fn typed_strict_sp_rejects_metadata_only_idp_assertion_only_post(
         Err(SamlError::SignedReferenceMismatch) => Ok(()),
         other => Err(format!("expected SignedReferenceMismatch, got {other:?}").into()),
     }
+}
+
+#[test]
+fn typed_sign_response_satisfies_required_response_signature(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(response_signature_required_sp_config()?)?;
+    let idp = Saml::idp(idp_config()?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    )?;
+    let response = idp.respond_sso(
+        &sp_descriptor,
+        &received,
+        subject(),
+        RespondSso::post().sign_response(),
+    )?;
+    let session = sp.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::post(post_fields(&response)?),
+        validation(),
+    )?;
+
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    Ok(())
 }
 
 #[test]

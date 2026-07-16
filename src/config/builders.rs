@@ -7,14 +7,14 @@ use super::credentials::Credentials;
 use super::descriptors::{validate_entity_id, EntityId, IdpMetadataConfig, SpMetadataConfig};
 use super::policies::{
     assertion_signature_required, audience_validation_enabled, authn_request_signature_required,
-    authn_request_signing_enabled, logout_signature_required, message_signature_required,
-    name_id_creation_allowed, AlgorithmPolicy, AssertionEncryptionPolicy,
+    authn_request_signing_enabled, logout_signature_required, name_id_creation_allowed,
+    response_signature_required, AlgorithmPolicy, AssertionEncryptionPolicy,
     AuthnRequestSigningPolicy, IdpValidationPolicy, SpValidationPolicy, TemplatePolicy, XmlPolicy,
 };
 #[cfg(not(feature = "crypto-bergshamra"))]
 use super::policies::{
     AssertionSignaturePolicy, AuthnRequestValidationPolicy, LogoutPolicy, LogoutSignaturePolicy,
-    MessageSignaturePolicy,
+    ResponseSignaturePolicy,
 };
 
 /// Typed Service Provider configuration.
@@ -465,8 +465,8 @@ fn sp_config_requires_crypto(config: &SpConfig) -> bool {
         config.validation.assertions,
         AssertionSignaturePolicy::RequireSigned
     ) || matches!(
-        config.validation.messages,
-        MessageSignaturePolicy::RequireSigned
+        config.validation.responses,
+        ResponseSignaturePolicy::RequireSigned
     ) || matches!(
         config.validation.authn_requests,
         AuthnRequestSigningPolicy::Sign
@@ -582,7 +582,7 @@ impl TryFrom<&SpConfig> for EntitySetting {
             authn_request_signing_enabled(config.validation.authn_requests);
         setting.want_assertions_signed = assertion_signature_required(config.validation.assertions);
         setting.validate_audience = audience_validation_enabled(config.validation.audience);
-        setting.want_message_signed = message_signature_required(config.validation.messages);
+        setting.want_message_signed = response_signature_required(config.validation.responses);
         setting.want_logout_request_signed =
             logout_signature_required(config.validation.logout.requests)?;
         setting.want_logout_response_signed =

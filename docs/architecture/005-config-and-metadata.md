@@ -177,9 +177,9 @@ pub enum AssertionSignaturePolicy {
     AllowUnsignedForCompatibility,
 }
 
-pub enum MessageSignaturePolicy {
+pub enum ResponseSignaturePolicy {
+    Optional,
     RequireSigned,
-    AllowUnsignedForCompatibility,
 }
 
 pub enum AuthnRequestSigningPolicy {
@@ -199,7 +199,7 @@ pub enum LogoutSignaturePolicy {
 
 pub struct SpValidationPolicy {
     assertions: AssertionSignaturePolicy,
-    messages: MessageSignaturePolicy,
+    responses: ResponseSignaturePolicy,
     authn_requests: AuthnRequestSigningPolicy,
     audience: AudienceValidationPolicy,
     name_id_creation: NameIdCreationPolicy,
@@ -211,6 +211,15 @@ pub struct IdpValidationPolicy {
     logout: LogoutPolicy,
 }
 ```
+
+`SpValidationPolicy::strict()` requires a signed Assertion but leaves the
+top-level Response signature optional. `SpValidationPolicy::compatibility()`
+also uses `ResponseSignaturePolicy::Optional`. A Response-root signature is
+extra hardening beyond the Web Browser SSO profile's signed-Assertion
+requirement, and standard SP metadata has no flag that negotiates it. Callers
+that require both set `responses` to `ResponseSignaturePolicy::RequireSigned`;
+typed IdPs can satisfy that policy for HTTP-POST with
+`RespondSso::post().sign_response()`.
 
 Avoid bare boolean names for signature requirements and avoid names like
 `insecure(true)`. Compatibility exceptions should be visible in enum variants.

@@ -178,7 +178,8 @@ impl Saml<Idp> {
             })
         });
         relay_state.validate()?;
-        let raw_sp = raw_sp_descriptor(sp)?;
+        let mut raw_sp = raw_sp_descriptor(sp)?;
+        raw_sp.setting.want_message_signed = options.sign_response;
         let (binding, explicit_acs) = match request {
             Some(request) => response_target(&raw_sp, request.message(), options.binding)?,
             None => (options.binding, None),

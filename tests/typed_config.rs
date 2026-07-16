@@ -6,9 +6,10 @@ use saml_rs::xml::XmlLimits;
 use saml_rs::{
     AcsEndpoint, AssertionSignaturePolicy, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
     CertificatePem, Credentials, DataEncryptionAlgorithm, DigestAlgorithm, EntityId, EntitySetting,
-    IdpConfig, IdpDescriptor, IdpMetadataConfig, KeyEncryptionAlgorithm, MessageSignaturePolicy,
-    MetadataTrustPolicy, NameIdFormat, Passphrase, PrivateKeyPem, SamlError, SignatureAlgorithm,
-    SpConfig, SpDescriptor, SpMetadataConfig, SsoEndpoint, TransformAlgorithm, XmlEncryptionPolicy,
+    IdpConfig, IdpDescriptor, IdpMetadataConfig, KeyEncryptionAlgorithm, MetadataTrustPolicy,
+    NameIdFormat, Passphrase, PrivateKeyPem, ResponseSignaturePolicy, SamlError,
+    SignatureAlgorithm, SpConfig, SpDescriptor, SpMetadataConfig, SsoEndpoint, TransformAlgorithm,
+    XmlEncryptionPolicy,
 };
 
 const IDP_METADATA: &str = include_str!("fixtures/idpmeta.xml");
@@ -185,7 +186,7 @@ fn typed_config_sp_config_converts_selected_settings() -> Result<(), Box<dyn std
         ..Credentials::default()
     };
     config.validation.assertions = AssertionSignaturePolicy::RequireSigned;
-    config.validation.messages = MessageSignaturePolicy::RequireSigned;
+    config.validation.responses = ResponseSignaturePolicy::RequireSigned;
     config.validation.authn_requests = AuthnRequestSigningPolicy::Sign;
     config.xml.clock_drifts = (-120_000, 180_000);
     config.xml.limits = limits;

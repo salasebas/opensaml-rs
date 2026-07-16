@@ -47,10 +47,17 @@ Entries before the rebrand use the package names that were current at the time.
 ### Added
 
 - *(api)* expose every `AuthnStatement` session tuple in XML order
+- *(api)* add `RespondSso::sign_response()` for explicit top-level HTTP-POST Response signing
+
+### Changed
+
+- *(api)* rename the SP message-signature policy and field to `ResponseSignaturePolicy`/`responses`
+- *(sp)* keep top-level Response signatures optional in `SpValidationPolicy::strict()`
 
 ### Fixed
 
 - *(sp)* honor the earliest `SessionNotOnOrAfter` across repeated `AuthnStatement` values
+- *(security)* enforce explicit required Response signatures against verified root coverage
 
 ## [0.2.0](https://github.com/salasebas/opensaml-rs/compare/v0.1.4...v0.2.0) - 2026-07-14
 

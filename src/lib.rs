@@ -319,8 +319,8 @@ pub use config::{
     AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, CertificatePem, Credentials,
     DataEncryptionAlgorithm, DigestAlgorithm, EntityId, IdpConfig, IdpConfigBuilder, IdpDescriptor,
     IdpMetadataConfig, IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy,
-    LogoutSignaturePolicy, MessageSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy,
-    NameIdFormat, Passphrase, PrivateKeyPem, SignatureAlgorithm, SpConfig, SpConfigBuilder,
+    LogoutSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase,
+    PrivateKeyPem, ResponseSignaturePolicy, SignatureAlgorithm, SpConfig, SpConfigBuilder,
     SpDescriptor, SpMetadataConfig, SpValidationPolicy, TemplatePolicy, TransformAlgorithm,
     XmlEncryptionPolicy, XmlPolicy,
 };

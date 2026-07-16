@@ -85,6 +85,7 @@ impl StartSso {
 pub struct RespondSso {
     pub(super) binding: SsoResponseBinding,
     pub(super) relay_state: Option<RelayStateParam>,
+    pub(super) sign_response: bool,
 }
 
 impl RespondSso {
@@ -102,7 +103,17 @@ impl RespondSso {
         Self {
             binding,
             relay_state: None,
+            sign_response: false,
         }
+    }
+
+    /// Sign the top-level SAML Response.
+    ///
+    /// HTTP-POST embeds an XML signature covering the Response. HTTP-POST-
+    /// SimpleSign continues to use its binding-defined detached signature.
+    pub fn sign_response(mut self) -> Self {
+        self.sign_response = true;
+        self
     }
 
     /// Set exact RelayState state for the response.
