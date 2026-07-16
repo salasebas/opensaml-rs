@@ -1,4 +1,4 @@
-use saml_rs::binding::base64_encode;
+use saml_rs::binding::{base64_encode, deflate_raw_encode};
 use saml_rs::constants::{Binding, ParserType};
 use saml_rs::flow::{flow, FlowOptions, HttpRequest};
 use saml_rs::SamlError;
@@ -17,15 +17,30 @@ const PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 #[cfg(feature = "crypto-bergshamra")]
 const CERTIFICATE: &str = include_str!("fixtures/key/sp_signing_cert.cer");
 
-fn run_flow(xml: &str, parser_type: ParserType) -> Result<(), SamlError> {
-    let request = HttpRequest::post(vec![(
-        parser_type.query_param().to_string(),
-        base64_encode(xml.as_bytes()),
-    )]);
+fn run_flow_with_binding(
+    xml: &str,
+    parser_type: ParserType,
+    binding: Binding,
+) -> Result<(), SamlError> {
+    let encoded = match binding {
+        Binding::Redirect => base64_encode(&deflate_raw_encode(xml.as_bytes())?),
+        Binding::Post | Binding::SimpleSign => base64_encode(xml.as_bytes()),
+        Binding::Artifact => return Err(SamlError::UnsupportedBinding { binding }),
+    };
+    let parameter = (parser_type.query_param().to_string(), encoded);
+    let request = match binding {
+        Binding::Redirect => HttpRequest::redirect(vec![parameter]),
+        Binding::Post | Binding::SimpleSign => HttpRequest::post(vec![parameter]),
+        Binding::Artifact => return Err(SamlError::UnsupportedBinding { binding }),
+    };
     let mut options = FlowOptions::default();
-    options.binding = Some(Binding::Post);
+    options.binding = Some(binding);
     options.parser_type = Some(parser_type);
     flow(&options, &request).map(|_| ())
+}
+
+fn run_flow(xml: &str, parser_type: ParserType) -> Result<(), SamlError> {
+    run_flow_with_binding(xml, parser_type, Binding::Post)
 }
 
 fn expect_profile_rejection(
@@ -37,6 +52,27 @@ fn expect_profile_rejection(
         Err(other) => Err(format!("expected ProtocolProfile, got {other:?}").into()),
         Ok(()) => Err("expected SAML profile rejection".into()),
     }
+}
+
+fn expect_profile_rejection_with_binding(
+    xml: &str,
+    parser_type: ParserType,
+    binding: Binding,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match run_flow_with_binding(xml, parser_type, binding) {
+        Err(SamlError::ProtocolProfile(_)) => Ok(()),
+        Err(other) => Err(format!("expected ProtocolProfile, got {other:?}").into()),
+        Ok(()) => Err("expected SAML profile rejection".into()),
+    }
+}
+
+fn authn_request_xml(issue_instant: Option<&str>) -> String {
+    let issue_instant = issue_instant
+        .map(|value| format!(r#" IssueInstant="{value}""#))
+        .unwrap_or_default();
+    format!(
+        r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" ID="_request" Version="2.0"{issue_instant}/>"#
+    )
 }
 
 fn response_xml(protocol_ns: &str, assertion_ns: &str, version: &str) -> String {
@@ -71,8 +107,60 @@ fn alternate_prefixes_with_oasis_namespaces_are_accepted() -> Result<(), Box<dyn
 
 #[test]
 fn default_protocol_namespace_is_accepted() -> Result<(), Box<dyn std::error::Error>> {
-    let xml = format!(r#"<AuthnRequest xmlns="{PROTOCOL_NS}" ID="_request" Version="2.0"/>"#);
+    let xml = format!(
+        r#"<AuthnRequest xmlns="{PROTOCOL_NS}" ID="_request" Version="2.0" IssueInstant="2024-01-01T00:00:00Z"/>"#
+    );
     run_flow(&xml, ParserType::SamlRequest)?;
+    Ok(())
+}
+
+#[test]
+fn authn_request_issue_instant_validation_runs_for_supported_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cases = [
+        authn_request_xml(None),
+        authn_request_xml(Some("2023-02-29T00:00:00Z")),
+        authn_request_xml(Some("2024-01-01T00:00:00+00:00")),
+    ];
+    for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
+        for xml in &cases {
+            expect_profile_rejection_with_binding(xml, ParserType::SamlRequest, binding)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn authn_request_issue_instant_rejects_invalid_lexical_forms(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for issue_instant in [
+        "not-an-instant",
+        "2024-01-01_00:00:00Z",
+        "2024-01-01T00:00:00+00:00",
+        "2024-01-01T00:00:00+01:00",
+        "2024-01-01T00:00:00z",
+        "2024-01-01T00:00:60Z",
+        "2024-01-01T24:00:00.001Z",
+    ] {
+        let xml = authn_request_xml(Some(issue_instant));
+        expect_profile_rejection(&xml, ParserType::SamlRequest)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn authn_request_issue_instant_accepts_valid_utc_lexical_forms(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for issue_instant in [
+        "2000-01-01T00:00:00Z",
+        "2024-01-01T00:00:00.000Z",
+        "2024-01-01T00:00:00.123456789012Z",
+        "12345-01-01T00:00:00Z",
+        "2000-02-29T24:00:00.000Z",
+    ] {
+        let xml = authn_request_xml(Some(issue_instant));
+        run_flow(&xml, ParserType::SamlRequest)?;
+    }
     Ok(())
 }
 
@@ -213,7 +301,9 @@ fn all_parser_roots_accept_version_2() -> Result<(), Box<dyn std::error::Error>>
     let cases = [
         (
             ParserType::SamlRequest,
-            format!(r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0"/>"#),
+            format!(
+                r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0" IssueInstant="2024-01-01T00:00:00Z"/>"#
+            ),
         ),
         (
             ParserType::SamlResponse,
