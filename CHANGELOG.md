@@ -9,6 +9,25 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.2.1](https://github.com/salasebas/opensaml-rs/compare/v0.2.0...v0.2.1) - 2026-07-16
+
+### Added
+
+- *(compat)* restore maintained crate aliases
+
+### Fixed
+
+- enforce SAML 2.0 namespace and version profile ([#79](https://github.com/salasebas/opensaml-rs/pull/79))
+- honor repeated AuthnStatement session bounds ([#71](https://github.com/salasebas/opensaml-rs/pull/71))
+- *(security)* preserve SAML audience restriction groups ([#69](https://github.com/salasebas/opensaml-rs/pull/69))
+- reject repeated SAML assertion conditions ([#67](https://github.com/salasebas/opensaml-rs/pull/67))
+- *(security)* enforce SP assertion signature policy ([#70](https://github.com/salasebas/opensaml-rs/pull/70))
+- *(xml)* reject multiple document elements ([#68](https://github.com/salasebas/opensaml-rs/pull/68))
+
+### Other
+
+- add migration guide structure
+
 ### Added
 
 - *(api)* expose every `AuthnStatement` session tuple in XML order
