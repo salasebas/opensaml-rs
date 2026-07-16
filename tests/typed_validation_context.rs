@@ -157,7 +157,10 @@ fn authn_request() -> Result<AuthnRequest, SamlError> {
         extract: value_object(vec![
             (
                 "request",
-                value_object(vec![("id", value_str("_request123"))]),
+                value_object(vec![
+                    ("id", value_str("_request123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
             ("issuer", value_str("https://sp.example.com/metadata")),
         ]),

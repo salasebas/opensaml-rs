@@ -731,6 +731,7 @@ fn typed_models_authn_request_from_flow_result_exposes_typed_fields(
                 "request",
                 value_object(vec![
                     ("id", value_str("_request123")),
+                    ("issueInstant", value_str(" \t\n2024-01-01T00:00:00Z\r ")),
                     ("destination", value_str("https://idp.example.com/sso")),
                     (
                         "assertionConsumerServiceUrl",
@@ -760,6 +761,7 @@ fn typed_models_authn_request_from_flow_result_exposes_typed_fields(
     let request = AuthnRequest::try_from(flow)?;
 
     assert_eq!(request.id().as_str(), "_request123");
+    assert_eq!(request.issue_instant().as_str(), "2024-01-01T00:00:00Z");
     assert_eq!(request.issuer().as_str(), "https://sp.example.com/metadata");
     assert_eq!(
         request.destination().map(EndpointUrl::as_str),
@@ -789,7 +791,10 @@ fn typed_models_authn_request_rejects_invalid_name_id_policy_allow_create() {
         extract: value_object(vec![
             (
                 "request",
-                value_object(vec![("id", value_str("_request123"))]),
+                value_object(vec![
+                    ("id", value_str("_request123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
             ("issuer", value_str("https://sp.example.com/metadata")),
             (
@@ -806,6 +811,53 @@ fn typed_models_authn_request_rejects_invalid_name_id_policy_allow_create() {
 }
 
 #[test]
+fn typed_models_authn_request_rejects_missing_issue_instant_with_profile_context() {
+    let flow = FlowResult {
+        saml_content: "<samlp:AuthnRequest/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "request",
+                value_object(vec![("id", value_str("_request123"))]),
+            ),
+            ("issuer", value_str("https://sp.example.com/metadata")),
+        ]),
+    };
+
+    assert!(matches!(
+        AuthnRequest::try_from(flow),
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("missing required unqualified attribute IssueInstant")
+    ));
+}
+
+#[test]
+fn typed_models_authn_request_rejects_malformed_issue_instant_with_profile_context() {
+    let flow = FlowResult {
+        saml_content: "<samlp:AuthnRequest/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "request",
+                value_object(vec![
+                    ("id", value_str("_request123")),
+                    ("issueInstant", value_str("not-an-instant")),
+                ]),
+            ),
+            ("issuer", value_str("https://sp.example.com/metadata")),
+        ]),
+    };
+
+    assert!(matches!(
+        AuthnRequest::try_from(flow),
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z"
+            )
+    ));
+}
+
+#[test]
 fn typed_models_authn_request_name_id_policy_without_allow_create_is_unspecified(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let flow = FlowResult {
@@ -814,7 +866,10 @@ fn typed_models_authn_request_name_id_policy_without_allow_create_is_unspecified
         extract: value_object(vec![
             (
                 "request",
-                value_object(vec![("id", value_str("_request123"))]),
+                value_object(vec![
+                    ("id", value_str("_request123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
             ("issuer", value_str("https://sp.example.com/metadata")),
             (
@@ -845,7 +900,10 @@ fn typed_models_authn_request_without_name_id_policy_stays_absent(
         extract: value_object(vec![
             (
                 "request",
-                value_object(vec![("id", value_str("_request123"))]),
+                value_object(vec![
+                    ("id", value_str("_request123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
             ("issuer", value_str("https://sp.example.com/metadata")),
         ]),

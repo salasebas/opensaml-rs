@@ -1,6 +1,7 @@
 use crate::constants::{namespace, ParserType};
 use crate::error::SamlError;
 use crate::xml::dom::XmlLimits;
+use crate::xml::parse_saml_utc_date_time;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, XmlVersion};
@@ -122,6 +123,28 @@ fn require_version_2(
     Ok(())
 }
 
+fn require_authn_request_issue_instant(
+    values: &[(Vec<u8>, String)],
+    element: &BytesStart<'_>,
+) -> Result<(), SamlError> {
+    let issue_instant = values
+        .iter()
+        .find_map(|(name, value)| (name == b"IssueInstant").then_some(value.as_str()))
+        .ok_or_else(|| {
+            profile_error(format!(
+                "{} is missing required unqualified attribute IssueInstant",
+                element_label(element),
+            ))
+        })?;
+    if parse_saml_utc_date_time(issue_instant).is_none() {
+        return Err(profile_error(format!(
+            "{} IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
+            element_label(element),
+        )));
+    }
+    Ok(())
+}
+
 fn root_consumed_attributes(parser_type: ParserType) -> &'static [&'static [u8]] {
     match parser_type {
         ParserType::SamlRequest => &[
@@ -166,13 +189,23 @@ fn validate_root(
             element_label(element),
         )));
     }
+    let required: &[&[u8]] = match parser_type {
+        ParserType::SamlRequest => &[b"ID", b"Version", b"IssueInstant"],
+        ParserType::SamlResponse | ParserType::LogoutRequest | ParserType::LogoutResponse => {
+            &[b"ID", b"Version"]
+        }
+    };
     let attributes = validate_unqualified_attributes(
         reader,
         element,
         root_consumed_attributes(parser_type),
-        &[b"ID", b"Version"],
+        required,
     )?;
-    require_version_2(&attributes, element)
+    require_version_2(&attributes, element)?;
+    if parser_type == ParserType::SamlRequest {
+        require_authn_request_issue_instant(&attributes, element)?;
+    }
+    Ok(())
 }
 
 fn expected_child_namespace(stack: &[ExpandedName], child: &[u8]) -> Option<NamespaceKind> {

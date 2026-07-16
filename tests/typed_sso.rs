@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use saml_rs::binding::{base64_decode, deflate_raw_decode};
+use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode};
 use saml_rs::error::TimeWindowField;
 use saml_rs::raw::Binding;
 use saml_rs::{
@@ -117,6 +117,23 @@ fn facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
     Ok((Saml::sp(sp_config()?)?, Saml::idp(idp_config()?)?))
 }
 
+fn compatibility_facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
+    let sp = SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
+        .acs_endpoint(AcsEndpoint::simple_sign(SP_ACS_SIMPLESIGN)?)
+        .credentials(credentials())
+        .validation(SpValidationPolicy::compatibility())
+        .build()?;
+    let idp = IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+        .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+        .sso_endpoint(SsoEndpoint::redirect(IDP_SSO_REDIRECT)?)
+        .sso_endpoint(SsoEndpoint::simple_sign(IDP_SSO_SIMPLESIGN)?)
+        .credentials(credentials())
+        .validation(IdpValidationPolicy::compatibility())
+        .build()?;
+    Ok((Saml::sp(sp)?, Saml::idp(idp)?))
+}
+
 fn hostile_facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
     Ok((
         Saml::sp(hostile_sp_config()?)?,
@@ -195,6 +212,29 @@ fn authn_request_input(
         )?)),
         Binding::Artifact => Err("artifact binding is unsupported".into()),
     }
+}
+
+fn post_authn_request_input_with_xml(xml: &str) -> BrowserInput<AuthnRequest> {
+    BrowserInput::<AuthnRequest>::post(vec![FormField::new(
+        "SAMLRequest",
+        base64_encode(xml.as_bytes()),
+    )])
+}
+
+fn replace_issue_instant(
+    xml: &str,
+    replacement: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let (before, after) = xml
+        .split_once(" IssueInstant=\"")
+        .ok_or("missing IssueInstant attribute")?;
+    let (_, after) = after
+        .split_once('"')
+        .ok_or("unterminated IssueInstant attribute")?;
+    let replacement = replacement
+        .map(|value| format!(" IssueInstant=\"{value}\""))
+        .unwrap_or_default();
+    Ok(format!("{before}{replacement}{after}"))
 }
 
 struct SsoExchange {
@@ -426,6 +466,82 @@ fn typed_detached_authn_requests_parse_with_relay_state() -> Result<(), Box<dyn 
             Some("signed-state")
         );
     }
+    Ok(())
+}
+
+#[test]
+fn typed_facade_rejects_missing_authn_request_issue_instant_in_real_flow(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = compatibility_facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let xml = replace_issue_instant(&authn_request_xml(&started.outbound)?, None)?;
+
+    match idp.receive_sso(
+        &sp_descriptor,
+        post_authn_request_input_with_xml(&xml),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("missing required unqualified attribute IssueInstant") =>
+        {
+            Ok(())
+        }
+        other => {
+            Err(format!("expected missing IssueInstant ProtocolProfile, got {other:?}").into())
+        }
+    }
+}
+
+#[test]
+fn typed_facade_rejects_malformed_authn_request_issue_instant_in_real_flow(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = compatibility_facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let xml = replace_issue_instant(
+        &authn_request_xml(&started.outbound)?,
+        Some("not-an-instant"),
+    )?;
+
+    match idp.receive_sso(
+        &sp_descriptor,
+        post_authn_request_input_with_xml(&xml),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
+            ) =>
+        {
+            Ok(())
+        }
+        other => {
+            Err(format!("expected malformed IssueInstant ProtocolProfile, got {other:?}").into())
+        }
+    }
+}
+
+#[test]
+fn typed_facade_accepts_old_normalized_authn_request_issue_instant_in_real_flow(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = compatibility_facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let xml = replace_issue_instant(
+        &authn_request_xml(&started.outbound)?,
+        Some(" &#x9;2001-01-01T00:00:00Z&#xA; "),
+    )?;
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        post_authn_request_input_with_xml(&xml),
+        validation(),
+    )?;
+
+    assert_eq!(
+        received.message().issue_instant().as_str(),
+        "2001-01-01T00:00:00Z"
+    );
     Ok(())
 }
 

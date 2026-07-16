@@ -1,5 +1,5 @@
 use super::extract::{name_id_policy_from_extract, optional_endpoint, optional_u16, required_str};
-use super::identifiers::MessageId;
+use super::identifiers::{MessageId, SamlInstant};
 use super::subject::NameIdPolicy;
 use super::{EndpointUrl, ReplayKey, SamlValidationContext};
 use crate::browser::SsoResponseBinding;
@@ -7,11 +7,13 @@ use crate::config::EntityId;
 use crate::constants::Binding;
 use crate::error::SamlError;
 use crate::raw::FlowResult;
+use crate::xml::parse_saml_utc_date_time;
 
 /// Parsed AuthnRequest result.
 #[derive(Debug, Clone)]
 pub struct AuthnRequest {
     id: MessageId,
+    issue_instant: SamlInstant,
     issuer: EntityId,
     destination: Option<EndpointUrl>,
     acs_url: Option<EndpointUrl>,
@@ -25,6 +27,11 @@ impl AuthnRequest {
     /// Request ID.
     pub fn id(&self) -> &MessageId {
         &self.id
+    }
+
+    /// Request `IssueInstant`, normalized according to XML Schema whitespace rules.
+    pub fn issue_instant(&self) -> &SamlInstant {
+        &self.issue_instant
     }
 
     /// Request issuer.
@@ -82,6 +89,7 @@ impl TryFrom<FlowResult> for AuthnRequest {
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
         let id = MessageId::try_new(required_str(&raw_flow.extract, "request.id")?)?;
+        let issue_instant = issue_instant_from_extract(&raw_flow.extract)?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let destination = optional_endpoint(&raw_flow.extract, "request.destination")?;
         let acs_url = optional_endpoint(&raw_flow.extract, "request.assertionConsumerServiceUrl")?;
@@ -90,6 +98,7 @@ impl TryFrom<FlowResult> for AuthnRequest {
         let name_id_policy = name_id_policy_from_extract(&raw_flow.extract)?;
         Ok(Self {
             id,
+            issue_instant,
             issuer,
             destination,
             acs_url,
@@ -99,6 +108,21 @@ impl TryFrom<FlowResult> for AuthnRequest {
             raw_flow,
         })
     }
+}
+
+fn issue_instant_from_extract(extract: &crate::util::Value) -> Result<SamlInstant, SamlError> {
+    let issue_instant = extract.get_str("request.issueInstant").ok_or_else(|| {
+        SamlError::ProtocolProfile(
+            "AuthnRequest is missing required unqualified attribute IssueInstant".into(),
+        )
+    })?;
+    let issue_instant = parse_saml_utc_date_time(issue_instant).ok_or_else(|| {
+        SamlError::ProtocolProfile(
+            "AuthnRequest IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z"
+                .into(),
+        )
+    })?;
+    SamlInstant::try_new(issue_instant)
 }
 
 fn optional_response_binding(
