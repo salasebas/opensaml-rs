@@ -15,6 +15,10 @@ const ASSERTION_NS: &str = "urn:oasis:names:tc:SAML:2.0:assertion";
 const MISSING_ISSUE_INSTANT_CONTEXT: &str = "missing required unqualified attribute IssueInstant";
 const MALFORMED_ISSUE_INSTANT_CONTEXT: &str =
     "IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z";
+const LOGOUT_RESPONSE_MISSING_ISSUE_INSTANT_CONTEXT: &str =
+    "LogoutResponse is missing required unqualified attribute IssueInstant";
+const LOGOUT_RESPONSE_MALFORMED_ISSUE_INSTANT_CONTEXT: &str =
+    "LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z";
 #[cfg(feature = "crypto-bergshamra")]
 const PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 #[cfg(feature = "crypto-bergshamra")]
@@ -96,6 +100,15 @@ fn authn_request_xml(issue_instant: Option<&str>) -> String {
         .unwrap_or_default();
     format!(
         r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" ID="_request" Version="2.0"{issue_instant}/>"#
+    )
+}
+
+fn logout_response_xml(issue_instant: Option<&str>) -> String {
+    let issue_instant = issue_instant
+        .map(|value| format!(r#" IssueInstant="{value}""#))
+        .unwrap_or_default();
+    format!(
+        r#"<p:LogoutResponse xmlns:p="{PROTOCOL_NS}" ID="_response" Version="2.0"{issue_instant}><p:Status><p:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></p:Status></p:LogoutResponse>"#
     )
 }
 
@@ -189,7 +202,7 @@ fn authn_request_issue_instant_rejects_invalid_lexical_forms(
 }
 
 #[test]
-fn authn_request_issue_instant_rejects_leap_seconds_per_saml(
+fn authn_request_issue_instant_rejects_leap_seconds_under_strict_receiver_policy(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let xml = authn_request_xml(Some("2024-01-01T00:00:60Z"));
 
@@ -226,6 +239,70 @@ fn authn_request_issue_instant_collapses_surrounding_xml_schema_whitespace(
         let xml = authn_request_xml(Some(issue_instant));
         run_flow(&xml, ParserType::SamlRequest)?;
     }
+    Ok(())
+}
+
+#[test]
+fn logout_response_issue_instant_validation_precedes_signature_handling_for_supported_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cases = [
+        (
+            logout_response_xml(None),
+            LOGOUT_RESPONSE_MISSING_ISSUE_INSTANT_CONTEXT,
+        ),
+        (
+            logout_response_xml(Some("not-an-instant")),
+            LOGOUT_RESPONSE_MALFORMED_ISSUE_INSTANT_CONTEXT,
+        ),
+        (
+            logout_response_xml(Some("2024-01-01T00:00:00+00:00")),
+            LOGOUT_RESPONSE_MALFORMED_ISSUE_INSTANT_CONTEXT,
+        ),
+    ];
+    for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
+        for (xml, context) in &cases {
+            expect_profile_rejection_with_binding_and_context(
+                xml,
+                ParserType::LogoutResponse,
+                binding,
+                context,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn logout_response_issue_instant_rejects_leap_seconds_under_strict_receiver_policy(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = logout_response_xml(Some("2024-01-01T00:00:60Z"));
+
+    expect_profile_rejection_with_context(
+        &xml,
+        ParserType::LogoutResponse,
+        LOGOUT_RESPONSE_MALFORMED_ISSUE_INSTANT_CONTEXT,
+    )
+}
+
+#[test]
+fn logout_response_issue_instant_collapses_surrounding_xml_schema_whitespace(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for issue_instant in [
+        " \t\n\r2000-01-01T00:00:00Z \t\n\r",
+        "&#x9;&#xA;&#xD;2000-01-01T00:00:00Z&#x20;&#x9;",
+    ] {
+        let xml = logout_response_xml(Some(issue_instant));
+        run_flow(&xml, ParserType::LogoutResponse)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn logout_response_issue_instant_accepts_old_valid_utc_value(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = logout_response_xml(Some("2000-01-01T00:00:00Z"));
+
+    run_flow(&xml, ParserType::LogoutResponse)?;
     Ok(())
 }
 
@@ -383,7 +460,9 @@ fn all_parser_roots_require_version_2() -> Result<(), Box<dyn std::error::Error>
         ),
         (
             ParserType::LogoutResponse,
-            format!(r#"<p:LogoutResponse xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0"/>"#),
+            format!(
+                r#"<p:LogoutResponse xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0" IssueInstant="2026-01-01T00:00:00Z"/>"#
+            ),
         ),
     ];
     for (parser_type, xml) in cases {
@@ -412,7 +491,7 @@ fn all_parser_roots_accept_version_2() -> Result<(), Box<dyn std::error::Error>>
         (
             ParserType::LogoutResponse,
             format!(
-                r#"<p:LogoutResponse xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0"><p:Status><p:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></p:Status></p:LogoutResponse>"#
+                r#"<p:LogoutResponse xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0" IssueInstant="2026-01-01T00:00:00Z"><p:Status><p:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></p:Status></p:LogoutResponse>"#
             ),
         ),
     ];

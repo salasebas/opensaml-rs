@@ -1,5 +1,5 @@
 use super::*;
-use crate::binding::{base64_decode, deflate_raw_decode};
+use crate::binding::{base64_decode, base64_encode, deflate_raw_decode};
 use crate::constants::Binding;
 use crate::entity::{EntitySetting, User};
 use crate::error::SamlError;
@@ -54,6 +54,37 @@ fn unsigned_sp(entity_id: &str) -> Result<ServiceProvider, SamlError> {
             ..Default::default()
         },
         unsigned_setting(),
+    )
+}
+
+fn logout_response_request(issue_instant_attribute: &str) -> HttpRequest {
+    let xml = format!(
+        r#"<samlp:LogoutResponse
+    xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+    ID="_response1" Version="2.0" {issue_instant_attribute}
+    Destination="https://sp/slo" InResponseTo="_req1">
+  <saml:Issuer>https://idp.example.com/metadata</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+</samlp:LogoutResponse>"#
+    );
+    HttpRequest::post(vec![("SAMLResponse".into(), base64_encode(xml.as_bytes()))])
+}
+
+fn parse_unsigned_logout_response(
+    issue_instant_attribute: &str,
+) -> Result<crate::flow::FlowResult, SamlError> {
+    let mut sp = sp()?;
+    let idp = idp()?;
+    sp.setting.want_logout_response_signed = false;
+    parse_logout_response(
+        &sp.setting,
+        &idp.metadata,
+        Binding::Post,
+        &logout_response_request(issue_instant_attribute),
+        "_req1",
     )
 }
 
@@ -196,6 +227,51 @@ fn logout_response_post_round_trips() -> Result<(), Box<dyn std::error::Error>> 
     assert_eq!(
         result.extract.get_str("issuer"),
         Some("https://idp.example.com/metadata")
+    );
+    Ok(())
+}
+
+#[test]
+fn logout_response_rejects_missing_issue_instant() {
+    let result = parse_unsigned_logout_response("");
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("LogoutResponse is missing required unqualified attribute IssueInstant")
+    ));
+}
+
+#[test]
+fn logout_response_rejects_malformed_issue_instant() {
+    let result = parse_unsigned_logout_response("IssueInstant=\"not-a-date\"");
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z")
+    ));
+}
+
+#[test]
+fn logout_response_rejects_non_utc_issue_instant() {
+    let result = parse_unsigned_logout_response("IssueInstant=\"2024-01-01T00:00:00+00:00\"");
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z")
+    ));
+}
+
+#[test]
+fn logout_response_accepts_well_formed_utc_issue_instant_without_age_policy(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parsed = parse_unsigned_logout_response("IssueInstant=\"2000-01-01T00:00:00Z\"")?;
+
+    assert_eq!(
+        parsed.extract.get_str("response.issueInstant"),
+        Some("2000-01-01T00:00:00Z")
     );
     Ok(())
 }

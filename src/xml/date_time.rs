@@ -80,6 +80,8 @@ pub(crate) fn parse_saml_utc_date_time(value: &str) -> Option<&str> {
     let hour = parse_two_ascii_digits(bytes, year_separator + 7)?;
     let minute = parse_two_ascii_digits(bytes, year_separator + 10)?;
     let second = parse_two_ascii_digits(bytes, year_separator + 13)?;
+    // SAML Core 2.0 §1.3.3 forbids producers from generating leap seconds, so
+    // this receiver rejects rather than normalizes that non-conformant input.
     if !is_valid_calendar_day(year, negative_year, month, day) || minute > 59 || second > 59 {
         return None;
     }

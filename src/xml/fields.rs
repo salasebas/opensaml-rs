@@ -114,6 +114,7 @@ pub fn logout_response_fields() -> Vec<ExtractorField> {
     vec![
         ExtractorField::new("response", &["LogoutResponse"]).attrs(&[
             "ID",
+            "IssueInstant",
             "Destination",
             "InResponseTo",
         ]),
