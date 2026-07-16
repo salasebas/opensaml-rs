@@ -462,6 +462,7 @@ pub(crate) struct SignatureVerification {
     verified: bool,
     signed_content: Option<String>,
     assertion_directly_covered: bool,
+    response_covered: bool,
 }
 
 impl SignatureVerification {
@@ -471,6 +472,10 @@ impl SignatureVerification {
 
     pub(crate) fn assertion_directly_covered(&self) -> bool {
         self.assertion_directly_covered
+    }
+
+    pub(crate) fn response_covered(&self) -> bool {
+        self.response_covered
     }
 
     pub(crate) fn into_signed_content(self) -> Option<String> {
@@ -501,6 +506,7 @@ pub(crate) fn verify_signatures_detailed_with_limits(
             verified: false,
             signed_content: None,
             assertion_directly_covered: false,
+            response_covered: false,
         });
     }
     preflight_saml_reference_uris(&signature_candidates)?;
@@ -557,10 +563,13 @@ pub(crate) fn verify_signatures_detailed_with_limits(
     }
     if first_signature_verified && !targets.is_empty() {
         let assertion_directly_covered = assertion_is_directly_covered(root, &targets);
+        let response_covered =
+            root.local_name.contains("Response") && response_is_covered(&targets, root);
         return Ok(SignatureVerification {
             verified: true,
             signed_content: verified_content(root, xml, &targets)?,
             assertion_directly_covered,
+            response_covered,
         });
     }
     match last_err {
@@ -569,6 +578,7 @@ pub(crate) fn verify_signatures_detailed_with_limits(
             verified: false,
             signed_content: None,
             assertion_directly_covered: false,
+            response_covered: false,
         }),
     }
 }
@@ -975,7 +985,7 @@ mod tests {
             &[IDP_CERT.to_string()],
             XmlLimits::default(),
         )?;
-        assert!(!result.verified());
+        assert!(!result.verified() && !result.response_covered());
         Ok(())
     }
 
@@ -997,7 +1007,9 @@ mod tests {
             &[SP_SIGNING_CERT.to_string(), IDP_CERT.to_string()],
             XmlLimits::default(),
         )?;
-        assert!(result.verified() && result.assertion_directly_covered());
+        assert!(
+            result.verified() && result.assertion_directly_covered() && result.response_covered()
+        );
         Ok(())
     }
 

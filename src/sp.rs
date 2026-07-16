@@ -8,7 +8,7 @@ use crate::entity::{
 use crate::error::SamlError;
 use crate::flow::{
     flow_with_expected_recipient, AssertionSignatureRequirement, FlowOptions, FlowResult,
-    HttpRequest,
+    HttpRequest, MessageSignatureRequirement,
 };
 use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
@@ -663,6 +663,11 @@ impl ServiceProvider {
                 AssertionSignatureRequirement::Direct
             } else {
                 AssertionSignatureRequirement::Compatible
+            },
+            if self.setting.want_message_signed {
+                MessageSignatureRequirement::Response
+            } else {
+                MessageSignatureRequirement::Compatible
             },
         )?;
         if matches!(correlation, LoginResponseCorrelation::Unsolicited)

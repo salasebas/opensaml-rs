@@ -7,7 +7,7 @@
 #![cfg(feature = "crypto-bergshamra")]
 #![allow(clippy::unwrap_used)]
 
-use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_encode};
+use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode, deflate_raw_encode};
 use saml_rs::constants::signature_algorithm::RSA_SHA256;
 use saml_rs::constants::Binding;
 use saml_rs::entity::{iso8601_offset, BindingContext, EntitySetting, User};
@@ -656,6 +656,28 @@ fn send_signed_assertion(binding: Binding) -> Result<(), Box<dyn std::error::Err
 fn flow_conformance_send_signed_assertion_post() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_assertion(Binding::Post)
 }
+
+#[test]
+fn flow_conformance_strict_message_signature_rejects_assertion_only_post(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let compatible_sp = sp(true, false);
+    let mut strict_setting = signing();
+    strict_setting.want_message_signed = true;
+    let strict_sp = ServiceProvider::from_config(&sp_config(false, true, false), strict_setting)?;
+    let ctx = idp.create_login_response(
+        &compatible_sp,
+        Binding::Post,
+        &User::new("assertion-only@example.com"),
+        &opts("_r"),
+    )?;
+
+    match parse_response_with_request_id(&strict_sp, &idp, Binding::Post, &ctx, "_r") {
+        Err(SamlError::SignedReferenceMismatch) => Ok(()),
+        other => Err(format!("expected SignedReferenceMismatch, got {other:?}").into()),
+    }
+}
+
 #[test]
 fn flow_conformance_send_signed_assertion_redirect() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_assertion(Binding::Redirect)
@@ -757,6 +779,29 @@ fn flow_conformance_send_signed_message_post() -> Result<(), Box<dyn std::error:
 }
 
 #[test]
+fn flow_conformance_strict_message_signature_accepts_response_signed_post(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let compatible_sp = sp(false, false);
+    let mut strict_setting = signing();
+    strict_setting.want_message_signed = true;
+    let strict_sp = ServiceProvider::from_config(&sp_config(false, false, false), strict_setting)?;
+    let ctx = idp.create_login_response(
+        &compatible_sp,
+        Binding::Post,
+        &User::new("response-signed@example.com"),
+        &opts("_r"),
+    )?;
+
+    let parsed = parse_response_with_request_id(&strict_sp, &idp, Binding::Post, &ctx, "_r")?;
+    assert_eq!(
+        parsed.extract.get_str("nameID"),
+        Some("response-signed@example.com")
+    );
+    Ok(())
+}
+
+#[test]
 fn flow_conformance_strict_assertion_signature_rejects_response_only_post(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
@@ -802,6 +847,62 @@ fn flow_conformance_send_signed_message_redirect() -> Result<(), Box<dyn std::er
 #[test]
 fn flow_conformance_send_signed_message_simplesign() -> Result<(), Box<dyn std::error::Error>> {
     send_signed_message(Binding::SimpleSign)
+}
+
+fn strict_message_signature_accepts_detached_without_embedded_signature(
+    binding: Binding,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let idp = idp(false);
+    let compatible_sp = sp(false, false);
+    let mut strict_setting = signing();
+    strict_setting.want_message_signed = true;
+    let strict_sp = ServiceProvider::from_config(&sp_config(false, false, false), strict_setting)?;
+    let ctx = idp.create_login_response(
+        &compatible_sp,
+        binding,
+        &User::new("detached@example.com"),
+        &opts("_r"),
+    )?;
+    let request = response_request(binding, &ctx)?;
+    let params = match binding {
+        Binding::Redirect => &request.query,
+        Binding::SimpleSign => &request.body,
+        Binding::Post | Binding::Artifact => return Err("expected detached binding".into()),
+    };
+    let encoded = params
+        .iter()
+        .find(|(name, _)| name == "SAMLResponse")
+        .map(|(_, value)| value.as_str())
+        .ok_or("missing bound SAMLResponse")?;
+    let decoded = base64_decode(encoded)?;
+    let xml = match binding {
+        Binding::Redirect => deflate_raw_decode(&decoded)?,
+        Binding::SimpleSign => decoded,
+        Binding::Post | Binding::Artifact => return Err("expected detached binding".into()),
+    };
+    let xml = String::from_utf8(xml)?;
+    if xml.contains("<ds:Signature") {
+        return Err("expected detached-only response fixture".into());
+    }
+
+    let parsed = parse_response_with_request_id(&strict_sp, &idp, binding, &ctx, "_r")?;
+    assert_eq!(
+        parsed.extract.get_str("nameID"),
+        Some("detached@example.com")
+    );
+    Ok(())
+}
+
+#[test]
+fn flow_conformance_strict_message_signature_accepts_redirect_detached_signature(
+) -> Result<(), Box<dyn std::error::Error>> {
+    strict_message_signature_accepts_detached_without_embedded_signature(Binding::Redirect)
+}
+
+#[test]
+fn flow_conformance_strict_message_signature_accepts_simplesign_detached_signature(
+) -> Result<(), Box<dyn std::error::Error>> {
+    strict_message_signature_accepts_detached_without_embedded_signature(Binding::SimpleSign)
 }
 
 // ----- [custom template] signed message (34-36) -----
@@ -988,6 +1089,33 @@ fn flow_conformance_encrypted_signed_assertion() -> Result<(), Box<dyn std::erro
 fn flow_conformance_encrypted_custom_signed_assertion() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(true, false)
 }
+
+#[test]
+fn flow_conformance_strict_message_signature_rejects_encrypted_assertion_only_post(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut idp_setting = signing();
+    idp_setting.is_assertion_encrypted = true;
+    let idp = IdentityProvider::from_config(&idp_config(false), idp_setting)?;
+    let compatible_sp = sp(true, true);
+    let mut strict_setting = signing();
+    strict_setting.is_assertion_encrypted = true;
+    strict_setting.enc_private_key = Some(PRIVKEY.into());
+    strict_setting.allow_insecure_software_rsa_key_transport_decryption = true;
+    strict_setting.want_message_signed = true;
+    let strict_sp = ServiceProvider::from_config(&sp_config(false, true, true), strict_setting)?;
+    let ctx = idp.create_login_response(
+        &compatible_sp,
+        Binding::Post,
+        &User::new("encrypted-assertion-only@example.com"),
+        &opts("_r"),
+    )?;
+
+    match parse_response_with_request_id(&strict_sp, &idp, Binding::Post, &ctx, "_r") {
+        Err(SamlError::SignatureMissing) => Ok(()),
+        other => Err(format!("expected SignatureMissing, got {other:?}").into()),
+    }
+}
+
 #[test]
 fn flow_conformance_encrypted_signed_assertion_and_message(
 ) -> Result<(), Box<dyn std::error::Error>> {

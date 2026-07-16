@@ -160,6 +160,12 @@ pub(crate) enum AssertionSignatureRequirement {
     Direct,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MessageSignatureRequirement {
+    Compatible,
+    Response,
+}
+
 /// Result of a successful flow.
 #[derive(Debug, Clone)]
 pub struct FlowResult {
@@ -372,26 +378,29 @@ fn verify_embedded_signature(
     xml: &str,
     opts: &FlowOptions<'_>,
     assertion_signature: AssertionSignatureRequirement,
-) -> Result<(bool, Option<String>, bool), SamlError> {
+    message_signature: MessageSignatureRequirement,
+) -> Result<(bool, Option<String>, bool, bool), SamlError> {
     use crate::crypto::verify::{
         verify_signature_with_limits, verify_signatures_detailed_with_limits,
     };
 
-    match assertion_signature {
-        AssertionSignatureRequirement::Compatible => {
+    match (assertion_signature, message_signature) {
+        (AssertionSignatureRequirement::Compatible, MessageSignatureRequirement::Compatible) => {
             let (verified, signed_content) =
                 verify_signature_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
-            Ok((verified, signed_content, false))
+            Ok((verified, signed_content, false, false))
         }
-        AssertionSignatureRequirement::Direct => {
+        _ => {
             let verification =
                 verify_signatures_detailed_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
             let verified = verification.verified();
             let assertion_directly_covered = verification.assertion_directly_covered();
+            let response_covered = verification.response_covered();
             Ok((
                 verified,
                 verification.into_signed_content(),
                 assertion_directly_covered,
+                response_covered,
             ))
         }
     }
@@ -408,6 +417,17 @@ fn require_direct_assertion_coverage(
     Ok(())
 }
 
+#[cfg(feature = "crypto-bergshamra")]
+fn require_response_coverage(
+    message_signature: MessageSignatureRequirement,
+    response_covered: bool,
+) -> Result<(), SamlError> {
+    if message_signature == MessageSignatureRequirement::Response && !response_covered {
+        return Err(SamlError::SignedReferenceMismatch);
+    }
+    Ok(())
+}
+
 /// Verify and optionally decrypt the message, returning the authenticated
 /// `(saml_content, assertion)`. Requires `crypto-bergshamra`.
 #[cfg(feature = "crypto-bergshamra")]
@@ -416,6 +436,7 @@ fn verify_and_prepare(
     parser_type: ParserType,
     opts: &FlowOptions<'_>,
     assertion_signature: AssertionSignatureRequirement,
+    message_signature: MessageSignatureRequirement,
 ) -> Result<(String, Option<String>), SamlError> {
     use crate::crypto::{
         decrypt_assertion_with_limits,
@@ -425,8 +446,14 @@ fn verify_and_prepare(
     };
 
     let signature_present = has_xml_signature_with_limits(xml, opts.xml_limits)?;
-    let (verified, verified_node, assertion_directly_covered) =
-        verify_embedded_signature(xml, opts, assertion_signature)?;
+    let (verified, verified_node, assertion_directly_covered, response_covered) =
+        verify_embedded_signature(xml, opts, assertion_signature, message_signature)?;
+    if message_signature == MessageSignatureRequirement::Response {
+        if !verified {
+            return Err(required_xml_signature_failed(signature_present));
+        }
+        require_response_coverage(message_signature, response_covered)?;
+    }
     let decrypt_required = opts.decrypt_key.is_some();
     if decrypt_required && !opts.allow_insecure_software_rsa_key_transport_decryption {
         return Err(software_rsa_decryption_disabled());
@@ -452,8 +479,13 @@ fn verify_and_prepare(
             if assertion_signature == AssertionSignatureRequirement::Direct {
                 let decrypted_signature_present =
                     has_xml_signature_with_limits(&assertion, opts.xml_limits)?;
-                let (decrypted_verified, _, decrypted_assertion_covered) =
-                    verify_embedded_signature(&assertion, opts, assertion_signature)?;
+                let (decrypted_verified, _, decrypted_assertion_covered, _) =
+                    verify_embedded_signature(
+                        &assertion,
+                        opts,
+                        assertion_signature,
+                        MessageSignatureRequirement::Compatible,
+                    )?;
                 if !decrypted_verified {
                     return Err(required_xml_signature_failed(decrypted_signature_present));
                 }
@@ -477,8 +509,12 @@ fn verify_and_prepare(
             content.as_str()
         };
         let signature_present = has_xml_signature_with_limits(verification_xml, opts.xml_limits)?;
-        let (re_verified, re_node, re_assertion_directly_covered) =
-            verify_embedded_signature(verification_xml, opts, assertion_signature)?;
+        let (re_verified, re_node, re_assertion_directly_covered, _) = verify_embedded_signature(
+            verification_xml,
+            opts,
+            assertion_signature,
+            MessageSignatureRequirement::Compatible,
+        )?;
         return if re_verified {
             require_direct_assertion_coverage(assertion_signature, re_assertion_directly_covered)?;
             let verified_assertion = if assertion_signature == AssertionSignatureRequirement::Direct
@@ -512,6 +548,7 @@ fn verify_and_prepare(
     _parser_type: ParserType,
     _opts: &FlowOptions<'_>,
     _assertion_signature: AssertionSignatureRequirement,
+    _message_signature: MessageSignatureRequirement,
 ) -> Result<(String, Option<String>), SamlError> {
     Err(SamlError::Unsupported(
         "signature verification requires feature crypto-bergshamra".into(),
@@ -810,6 +847,7 @@ fn flow_inner(
     request: &HttpRequest,
     expected_recipient: Option<&str>,
     assertion_signature: AssertionSignatureRequirement,
+    message_signature: MessageSignatureRequirement,
 ) -> Result<FlowResult, SamlError> {
     let binding = opts
         .binding
@@ -836,7 +874,13 @@ fn flow_inner(
                 let (saml_content, assertion) = if parser_type == ParserType::SamlResponse
                     && assertion_signature == AssertionSignatureRequirement::Direct
                 {
-                    verify_and_prepare(&xml, parser_type, opts, assertion_signature)?
+                    verify_and_prepare(
+                        &xml,
+                        parser_type,
+                        opts,
+                        assertion_signature,
+                        MessageSignatureRequirement::Compatible,
+                    )?
                 } else {
                     let assertion = if parser_type == ParserType::SamlResponse {
                         assertion_shortcut(&xml, opts.xml_limits)?
@@ -848,8 +892,13 @@ fn flow_inner(
                 (saml_content, assertion, Some(sig_alg))
             }
             _ => {
-                let (content, assertion) =
-                    verify_and_prepare(&xml, parser_type, opts, assertion_signature)?;
+                let (content, assertion) = verify_and_prepare(
+                    &xml,
+                    parser_type,
+                    opts,
+                    assertion_signature,
+                    message_signature,
+                )?;
                 (content, assertion, None)
             }
         }
@@ -886,6 +935,7 @@ pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult,
         request,
         None,
         AssertionSignatureRequirement::Compatible,
+        MessageSignatureRequirement::Compatible,
     )
 }
 
@@ -894,6 +944,13 @@ pub(crate) fn flow_with_expected_recipient(
     request: &HttpRequest,
     expected_recipient: &str,
     assertion_signature: AssertionSignatureRequirement,
+    message_signature: MessageSignatureRequirement,
 ) -> Result<FlowResult, SamlError> {
-    flow_inner(opts, request, Some(expected_recipient), assertion_signature)
+    flow_inner(
+        opts,
+        request,
+        Some(expected_recipient),
+        assertion_signature,
+        message_signature,
+    )
 }

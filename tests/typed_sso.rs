@@ -10,11 +10,11 @@ use saml_rs::error::TimeWindowField;
 use saml_rs::raw::Binding;
 use saml_rs::{
     AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, ForceAuthn,
-    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId,
-    NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
-    RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, Saml, SamlError,
-    SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse,
-    SsoResponseBinding, StartSso, Subject,
+    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MessageSignaturePolicy,
+    MetadataTrustPolicy, NameId, NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot,
+    PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso,
+    Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
+    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject,
 };
 use url::Url;
 
@@ -76,6 +76,19 @@ fn credentials() -> Credentials {
 }
 
 fn sp_config() -> Result<SpConfig, SamlError> {
+    let validation = SpValidationPolicy {
+        messages: MessageSignaturePolicy::AllowUnsignedForCompatibility,
+        ..SpValidationPolicy::strict()
+    };
+    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
+        .acs_endpoint(AcsEndpoint::simple_sign(SP_ACS_SIMPLESIGN)?)
+        .credentials(credentials())
+        .validation(validation)
+        .build()
+}
+
+fn strict_sp_config() -> Result<SpConfig, SamlError> {
     SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
         .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
         .acs_endpoint(AcsEndpoint::simple_sign(SP_ACS_SIMPLESIGN)?)
@@ -689,6 +702,31 @@ fn typed_facade_runs_sp_initiated_sso() -> Result<(), Box<dyn std::error::Error>
     );
     assert_eq!(exchange.sp_descriptor.entity_id().as_str(), SP_ENTITY_ID);
     Ok(())
+}
+
+#[test]
+fn typed_strict_sp_rejects_metadata_only_idp_assertion_only_post(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(strict_sp_config()?)?;
+    let idp = Saml::idp(idp_config()?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    )?;
+    let response = idp.respond_sso(&sp_descriptor, &received, subject(), RespondSso::post())?;
+
+    match sp.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::post(post_fields(&response)?),
+        validation(),
+    ) {
+        Err(SamlError::SignedReferenceMismatch) => Ok(()),
+        other => Err(format!("expected SignedReferenceMismatch, got {other:?}").into()),
+    }
 }
 
 #[test]
