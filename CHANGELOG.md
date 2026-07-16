@@ -9,6 +9,16 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.3.0](https://github.com/salasebas/opensaml-rs/compare/v0.2.1...v0.3.0) - 2026-07-16
+
+### Fixed
+
+- *(api)* [**breaking**] avoid exposing time crate types ([#72](https://github.com/salasebas/opensaml-rs/pull/72))
+
+### Other
+
+- *(migrations)* add 0.2 to 0.3 guide ([#83](https://github.com/salasebas/opensaml-rs/pull/83))
+
 ## [0.2.1](https://github.com/salasebas/opensaml-rs/compare/v0.2.0...v0.2.1) - 2026-07-16
 
 ### Added
