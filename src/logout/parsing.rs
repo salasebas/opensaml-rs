@@ -3,7 +3,7 @@ use crate::entity::EntitySetting;
 use crate::error::SamlError;
 use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::Metadata;
-use time::OffsetDateTime;
+use std::time::SystemTime;
 
 /// Parse a `<LogoutRequest>` from `from`.
 ///
@@ -37,7 +37,7 @@ pub(crate) fn parse_logout_request_at(
     from_meta: &Metadata,
     binding: Binding,
     request: &HttpRequest,
-    now: OffsetDateTime,
+    now: SystemTime,
     clock_drifts: (i64, i64),
 ) -> Result<FlowResult, SamlError> {
     parse_logout_request_inner(
@@ -55,7 +55,7 @@ fn parse_logout_request_inner(
     from_meta: &Metadata,
     binding: Binding,
     request: &HttpRequest,
-    now: Option<OffsetDateTime>,
+    now: Option<SystemTime>,
     clock_drifts: (i64, i64),
 ) -> Result<FlowResult, SamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
@@ -86,7 +86,7 @@ fn parse_logout_response_inner(
     binding: Binding,
     request: &HttpRequest,
     expected_in_response_to: Option<&str>,
-    now: Option<OffsetDateTime>,
+    now: Option<SystemTime>,
     clock_drifts: (i64, i64),
 ) -> Result<FlowResult, SamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
@@ -158,7 +158,7 @@ pub(crate) fn parse_logout_response_at(
     binding: Binding,
     request: &HttpRequest,
     request_id: &str,
-    now: OffsetDateTime,
+    now: SystemTime,
     clock_drifts: (i64, i64),
 ) -> Result<FlowResult, SamlError> {
     if request_id.is_empty() {

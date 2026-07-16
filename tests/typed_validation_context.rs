@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 
 use saml_rs::binding::base64_encode;
 use saml_rs::constants::{Binding, ParserType};
@@ -6,7 +9,8 @@ use saml_rs::error::{SubjectConfirmationReason, TimeWindowField};
 use saml_rs::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use saml_rs::util::Value;
 use saml_rs::{
-    ClockSkew, ReplayCache, ReplayKey, ReplayPolicy, SamlError, SamlValidationContext, SsoSession,
+    AuthnRequest, ClockSkew, ReplayCache, ReplayKey, ReplayPolicy, SamlError,
+    SamlValidationContext, SsoSession,
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -14,15 +18,11 @@ const RESPONSE: &str = include_str!("fixtures/response.xml");
 
 #[derive(Default)]
 struct MemoryReplayCache {
-    seen: HashMap<String, OffsetDateTime>,
+    seen: HashMap<String, SystemTime>,
 }
 
 impl ReplayCache for MemoryReplayCache {
-    fn check_and_store(
-        &mut self,
-        key: ReplayKey,
-        expires_at: OffsetDateTime,
-    ) -> Result<(), SamlError> {
+    fn check_and_store(&mut self, key: ReplayKey, expires_at: SystemTime) -> Result<(), SamlError> {
         let cache_key = key.cache_key();
         if self.seen.contains_key(&cache_key) {
             return Err(SamlError::ReplayDetected { key: cache_key });
@@ -32,8 +32,8 @@ impl ReplayCache for MemoryReplayCache {
     }
 }
 
-fn instant(value: &str) -> Result<OffsetDateTime, time::error::Parse> {
-    OffsetDateTime::parse(value, &Rfc3339)
+fn instant(value: &str) -> Result<SystemTime, time::error::Parse> {
+    OffsetDateTime::parse(value, &Rfc3339).map(SystemTime::from)
 }
 
 fn response_request(xml: &str) -> HttpRequest {
@@ -148,6 +148,20 @@ fn session_flow() -> FlowResult {
 
 fn sso_session() -> Result<SsoSession, SamlError> {
     SsoSession::try_from(session_flow())
+}
+
+fn authn_request() -> Result<AuthnRequest, SamlError> {
+    AuthnRequest::try_from(FlowResult {
+        saml_content: "<samlp:AuthnRequest/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            (
+                "request",
+                value_object(vec![("id", value_str("_request123"))]),
+            ),
+            ("issuer", value_str("https://sp.example.com/metadata")),
+        ]),
+    })
 }
 
 fn remove_extract_keys(flow: &mut FlowResult, keys: &[&str]) {
@@ -328,6 +342,95 @@ fn typed_validation_context_replay_cache_stores_new_keys() -> Result<(), Box<dyn
         Some(&expected_expires_at)
     );
     Ok(())
+}
+
+#[test]
+fn typed_validation_context_replay_expiration_preserves_pre_epoch_nanoseconds(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut flow = session_flow();
+    remove_extract_keys(&mut flow, &["sessionIndex", "subjectConfirmation"]);
+    flow.extract.insert(
+        "conditions",
+        value_object(vec![(
+            "notOnOrAfter",
+            value_str("1969-12-31T23:59:59.123456789Z"),
+        )]),
+    );
+    let session = SsoSession::try_from(flow)?;
+    let mut cache = MemoryReplayCache::default();
+    let mut validation = SamlValidationContext::new(
+        instant("1969-12-31T23:59:59.123456788Z")?,
+        ReplayPolicy::RequireCache(&mut cache),
+    );
+
+    session.check_and_store_replay(&mut validation)?;
+    assert_eq!(
+        cache.seen.get("response_id:_response123"),
+        Some(&instant("1969-12-31T23:59:59.123456789Z")?)
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_validation_context_out_of_range_instant_returns_error(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let max_supported_second = time::Date::MAX
+        .with_time(time::Time::MAX)
+        .assume_utc()
+        .unix_timestamp();
+    let first_unsupported_second = u64::try_from(max_supported_second)?.saturating_add(1);
+    let out_of_range = SystemTime::UNIX_EPOCH
+        .checked_add(Duration::from_secs(first_unsupported_second))
+        .ok_or("platform SystemTime cannot represent the test instant")?;
+    let session = sso_session()?;
+    let mut cache = MemoryReplayCache::default();
+    let mut validation =
+        SamlValidationContext::new(out_of_range, ReplayPolicy::RequireCache(&mut cache));
+
+    assert_eq!(validation.now(), out_of_range);
+    match session.check_and_store_replay(&mut validation) {
+        Err(SamlError::Invalid(message)) => {
+            assert!(message.contains("validation instant"));
+            Ok(())
+        }
+        other => Err(format!("expected invalid validation instant, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_validation_context_zero_replay_retention_fails_closed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let request = authn_request()?;
+    let mut cache = MemoryReplayCache::default();
+    let mut validation =
+        SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(&mut cache))
+            .with_replay_retention(Duration::ZERO);
+
+    match request.check_and_store_replay(&mut validation) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::ReplayExpiration);
+            Ok(())
+        }
+        other => Err(format!("expected zero-retention failure, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_validation_context_replay_retention_overflow_fails_closed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let request = authn_request()?;
+    let mut cache = MemoryReplayCache::default();
+    let mut validation =
+        SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(&mut cache))
+            .with_replay_retention(Duration::MAX);
+
+    match request.check_and_store_replay(&mut validation) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::ReplayExpiration);
+            Ok(())
+        }
+        other => Err(format!("expected replay-retention overflow, got {other:?}").into()),
+    }
 }
 
 #[test]

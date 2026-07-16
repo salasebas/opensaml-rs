@@ -118,7 +118,7 @@ impl Saml<Sp> {
     ///     BrowserInput, FormField, IdpDescriptor, PendingAuthnRequest, ReplayPolicy, Saml,
     ///     SamlValidationContext, SsoResponse,
     /// };
-    /// use time::OffsetDateTime;
+    /// use std::time::SystemTime;
     ///
     /// # fn finish(
     /// #     sp: &Saml<saml_rs::Sp>,
@@ -127,7 +127,7 @@ impl Saml<Sp> {
     /// #     fields: Vec<FormField>,
     /// # ) -> Result<(), saml_rs::SamlError> {
     /// let validation = SamlValidationContext::new(
-    ///     OffsetDateTime::now_utc(),
+    ///     SystemTime::now(),
     ///     ReplayPolicy::DisabledForCompatibility,
     /// );
     /// let input = BrowserInput::<SsoResponse>::post(fields);

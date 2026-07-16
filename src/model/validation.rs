@@ -1,6 +1,7 @@
 use super::{AssertionId, MessageId};
 use crate::error::SamlError;
-use time::{Duration, OffsetDateTime};
+use std::time::{Duration, SystemTime};
+use time::OffsetDateTime;
 
 /// Clock skew applied to SAML time-window checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,23 +125,22 @@ impl ReplayKey {
 /// responses.
 ///
 /// ```
-/// use std::collections::HashMap;
+/// use std::{collections::HashMap, time::{Duration, SystemTime}};
 ///
 /// use saml_rs::{
 ///     ReplayCache, ReplayKey, ReplayPolicy, SamlError, SamlValidationContext,
 /// };
-/// use time::{Duration, OffsetDateTime};
 ///
 /// #[derive(Default)]
 /// struct MinimalReplayCache {
-///     seen: HashMap<String, OffsetDateTime>,
+///     seen: HashMap<String, SystemTime>,
 /// }
 ///
 /// impl ReplayCache for MinimalReplayCache {
 ///     fn check_and_store(
 ///         &mut self,
 ///         key: ReplayKey,
-///         expires_at: OffsetDateTime,
+///         expires_at: SystemTime,
 ///     ) -> Result<(), SamlError> {
 ///         let cache_key = key.cache_key();
 ///         if self.seen.contains_key(&cache_key) {
@@ -151,13 +151,13 @@ impl ReplayKey {
 ///     }
 /// }
 ///
-/// let now = OffsetDateTime::now_utc();
+/// let now = SystemTime::now();
 /// let mut cache = MinimalReplayCache::default();
 /// let validation = SamlValidationContext::new(
 ///     now,
 ///     ReplayPolicy::RequireCache(&mut cache),
 /// )
-/// .with_replay_retention(Duration::minutes(5));
+/// .with_replay_retention(Duration::from_secs(5 * 60));
 /// # let _ = validation;
 /// ```
 pub trait ReplayCache {
@@ -169,11 +169,7 @@ pub trait ReplayCache {
     /// Implementations should return [`SamlError::ReplayDetected`] for
     /// duplicate keys. They may also return storage-specific failures mapped
     /// to [`SamlError`] if cache access fails.
-    fn check_and_store(
-        &mut self,
-        key: ReplayKey,
-        expires_at: OffsetDateTime,
-    ) -> Result<(), SamlError>;
+    fn check_and_store(&mut self, key: ReplayKey, expires_at: SystemTime) -> Result<(), SamlError>;
 }
 
 /// Replay behavior for typed inbound browser flows.
@@ -187,7 +183,7 @@ pub enum ReplayPolicy<'a> {
 
 /// Caller-owned validation context for typed inbound SAML messages.
 pub struct SamlValidationContext<'a> {
-    now: OffsetDateTime,
+    now: SystemTime,
     clock_skew: ClockSkew,
     replay: ReplayPolicy<'a>,
     replay_retention: Option<Duration>,
@@ -195,7 +191,7 @@ pub struct SamlValidationContext<'a> {
 
 impl<'a> SamlValidationContext<'a> {
     /// Build a validation context with strict clock skew.
-    pub fn new(now: OffsetDateTime, replay: ReplayPolicy<'a>) -> Self {
+    pub fn new(now: SystemTime, replay: ReplayPolicy<'a>) -> Self {
         Self {
             now,
             clock_skew: ClockSkew::strict(),
@@ -218,7 +214,7 @@ impl<'a> SamlValidationContext<'a> {
     }
 
     /// Validation instant supplied by the caller.
-    pub fn now(&self) -> OffsetDateTime {
+    pub fn now(&self) -> SystemTime {
         self.now
     }
 
@@ -230,6 +226,10 @@ impl<'a> SamlValidationContext<'a> {
     /// Replay retention for protocol message IDs without SAML expiry.
     pub fn replay_retention(&self) -> Option<Duration> {
         self.replay_retention
+    }
+
+    pub(crate) fn now_offset(&self) -> Result<OffsetDateTime, SamlError> {
+        crate::validator::offset_datetime_from_system_time(self.now)
     }
 
     pub(crate) fn replay_policy(&mut self) -> &mut ReplayPolicy<'a> {
@@ -250,7 +250,7 @@ impl<'a> SamlValidationContext<'a> {
         }
     }
 
-    fn message_replay_expires_at(&self) -> Result<OffsetDateTime, SamlError> {
+    fn message_replay_expires_at(&self) -> Result<SystemTime, SamlError> {
         let Some(retention) = self.replay_retention else {
             return Err(SamlError::TimeWindowInvalid {
                 field: crate::error::TimeWindowField::ReplayExpiration,

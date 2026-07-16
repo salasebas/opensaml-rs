@@ -17,7 +17,7 @@ use saml_rs::{
     SpDescriptor, SpValidationPolicy, SsoEndpoint, StartSlo, StartSso, XmlEncryptionPolicy,
     XmlPolicy,
 };
-use time::OffsetDateTime;
+use std::time::SystemTime;
 
 fn idp_config(want_authn_requests_signed: bool) -> IdpMetadataConfig {
     IdpMetadataConfig {
@@ -117,10 +117,7 @@ fn typed_protocol_facades() -> Result<
 }
 
 fn typed_validation() -> SamlValidationContext<'static> {
-    SamlValidationContext::new(
-        OffsetDateTime::now_utc(),
-        ReplayPolicy::DisabledForCompatibility,
-    )
+    SamlValidationContext::new(SystemTime::now(), ReplayPolicy::DisabledForCompatibility)
 }
 
 #[test]

@@ -16,7 +16,7 @@ use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
 use crate::util::Value;
 use crate::xml::write::XmlWriter;
 use crate::xml::{extract_with_limits, ExtractorField, XmlLimits};
-use time::OffsetDateTime;
+use std::time::SystemTime;
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
@@ -66,7 +66,7 @@ enum LoginResponseCorrelation<'a> {
 
 pub(crate) struct LoginResponseParseOptions<'a> {
     expected_recipient: Option<&'a str>,
-    now: Option<OffsetDateTime>,
+    now: Option<SystemTime>,
     clock_drifts: (i64, i64),
 }
 
@@ -79,7 +79,7 @@ impl<'a> LoginResponseParseOptions<'a> {
         }
     }
 
-    pub(crate) fn at(now: OffsetDateTime, clock_drifts: (i64, i64)) -> Self {
+    pub(crate) fn at(now: SystemTime, clock_drifts: (i64, i64)) -> Self {
         Self {
             expected_recipient: None,
             now: Some(now),
@@ -545,7 +545,7 @@ impl ServiceProvider {
         idp: &IdentityProvider,
         binding: Binding,
         request: &HttpRequest,
-        now: OffsetDateTime,
+        now: SystemTime,
         clock_drifts: (i64, i64),
     ) -> Result<FlowResult, SamlError> {
         self.parse_login_response_inner(

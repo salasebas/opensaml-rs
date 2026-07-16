@@ -42,7 +42,7 @@
 //!     MetadataTrustPolicy, ReplayPolicy, Saml, SamlValidationContext, SpConfig,
 //!     SpValidationPolicy, SsoResponse, StartSso,
 //! };
-//! use time::OffsetDateTime;
+//! use std::time::SystemTime;
 //!
 //! # fn run(
 //! #     idp_metadata_xml: &str,
@@ -65,7 +65,7 @@
 //! # let _ = redirect_url;
 //!
 //! let validation = SamlValidationContext::new(
-//!     OffsetDateTime::now_utc(),
+//!     SystemTime::now(),
 //!     ReplayPolicy::DisabledForCompatibility,
 //! );
 //! let session = sp.finish_sso(
@@ -90,7 +90,7 @@
 //!     BrowserInput, FormField, IdpDescriptor, ReplayPolicy, Saml,
 //!     SamlValidationContext, SsoResponse,
 //! };
-//! use time::OffsetDateTime;
+//! use std::time::SystemTime;
 //!
 //! # fn accept(
 //! #     sp: &Saml<saml_rs::Sp>,
@@ -98,7 +98,7 @@
 //! #     form_fields: Vec<FormField>,
 //! # ) -> Result<(), saml_rs::SamlError> {
 //! let validation = SamlValidationContext::new(
-//!     OffsetDateTime::now_utc(),
+//!     SystemTime::now(),
 //!     ReplayPolicy::DisabledForCompatibility,
 //! );
 //! let session = sp.accept_unsolicited_sso(
@@ -121,7 +121,7 @@
 //!     AuthnRequest, BrowserInput, FormField, NameId, ReplayPolicy, RespondSso,
 //!     Saml, SamlValidationContext, SpDescriptor, Subject,
 //! };
-//! use time::OffsetDateTime;
+//! use std::time::SystemTime;
 //!
 //! # fn respond(
 //! #     idp: &Saml<saml_rs::Idp>,
@@ -129,7 +129,7 @@
 //! #     request_fields: Vec<FormField>,
 //! # ) -> Result<(), saml_rs::SamlError> {
 //! let validation = SamlValidationContext::new(
-//!     OffsetDateTime::now_utc(),
+//!     SystemTime::now(),
 //!     ReplayPolicy::DisabledForCompatibility,
 //! );
 //! let request = idp.receive_sso(
@@ -160,7 +160,7 @@
 //!     BrowserInput, FormField, IdpDescriptor, LogoutResponse, ReplayPolicy,
 //!     Saml, SamlValidationContext, SsoSession, StartSlo,
 //! };
-//! use time::OffsetDateTime;
+//! use std::time::SystemTime;
 //!
 //! # fn logout(
 //! #     sp: &Saml<saml_rs::Sp>,
@@ -171,7 +171,7 @@
 //! if let Some(subject) = session.logout_subject() {
 //!     let started = sp.start_slo(idp, subject, StartSlo::post())?;
 //!     let validation = SamlValidationContext::new(
-//!         OffsetDateTime::now_utc(),
+//!         SystemTime::now(),
 //!         ReplayPolicy::DisabledForCompatibility,
 //!     );
 //!     let completed = sp.finish_slo(

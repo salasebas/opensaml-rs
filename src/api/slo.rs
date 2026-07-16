@@ -127,7 +127,7 @@ impl Saml<Sp> {
     ///     BrowserInput, FormField, IdpDescriptor, LogoutResponse, PendingLogoutRequest,
     ///     ReplayPolicy, Saml, SamlValidationContext,
     /// };
-    /// use time::OffsetDateTime;
+    /// use std::time::SystemTime;
     ///
     /// # fn finish(
     /// #     sp: &Saml<saml_rs::Sp>,
@@ -136,7 +136,7 @@ impl Saml<Sp> {
     /// #     fields: Vec<FormField>,
     /// # ) -> Result<(), saml_rs::SamlError> {
     /// let validation = SamlValidationContext::new(
-    ///     OffsetDateTime::now_utc(),
+    ///     SystemTime::now(),
     ///     ReplayPolicy::DisabledForCompatibility,
     /// );
     /// let completed = sp.finish_slo(
@@ -229,7 +229,7 @@ impl Saml<Idp> {
     ///     BrowserInput, FormField, LogoutRequest, ReplayPolicy, RespondSlo, Saml,
     ///     SamlValidationContext, SpDescriptor,
     /// };
-    /// use time::OffsetDateTime;
+    /// use std::time::SystemTime;
     ///
     /// # fn respond(
     /// #     idp: &Saml<saml_rs::Idp>,
@@ -237,7 +237,7 @@ impl Saml<Idp> {
     /// #     fields: Vec<FormField>,
     /// # ) -> Result<(), saml_rs::SamlError> {
     /// let validation = SamlValidationContext::new(
-    ///     OffsetDateTime::now_utc(),
+    ///     SystemTime::now(),
     ///     ReplayPolicy::DisabledForCompatibility,
     /// );
     /// let input = BrowserInput::<LogoutRequest>::post(fields);
@@ -320,7 +320,7 @@ impl Saml<Idp> {
     ///     BrowserInput, FormField, LogoutResponse, PendingLogoutRequest, ReplayPolicy,
     ///     Saml, SamlValidationContext, SpDescriptor,
     /// };
-    /// use time::OffsetDateTime;
+    /// use std::time::SystemTime;
     ///
     /// # fn finish(
     /// #     idp: &Saml<saml_rs::Idp>,
@@ -329,7 +329,7 @@ impl Saml<Idp> {
     /// #     fields: Vec<FormField>,
     /// # ) -> Result<(), saml_rs::SamlError> {
     /// let validation = SamlValidationContext::new(
-    ///     OffsetDateTime::now_utc(),
+    ///     SystemTime::now(),
     ///     ReplayPolicy::DisabledForCompatibility,
     /// );
     /// let completed = idp.finish_slo(

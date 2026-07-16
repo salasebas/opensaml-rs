@@ -40,7 +40,7 @@ impl Saml<Idp> {
     ///     AuthnRequest, BrowserInput, FormField, ReplayPolicy, RespondSso, Saml,
     ///     SamlValidationContext, SpDescriptor, Subject,
     /// };
-    /// use time::OffsetDateTime;
+    /// use std::time::SystemTime;
     ///
     /// # fn respond(
     /// #     idp: &Saml<saml_rs::Idp>,
@@ -49,7 +49,7 @@ impl Saml<Idp> {
     /// #     subject: Subject,
     /// # ) -> Result<(), saml_rs::SamlError> {
     /// let validation = SamlValidationContext::new(
-    ///     OffsetDateTime::now_utc(),
+    ///     SystemTime::now(),
     ///     ReplayPolicy::DisabledForCompatibility,
     /// );
     /// let input = BrowserInput::<AuthnRequest>::post(fields);
@@ -130,7 +130,7 @@ impl Saml<Idp> {
     ///     BrowserInput, FormField, IdpDescriptor, ReplayPolicy, RespondSso, Saml,
     ///     SamlValidationContext, SpDescriptor, SsoResponse, Subject,
     /// };
-    /// use time::OffsetDateTime;
+    /// use std::time::SystemTime;
     ///
     /// # fn initiate(
     /// #     idp: &Saml<saml_rs::Idp>,
@@ -145,7 +145,7 @@ impl Saml<Idp> {
     /// # let _ = form;
     ///
     /// let validation = SamlValidationContext::new(
-    ///     OffsetDateTime::now_utc(),
+    ///     SystemTime::now(),
     ///     ReplayPolicy::DisabledForCompatibility,
     /// );
     /// let session = sp.accept_unsolicited_sso(

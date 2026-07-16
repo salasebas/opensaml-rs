@@ -1,6 +1,9 @@
 #![cfg(feature = "crypto-bergshamra")]
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 
 use saml_rs::binding::{base64_decode, deflate_raw_decode};
 use saml_rs::error::TimeWindowField;
@@ -14,7 +17,6 @@ use saml_rs::{
     ReplayPolicy, RespondSlo, Saml, SamlError, SamlValidationContext, SessionIndex, SloEndpoint,
     SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoSession, StartSlo, TemplatePolicy,
 };
-use time::{Duration, OffsetDateTime};
 use url::Url;
 
 const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
@@ -53,15 +55,11 @@ fn credentials() -> Credentials {
 
 #[derive(Default)]
 struct MemoryReplayCache {
-    seen: HashMap<String, OffsetDateTime>,
+    seen: HashMap<String, SystemTime>,
 }
 
 impl ReplayCache for MemoryReplayCache {
-    fn check_and_store(
-        &mut self,
-        key: ReplayKey,
-        expires_at: OffsetDateTime,
-    ) -> Result<(), SamlError> {
+    fn check_and_store(&mut self, key: ReplayKey, expires_at: SystemTime) -> Result<(), SamlError> {
         let cache_key = key.cache_key();
         if self.seen.contains_key(&cache_key) {
             return Err(SamlError::ReplayDetected { key: cache_key });
@@ -136,14 +134,14 @@ fn subject() -> Result<LogoutSubject, SamlError> {
 
 fn validation() -> SamlValidationContext<'static> {
     SamlValidationContext::new(
-        OffsetDateTime::now_utc(),
+        SystemTime::now(),
         saml_rs::ReplayPolicy::DisabledForCompatibility,
     )
 }
 
 fn validation_with_cache(cache: &mut dyn ReplayCache) -> SamlValidationContext<'_> {
-    SamlValidationContext::new(OffsetDateTime::now_utc(), ReplayPolicy::RequireCache(cache))
-        .with_replay_retention(Duration::minutes(5))
+    SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(cache))
+        .with_replay_retention(Duration::from_secs(5 * 60))
 }
 
 fn post_fields<Message>(outbound: &Outbound<Message>) -> Result<Vec<FormField>, SamlError> {
@@ -473,10 +471,8 @@ fn typed_facade_receive_slo_requires_replay_retention_for_logout_request(
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
     let mut cache = MemoryReplayCache::default();
-    let validation = SamlValidationContext::new(
-        OffsetDateTime::now_utc(),
-        ReplayPolicy::RequireCache(&mut cache),
-    );
+    let validation =
+        SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(&mut cache));
 
     match idp.receive_slo(
         &sp_descriptor,
@@ -526,10 +522,8 @@ fn typed_facade_finish_slo_requires_replay_retention_for_logout_response(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let exchange = sp_started_exchange()?;
     let mut cache = MemoryReplayCache::default();
-    let validation = SamlValidationContext::new(
-        OffsetDateTime::now_utc(),
-        ReplayPolicy::RequireCache(&mut cache),
-    );
+    let validation =
+        SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(&mut cache));
 
     match exchange.sp.finish_slo(
         &exchange.idp_descriptor,

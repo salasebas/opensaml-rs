@@ -15,6 +15,7 @@ use crate::config::EntityId;
 use crate::error::{SamlError, TimeWindowField};
 use crate::raw::FlowResult;
 use crate::xml::{extract_with_limits, ExtractorField, XmlLimits};
+use std::time::SystemTime;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
@@ -262,12 +263,21 @@ impl SsoSession {
         &self,
         validation: &mut SamlValidationContext<'_>,
     ) -> Result<(), SamlError> {
-        let validation_now = validation.now();
+        let validation_now = validation.now_offset()?;
         let not_on_or_after_skew_ms = validation.clock_skew().not_on_or_after_millis();
         match validation.replay_policy() {
             ReplayPolicy::DisabledForCompatibility => Ok(()),
             ReplayPolicy::RequireCache(cache) => {
                 let expires_at = self.replay_expires_at(validation_now, not_on_or_after_skew_ms)?;
+                let since_epoch = expires_at - OffsetDateTime::UNIX_EPOCH;
+                let expires_at = if since_epoch.is_negative() {
+                    SystemTime::UNIX_EPOCH.checked_sub(since_epoch.unsigned_abs())
+                } else {
+                    SystemTime::UNIX_EPOCH.checked_add(since_epoch.unsigned_abs())
+                }
+                .ok_or(SamlError::TimeWindowInvalid {
+                    field: REPLAY_EXPIRATION_FIELD,
+                })?;
                 let keys = self.replay_keys();
                 for key in keys {
                     cache.check_and_store(key, expires_at)?;

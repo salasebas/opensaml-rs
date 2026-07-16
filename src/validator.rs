@@ -4,10 +4,27 @@ use crate::constants::{status_code, ParserType};
 use crate::error::SamlError;
 use crate::util::Value;
 use crate::xml::{extract_with_limits, fields, XmlLimits};
+use std::time::SystemTime;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 fn parse(ts: &str) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(ts, &Rfc3339).ok()
+}
+
+pub(crate) fn offset_datetime_from_system_time(
+    instant: SystemTime,
+) -> Result<OffsetDateTime, SamlError> {
+    let converted = match instant.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(elapsed) => Duration::try_from(elapsed)
+            .ok()
+            .and_then(|elapsed| OffsetDateTime::UNIX_EPOCH.checked_add(elapsed)),
+        Err(error) => Duration::try_from(error.duration())
+            .ok()
+            .and_then(|elapsed| OffsetDateTime::UNIX_EPOCH.checked_sub(elapsed)),
+    };
+    converted.ok_or_else(|| {
+        SamlError::Invalid("validation instant is outside the supported SAML time range".into())
+    })
 }
 
 /// Validate a `NotBefore` / `NotOnOrAfter` window.
@@ -108,9 +125,36 @@ pub fn check_status_with_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration as StdDuration;
 
     const RESPONSE: &str = include_str!("../tests/fixtures/response.xml");
     const FAILED: &str = include_str!("../tests/fixtures/failed_response.xml");
+
+    #[test]
+    fn system_time_conversion_supports_pre_unix_epoch() -> Result<(), Box<dyn std::error::Error>> {
+        let instant = SystemTime::UNIX_EPOCH
+            .checked_sub(StdDuration::new(1, 7))
+            .ok_or("platform SystemTime cannot represent the test instant")?;
+
+        assert_eq!(
+            offset_datetime_from_system_time(instant)?.unix_timestamp_nanos(),
+            -1_000_000_007
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn system_time_conversion_preserves_nanoseconds() -> Result<(), Box<dyn std::error::Error>> {
+        let instant = SystemTime::UNIX_EPOCH
+            .checked_add(StdDuration::new(1, 234_567_890))
+            .ok_or("platform SystemTime cannot represent the test instant")?;
+
+        assert_eq!(
+            offset_datetime_from_system_time(instant)?.unix_timestamp_nanos(),
+            1_234_567_890
+        );
+        Ok(())
+    }
 
     #[test]
     fn time_window_basic() {
