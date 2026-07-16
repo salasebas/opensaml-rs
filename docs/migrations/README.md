@@ -5,9 +5,9 @@ between breaking pre-1.0 releases of `saml-rs`. The
 [changelog](../../CHANGELOG.md) remains the complete record of changes in each
 release.
 
-## Planned guides
+## Available guides
 
-- `0.2` to `0.3`
+- [`0.2` to `0.3`](0.2-to-0.3.md)
 
 ## Adding a guide
 
