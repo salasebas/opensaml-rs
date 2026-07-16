@@ -1,6 +1,7 @@
 use crate::constants::{namespace, ParserType};
 use crate::error::SamlError;
 use crate::xml::dom::XmlLimits;
+use crate::xml::parse_saml_utc_date_time;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, XmlVersion};
@@ -122,105 +123,6 @@ fn require_version_2(
     Ok(())
 }
 
-fn parse_two_ascii_digits(value: &[u8], offset: usize) -> Option<u8> {
-    let tens = value.get(offset)?.checked_sub(b'0')?;
-    let ones = value.get(offset + 1)?.checked_sub(b'0')?;
-    (tens <= 9 && ones <= 9).then_some(tens * 10 + ones)
-}
-
-fn year_modulo(year: &[u8], modulus: u16) -> Option<u16> {
-    year.iter().try_fold(0, |remainder, digit| {
-        let digit = digit.checked_sub(b'0')?;
-        (digit <= 9).then_some((remainder * 10 + u16::from(digit)) % modulus)
-    })
-}
-
-fn is_leap_year(year: &[u8]) -> bool {
-    matches!(year_modulo(year, 400), Some(0))
-        || (matches!(year_modulo(year, 4), Some(0)) && !matches!(year_modulo(year, 100), Some(0)))
-}
-
-fn is_valid_calendar_day(year: &[u8], month: u8, day: u8) -> bool {
-    let max_day = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => return false,
-    };
-    (1..=max_day).contains(&day)
-}
-
-fn is_saml_utc_date_time(value: &str) -> bool {
-    let Some(without_timezone) = value.strip_suffix('Z') else {
-        return false;
-    };
-    let bytes = without_timezone.as_bytes();
-    let year_start = usize::from(bytes.first() == Some(&b'-'));
-    let Some(year_separator) = bytes
-        .get(year_start..)
-        .and_then(|remaining| remaining.iter().position(|byte| *byte == b'-'))
-        .map(|offset| year_start + offset)
-    else {
-        return false;
-    };
-    let year = &bytes[year_start..year_separator];
-    if year.len() < 4
-        || (year.len() > 4 && year.first() == Some(&b'0'))
-        || year.iter().all(|digit| *digit == b'0')
-        || year_modulo(year, 400).is_none()
-    {
-        return false;
-    }
-
-    let time_end = year_separator + 15;
-    if bytes.len() < time_end
-        || bytes.get(year_separator) != Some(&b'-')
-        || bytes.get(year_separator + 3) != Some(&b'-')
-        || bytes.get(year_separator + 6) != Some(&b'T')
-        || bytes.get(year_separator + 9) != Some(&b':')
-        || bytes.get(year_separator + 12) != Some(&b':')
-    {
-        return false;
-    }
-
-    let Some(month) = parse_two_ascii_digits(bytes, year_separator + 1) else {
-        return false;
-    };
-    let Some(day) = parse_two_ascii_digits(bytes, year_separator + 4) else {
-        return false;
-    };
-    let Some(hour) = parse_two_ascii_digits(bytes, year_separator + 7) else {
-        return false;
-    };
-    let Some(minute) = parse_two_ascii_digits(bytes, year_separator + 10) else {
-        return false;
-    };
-    let Some(second) = parse_two_ascii_digits(bytes, year_separator + 13) else {
-        return false;
-    };
-    if !is_valid_calendar_day(year, month, day) || minute > 59 || second > 59 {
-        return false;
-    }
-
-    let fractional = &bytes[time_end..];
-    let valid_fractional = fractional.is_empty()
-        || (fractional.first() == Some(&b'.')
-            && fractional.len() > 1
-            && fractional[1..].iter().all(u8::is_ascii_digit));
-    if !valid_fractional {
-        return false;
-    }
-
-    hour < 24
-        || (hour == 24
-            && minute == 0
-            && second == 0
-            && fractional
-                .get(1..)
-                .is_none_or(|digits| digits.iter().all(|digit| *digit == b'0')))
-}
-
 fn require_authn_request_issue_instant(
     values: &[(Vec<u8>, String)],
     element: &BytesStart<'_>,
@@ -234,9 +136,9 @@ fn require_authn_request_issue_instant(
                 element_label(element),
             ))
         })?;
-    if !is_saml_utc_date_time(issue_instant) {
+    if parse_saml_utc_date_time(issue_instant).is_none() {
         return Err(profile_error(format!(
-            "{} IssueInstant must be a valid UTC xs:dateTime ending in Z",
+            "{} IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
             element_label(element),
         )));
     }

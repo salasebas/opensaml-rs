@@ -12,6 +12,9 @@ use saml_rs::crypto::encrypt_assertion;
 
 const PROTOCOL_NS: &str = "urn:oasis:names:tc:SAML:2.0:protocol";
 const ASSERTION_NS: &str = "urn:oasis:names:tc:SAML:2.0:assertion";
+const MISSING_ISSUE_INSTANT_CONTEXT: &str = "missing required unqualified attribute IssueInstant";
+const MALFORMED_ISSUE_INSTANT_CONTEXT: &str =
+    "IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z";
 #[cfg(feature = "crypto-bergshamra")]
 const PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 #[cfg(feature = "crypto-bergshamra")]
@@ -54,13 +57,32 @@ fn expect_profile_rejection(
     }
 }
 
-fn expect_profile_rejection_with_binding(
+fn expect_profile_rejection_with_context(
+    xml: &str,
+    parser_type: ParserType,
+    context: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match run_flow(xml, parser_type) {
+        Err(SamlError::ProtocolProfile(message)) if message.contains(context) => Ok(()),
+        Err(SamlError::ProtocolProfile(message)) => {
+            Err(format!("expected {context} context, got {message:?}").into())
+        }
+        Err(other) => Err(format!("expected ProtocolProfile, got {other:?}").into()),
+        Ok(()) => Err("expected SAML profile rejection".into()),
+    }
+}
+
+fn expect_profile_rejection_with_binding_and_context(
     xml: &str,
     parser_type: ParserType,
     binding: Binding,
+    context: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match run_flow_with_binding(xml, parser_type, binding) {
-        Err(SamlError::ProtocolProfile(_)) => Ok(()),
+        Err(SamlError::ProtocolProfile(message)) if message.contains(context) => Ok(()),
+        Err(SamlError::ProtocolProfile(message)) => {
+            Err(format!("expected {context} context, got {message:?}").into())
+        }
         Err(other) => Err(format!("expected ProtocolProfile, got {other:?}").into()),
         Ok(()) => Err("expected SAML profile rejection".into()),
     }
@@ -118,13 +140,24 @@ fn default_protocol_namespace_is_accepted() -> Result<(), Box<dyn std::error::Er
 fn authn_request_issue_instant_validation_runs_for_supported_bindings(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let cases = [
-        authn_request_xml(None),
-        authn_request_xml(Some("2023-02-29T00:00:00Z")),
-        authn_request_xml(Some("2024-01-01T00:00:00+00:00")),
+        (authn_request_xml(None), MISSING_ISSUE_INSTANT_CONTEXT),
+        (
+            authn_request_xml(Some("2023-02-29T00:00:00Z")),
+            MALFORMED_ISSUE_INSTANT_CONTEXT,
+        ),
+        (
+            authn_request_xml(Some("2024-01-01T00:00:00+00:00")),
+            MALFORMED_ISSUE_INSTANT_CONTEXT,
+        ),
     ];
     for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
-        for xml in &cases {
-            expect_profile_rejection_with_binding(xml, ParserType::SamlRequest, binding)?;
+        for (xml, context) in &cases {
+            expect_profile_rejection_with_binding_and_context(
+                xml,
+                ParserType::SamlRequest,
+                binding,
+                context,
+            )?;
         }
     }
     Ok(())
@@ -139,13 +172,30 @@ fn authn_request_issue_instant_rejects_invalid_lexical_forms(
         "2024-01-01T00:00:00+00:00",
         "2024-01-01T00:00:00+01:00",
         "2024-01-01T00:00:00z",
-        "2024-01-01T00:00:60Z",
+        "2024-01-01T00: 00:00Z",
         "2024-01-01T24:00:00.001Z",
+        "\u{a0}2024-01-01T00:00:00Z\u{a0}",
     ] {
         let xml = authn_request_xml(Some(issue_instant));
-        expect_profile_rejection(&xml, ParserType::SamlRequest)?;
+        expect_profile_rejection_with_context(
+            &xml,
+            ParserType::SamlRequest,
+            MALFORMED_ISSUE_INSTANT_CONTEXT,
+        )?;
     }
     Ok(())
+}
+
+#[test]
+fn authn_request_issue_instant_rejects_leap_seconds_per_saml(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = authn_request_xml(Some("2024-01-01T00:00:60Z"));
+
+    expect_profile_rejection_with_context(
+        &xml,
+        ParserType::SamlRequest,
+        MALFORMED_ISSUE_INSTANT_CONTEXT,
+    )
 }
 
 #[test]
@@ -157,6 +207,19 @@ fn authn_request_issue_instant_accepts_valid_utc_lexical_forms(
         "2024-01-01T00:00:00.123456789012Z",
         "12345-01-01T00:00:00Z",
         "2000-02-29T24:00:00.000Z",
+    ] {
+        let xml = authn_request_xml(Some(issue_instant));
+        run_flow(&xml, ParserType::SamlRequest)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn authn_request_issue_instant_collapses_surrounding_xml_schema_whitespace(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for issue_instant in [
+        " \t\n\r2000-01-01T00:00:00Z \t\n\r",
+        "&#x9;&#xA;&#xD;2000-01-01T00:00:00Z&#x20;&#x9;",
     ] {
         let xml = authn_request_xml(Some(issue_instant));
         run_flow(&xml, ParserType::SamlRequest)?;
@@ -190,14 +253,14 @@ fn wrong_assertion_version_is_rejected() -> Result<(), Box<dyn std::error::Error
         "ID=\"_assertion\" Version=\"2.0\"",
         "ID=\"_assertion\" Version=\"1.0\"",
     );
-    expect_profile_rejection(&xml, ParserType::SamlResponse)
+    expect_profile_rejection_with_context(&xml, ParserType::SamlResponse, "Version")
 }
 
 #[test]
 fn missing_assertion_version_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"")
         .replace("ID=\"_assertion\" Version=\"2.0\"", "ID=\"_assertion\"");
-    expect_profile_rejection(&xml, ParserType::SamlResponse)
+    expect_profile_rejection_with_context(&xml, ParserType::SamlResponse, "Version")
 }
 
 #[test]
@@ -275,7 +338,9 @@ fn all_parser_roots_require_version_2() -> Result<(), Box<dyn std::error::Error>
     let cases = [
         (
             ParserType::SamlRequest,
-            format!(r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0"/>"#),
+            format!(
+                r#"<p:AuthnRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0" IssueInstant="2024-01-01T00:00:00Z"/>"#
+            ),
         ),
         (
             ParserType::SamlResponse,
@@ -291,7 +356,7 @@ fn all_parser_roots_require_version_2() -> Result<(), Box<dyn std::error::Error>
         ),
     ];
     for (parser_type, xml) in cases {
-        expect_profile_rejection(&xml, parser_type)?;
+        expect_profile_rejection_with_context(&xml, parser_type, "Version")?;
     }
     Ok(())
 }
@@ -347,7 +412,10 @@ fn decrypted_assertion_is_revalidated_before_signature_selection(
     options.allow_insecure_software_rsa_key_transport_decryption = true;
 
     match flow(&options, &request) {
-        Err(SamlError::ProtocolProfile(_)) => Ok(()),
+        Err(SamlError::ProtocolProfile(message)) if message.contains("Version") => Ok(()),
+        Err(SamlError::ProtocolProfile(message)) => {
+            Err(format!("expected Version context, got {message:?}").into())
+        }
         other => Err(format!("expected post-decryption ProtocolProfile, got {other:?}").into()),
     }
 }
@@ -394,11 +462,11 @@ fn decrypted_assertion_honors_xml_depth_limit_before_profile(
 #[test]
 fn wrong_root_version_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"1.0\"");
-    expect_profile_rejection(&xml, ParserType::SamlResponse)
+    expect_profile_rejection_with_context(&xml, ParserType::SamlResponse, "Version")
 }
 
 #[test]
 fn missing_root_version_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "");
-    expect_profile_rejection(&xml, ParserType::SamlResponse)
+    expect_profile_rejection_with_context(&xml, ParserType::SamlResponse, "Version")
 }

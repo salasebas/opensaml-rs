@@ -76,6 +76,7 @@ fn typed_api_contract_reexports_typed_binding_building_blocks(
 
 #[test]
 fn typed_api_contract_reexports_browser_and_model_types() {
+    let _: for<'a> fn(&'a AuthnRequest) -> &'a SamlInstant = AuthnRequest::issue_instant;
     let _ = std::any::type_name::<saml_rs::BrowserInput<saml_rs::AuthnRequest>>();
     let _ = std::any::type_name::<saml_rs::FormField>();
     let _ = std::any::type_name::<saml_rs::Outbound<saml_rs::AuthnRequest>>();
