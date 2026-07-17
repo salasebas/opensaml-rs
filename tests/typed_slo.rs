@@ -91,17 +91,30 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
         .build()
 }
 
-fn bad_template_idp_config() -> Result<IdpConfig, SamlError> {
+fn idp_config_with_logout_response_template(
+    logout_response_template: String,
+) -> Result<IdpConfig, SamlError> {
     IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
         .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
         .slo_endpoint(SloEndpoint::post(IDP_SLO_POST)?)
         .credentials(credentials())
         .validation(IdpValidationPolicy::strict())
         .templates(TemplatePolicy {
-            logout_response_template: Some(BAD_LOGOUT_RESPONSE_TEMPLATE.to_string()),
+            logout_response_template: Some(logout_response_template),
             ..TemplatePolicy::default()
         })
         .build()
+}
+
+fn bad_template_idp_config() -> Result<IdpConfig, SamlError> {
+    idp_config_with_logout_response_template(BAD_LOGOUT_RESPONSE_TEMPLATE.to_string())
+}
+
+fn bad_profile_template_idp_config() -> Result<IdpConfig, SamlError> {
+    idp_config_with_logout_response_template(BAD_LOGOUT_RESPONSE_TEMPLATE.replace(
+        r#"IssueInstant="{IssueInstant}""#,
+        r#"IssueInstant="not-a-date""#,
+    ))
 }
 
 fn facades() -> Result<(Saml<saml_rs::Sp>, Saml<saml_rs::Idp>), SamlError> {
@@ -868,6 +881,28 @@ fn typed_facade_rejects_custom_logout_response_in_response_to_mismatch(
             Ok(())
         }
         other => Err(format!("expected InResponseToMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_rejects_custom_logout_response_profile_before_correlation(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_config()?)?;
+    let idp = Saml::idp(bad_profile_template_idp_config()?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let request_input = BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?);
+    let received = idp.receive_slo(&sp_descriptor, request_input, validation())?;
+
+    match idp.respond_slo(&sp_descriptor, &received, RespondSlo::post()) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
+            ) =>
+        {
+            Ok(())
+        }
+        other => Err(format!("expected custom LogoutResponse profile error, got {other:?}").into()),
     }
 }
 

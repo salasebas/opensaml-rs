@@ -5,7 +5,8 @@ use crate::metadata::Metadata;
 use crate::template::{
     apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
 };
-use crate::xml::dom::parse_roots_with_limits;
+use crate::xml::dom::{parse_roots_with_limits, parse_with_limits};
+use crate::xml::validate_protocol_profile;
 
 use super::bindings::unsigned_context;
 use super::rendering::{
@@ -251,11 +252,12 @@ fn create_logout_request_for_subject_inner(
 /// # Errors
 ///
 /// Returns an error if `binding` is unsupported, `target_meta` has no SLO
-/// endpoint for `binding`, configured XML tag prefixes are invalid, default XML
-/// rendering fails, or Redirect DEFLATE encoding fails. When `want_signed` is
-/// true, missing or invalid signing keys/certificates, unavailable crypto
-/// support, XML signature construction, and detached-signature construction
-/// errors are propagated.
+/// endpoint for `binding`, configured XML tag prefixes are invalid, a custom
+/// template's final XML is structurally invalid or violates the LogoutResponse
+/// protocol profile, default XML rendering fails, or Redirect DEFLATE encoding
+/// fails. When `want_signed` is true, missing or invalid signing
+/// keys/certificates, unavailable crypto support, XML signature construction,
+/// and detached-signature construction errors are propagated.
 pub fn create_logout_response(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -401,6 +403,10 @@ fn create_logout_response_inner(
             in_response_to,
         )?
     };
+    if init_setting.logout_response_template.is_some() {
+        parse_with_limits(&xml, init_setting.xml_limits)?;
+        validate_protocol_profile(&xml, ParserType::LogoutResponse, init_setting.xml_limits)?;
+    }
     if validate_template_in_response_to && init_setting.logout_response_template.is_some() {
         validate_logout_response_in_response_to(&xml, in_response_to, init_setting.xml_limits)?;
     }

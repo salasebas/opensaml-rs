@@ -350,6 +350,9 @@ pub struct TemplatePolicy {
     /// Logout request template.
     pub logout_request_template: Option<String>,
     /// Logout response template.
+    ///
+    /// The final XML after prefix and placeholder substitution must be
+    /// structurally valid and satisfy the LogoutResponse protocol profile.
     pub logout_response_template: Option<String>,
     /// Embedded-signature placement and prefix.
     pub signature_config: Option<SignatureConfig>,

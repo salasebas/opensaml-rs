@@ -76,7 +76,8 @@ pub struct EntitySetting {
     /// SAML does not define this limit; the default is a conservative
     /// resource-exhaustion guard for unauthenticated Redirect messages.
     pub redirect_inflate_max_bytes: usize,
-    /// XML parser resource limits for inbound messages and metadata parsing.
+    /// XML parser resource limits for inbound messages, final custom
+    /// LogoutResponse XML, and metadata parsing.
     pub xml_limits: XmlLimits,
     /// IdP: protocol tag prefix for generated IdP messages (default `samlp`).
     pub tag_prefix_protocol: String,
@@ -91,6 +92,9 @@ pub struct EntitySetting {
     /// Custom `<LogoutRequest>` template (`None` uses the default).
     pub logout_request_template: Option<String>,
     /// Custom `<LogoutResponse>` template (`None` uses the default).
+    ///
+    /// The final XML after prefix and placeholder substitution must be
+    /// structurally valid and satisfy the LogoutResponse protocol profile.
     pub logout_response_template: Option<String>,
     /// Custom embedded-signature placement/prefix (`None` uses the default).
     pub signature_config: Option<SignatureConfig>,
