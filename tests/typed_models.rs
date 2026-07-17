@@ -698,15 +698,29 @@ fn value_str(value: &str) -> Value {
 }
 
 fn minimal_sso_flow(authn_statements: Option<Value>) -> FlowResult {
+    minimal_sso_flow_with_issue_instants(
+        Some("2024-01-01T00:00:00Z"),
+        Some("2024-01-01T00:00:01Z"),
+        authn_statements,
+    )
+}
+
+fn minimal_sso_flow_with_issue_instants(
+    response_issue_instant: Option<&str>,
+    assertion_issue_instant: Option<&str>,
+    authn_statements: Option<Value>,
+) -> FlowResult {
+    let mut response = vec![("id", value_str("_response123"))];
+    if let Some(issue_instant) = response_issue_instant {
+        response.push(("issueInstant", value_str(issue_instant)));
+    }
+    let mut assertion = vec![("id", value_str("_assertion123"))];
+    if let Some(issue_instant) = assertion_issue_instant {
+        assertion.push(("issueInstant", value_str(issue_instant)));
+    }
     let mut extract = value_object(vec![
-        (
-            "response",
-            value_object(vec![("id", value_str("_response123"))]),
-        ),
-        (
-            "assertion",
-            value_object(vec![("id", value_str("_assertion123"))]),
-        ),
+        ("response", value_object(response)),
+        ("assertion", value_object(assertion)),
         ("issuer", value_str("https://idp.example.com/metadata")),
         ("nameID", value_str("alice@example.com")),
     ]);
@@ -936,6 +950,116 @@ fn typed_models_name_id_policy_constructors_use_typed_creation_request() {
 }
 
 #[test]
+fn typed_models_sso_response_from_flow_result_normalizes_issue_instant(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response = SsoResponse::try_from(minimal_sso_flow_with_issue_instants(
+        Some(" \t\n2024-01-01T00:00:00Z\r "),
+        Some("2024-01-01T00:00:01Z"),
+        None,
+    ))?;
+
+    assert_eq!(response.response_id().as_str(), "_response123");
+    assert_eq!(response.issue_instant().as_str(), "2024-01-01T00:00:00Z");
+    Ok(())
+}
+
+#[test]
+fn typed_models_sso_response_rejects_missing_issue_instant_with_profile_context() {
+    let result = SsoResponse::try_from(minimal_sso_flow_with_issue_instants(
+        None,
+        Some("2024-01-01T00:00:01Z"),
+        None,
+    ));
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("Response is missing required unqualified attribute IssueInstant")
+    ));
+}
+
+#[test]
+fn typed_models_sso_response_rejects_malformed_issue_instant_with_profile_context() {
+    let result = SsoResponse::try_from(minimal_sso_flow_with_issue_instants(
+        Some("not-an-instant"),
+        Some("2024-01-01T00:00:01Z"),
+        None,
+    ));
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "Response IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z"
+            )
+    ));
+}
+
+#[test]
+fn typed_models_sso_session_rejects_missing_response_issue_instant_with_profile_context() {
+    let result = SsoSession::try_from(minimal_sso_flow_with_issue_instants(
+        None,
+        Some("2024-01-01T00:00:01Z"),
+        None,
+    ));
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("Response is missing required unqualified attribute IssueInstant")
+    ));
+}
+
+#[test]
+fn typed_models_sso_session_rejects_malformed_response_issue_instant_with_profile_context() {
+    let result = SsoSession::try_from(minimal_sso_flow_with_issue_instants(
+        Some("2024-01-01T00:00:00+00:00"),
+        Some("2024-01-01T00:00:01Z"),
+        None,
+    ));
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "Response IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z"
+            )
+    ));
+}
+
+#[test]
+fn typed_models_sso_session_rejects_missing_assertion_issue_instant_with_profile_context() {
+    let result = SsoSession::try_from(minimal_sso_flow_with_issue_instants(
+        Some("2024-01-01T00:00:00Z"),
+        None,
+        None,
+    ));
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("Assertion is missing required unqualified attribute IssueInstant")
+    ));
+}
+
+#[test]
+fn typed_models_sso_session_rejects_malformed_assertion_issue_instant_with_profile_context() {
+    let result = SsoSession::try_from(minimal_sso_flow_with_issue_instants(
+        Some("2024-01-01T00:00:00Z"),
+        Some("not-an-instant"),
+        None,
+    ));
+
+    assert!(matches!(
+        result,
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "Assertion IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z"
+            )
+    ));
+}
+
+#[test]
 fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let flow = FlowResult {
@@ -946,12 +1070,16 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
                 "response",
                 value_object(vec![
                     ("id", value_str("_response123")),
+                    ("issueInstant", value_str(" \t\n2024-01-01T00:00:00Z\r ")),
                     ("inResponseTo", value_str("_request123")),
                 ]),
             ),
             (
                 "assertion",
-                value_object(vec![("id", value_str("_assertion123"))]),
+                value_object(vec![
+                    ("id", value_str("_assertion123")),
+                    ("issueInstant", value_str(" \t\n2024-01-01T00:00:01Z\r ")),
+                ]),
             ),
             ("issuer", value_str("https://idp.example.com/metadata")),
             ("nameID", value_str("alice@example.com")),
@@ -996,7 +1124,15 @@ fn typed_models_sso_session_from_flow_result_preserves_multi_valued_attributes(
         .ok_or("missing affiliation")?;
 
     assert_eq!(session.response_id().as_str(), "_response123");
+    assert_eq!(
+        session.response_issue_instant().as_str(),
+        "2024-01-01T00:00:00Z"
+    );
     assert_eq!(session.assertion_id().as_str(), "_assertion123");
+    assert_eq!(
+        session.assertion_issue_instant().as_str(),
+        "2024-01-01T00:00:01Z"
+    );
     assert_eq!(
         session.assertion().id().map(saml_rs::AssertionId::as_str),
         Some("_assertion123")
@@ -1122,7 +1258,10 @@ fn typed_models_sso_session_without_assertion_id_fails_closed() {
         extract: value_object(vec![
             (
                 "response",
-                value_object(vec![("id", value_str("_response123"))]),
+                value_object(vec![
+                    ("id", value_str("_response123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
             ("issuer", value_str("https://idp.example.com/metadata")),
             ("nameID", value_str("alice@example.com")),
@@ -1144,11 +1283,17 @@ fn typed_models_sso_session_rejects_repeated_conditions_shape() {
         extract: value_object(vec![
             (
                 "response",
-                value_object(vec![("id", value_str("_response123"))]),
+                value_object(vec![
+                    ("id", value_str("_response123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
             (
                 "assertion",
-                value_object(vec![("id", value_str("_assertion123"))]),
+                value_object(vec![
+                    ("id", value_str("_assertion123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:01Z")),
+                ]),
             ),
             ("issuer", value_str("https://idp.example.com/metadata")),
             ("nameID", value_str("alice@example.com")),
@@ -1170,9 +1315,18 @@ fn typed_models_sso_session_rejects_malformed_assertion_id() {
         extract: value_object(vec![
             (
                 "response",
-                value_object(vec![("id", value_str("_response123"))]),
+                value_object(vec![
+                    ("id", value_str("_response123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
-            ("assertion", value_object(vec![("id", value_str("  "))])),
+            (
+                "assertion",
+                value_object(vec![
+                    ("id", value_str("  ")),
+                    ("issueInstant", value_str("2024-01-01T00:00:01Z")),
+                ]),
+            ),
             ("issuer", value_str("https://idp.example.com/metadata")),
             ("nameID", value_str("alice@example.com")),
         ]),

@@ -14,7 +14,7 @@ use super::{
 use crate::config::EntityId;
 use crate::error::{SamlError, TimeWindowField};
 use crate::raw::FlowResult;
-use crate::xml::{extract_with_limits, ExtractorField, XmlLimits};
+use crate::xml::{extract_with_limits, parse_saml_utc_date_time, ExtractorField, XmlLimits};
 use std::time::SystemTime;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
@@ -25,6 +25,7 @@ const REPLAY_EXPIRATION_FIELD: TimeWindowField = TimeWindowField::ReplayExpirati
 #[derive(Debug, Clone)]
 pub struct SsoResponse {
     response_id: MessageId,
+    issue_instant: SamlInstant,
     issuer: EntityId,
     in_response_to: Option<MessageId>,
     raw_flow: FlowResult,
@@ -34,6 +35,11 @@ impl SsoResponse {
     /// Response ID.
     pub fn response_id(&self) -> &MessageId {
         &self.response_id
+    }
+
+    /// Response `IssueInstant`, normalized according to XML Schema whitespace rules.
+    pub fn issue_instant(&self) -> &SamlInstant {
+        &self.issue_instant
     }
 
     /// Assertion issuer used by the current validated flow result.
@@ -57,10 +63,13 @@ impl TryFrom<FlowResult> for SsoResponse {
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
         let response_id = MessageId::try_new(required_str(&raw_flow.extract, "response.id")?)?;
+        let issue_instant =
+            issue_instant_from_extract(&raw_flow.extract, "response.issueInstant", "Response")?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let in_response_to = optional_request_id(&raw_flow.extract, "response.inResponseTo")?;
         Ok(Self {
             response_id,
+            issue_instant,
             issuer,
             in_response_to,
             raw_flow,
@@ -106,7 +115,9 @@ impl Assertion {
 #[derive(Debug, Clone)]
 pub struct SsoSession {
     response_id: MessageId,
+    response_issue_instant: SamlInstant,
     assertion_id: AssertionId,
+    assertion_issue_instant: SamlInstant,
     issuer: EntityId,
     in_response_to: Option<MessageId>,
     subject: Subject,
@@ -125,9 +136,19 @@ impl SsoSession {
         &self.response_id
     }
 
+    /// Response `IssueInstant`, normalized according to XML Schema whitespace rules.
+    pub fn response_issue_instant(&self) -> &SamlInstant {
+        &self.response_issue_instant
+    }
+
     /// Assertion ID.
     pub fn assertion_id(&self) -> &AssertionId {
         &self.assertion_id
+    }
+
+    /// Selected assertion `IssueInstant`, normalized according to XML Schema whitespace rules.
+    pub fn assertion_issue_instant(&self) -> &SamlInstant {
+        &self.assertion_issue_instant
     }
 
     /// Assertion issuer.
@@ -374,7 +395,11 @@ impl TryFrom<FlowResult> for SsoSession {
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
         let response_id = MessageId::try_new(required_str(&raw_flow.extract, "response.id")?)?;
+        let response_issue_instant =
+            issue_instant_from_extract(&raw_flow.extract, "response.issueInstant", "Response")?;
         let assertion_id = AssertionId::try_new(required_str(&raw_flow.extract, "assertion.id")?)?;
+        let assertion_issue_instant =
+            issue_instant_from_extract(&raw_flow.extract, "assertion.issueInstant", "Assertion")?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let in_response_to = optional_request_id(&raw_flow.extract, "response.inResponseTo")?;
         let name_id_format = raw_flow
@@ -393,7 +418,9 @@ impl TryFrom<FlowResult> for SsoSession {
         let sig_alg = raw_flow.sig_alg.clone();
         Ok(Self {
             response_id,
+            response_issue_instant,
             assertion_id,
+            assertion_issue_instant,
             issuer,
             in_response_to,
             subject,
@@ -406,4 +433,22 @@ impl TryFrom<FlowResult> for SsoSession {
             raw_flow,
         })
     }
+}
+
+fn issue_instant_from_extract(
+    extract: &crate::util::Value,
+    path: &str,
+    element: &str,
+) -> Result<SamlInstant, SamlError> {
+    let issue_instant = extract.get_str(path).ok_or_else(|| {
+        SamlError::ProtocolProfile(format!(
+            "{element} is missing required unqualified attribute IssueInstant"
+        ))
+    })?;
+    let issue_instant = parse_saml_utc_date_time(issue_instant).ok_or_else(|| {
+        SamlError::ProtocolProfile(format!(
+            "{element} IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z"
+        ))
+    })?;
+    SamlInstant::try_new(issue_instant)
 }
