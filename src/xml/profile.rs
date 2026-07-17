@@ -123,7 +123,7 @@ fn require_version_2(
     Ok(())
 }
 
-fn require_authn_request_issue_instant(
+fn require_issue_instant(
     values: &[(Vec<u8>, String)],
     element: &BytesStart<'_>,
 ) -> Result<(), SamlError> {
@@ -191,9 +191,8 @@ fn validate_root(
     }
     let required: &[&[u8]] = match parser_type {
         ParserType::SamlRequest => &[b"ID", b"Version", b"IssueInstant"],
-        ParserType::SamlResponse | ParserType::LogoutRequest | ParserType::LogoutResponse => {
-            &[b"ID", b"Version"]
-        }
+        ParserType::SamlResponse | ParserType::LogoutRequest => &[b"ID", b"Version"],
+        ParserType::LogoutResponse => &[b"ID", b"Version", b"IssueInstant"],
     };
     let attributes = validate_unqualified_attributes(
         reader,
@@ -202,8 +201,11 @@ fn validate_root(
         required,
     )?;
     require_version_2(&attributes, element)?;
-    if parser_type == ParserType::SamlRequest {
-        require_authn_request_issue_instant(&attributes, element)?;
+    if matches!(
+        parser_type,
+        ParserType::SamlRequest | ParserType::LogoutResponse
+    ) {
+        require_issue_instant(&attributes, element)?;
     }
     Ok(())
 }

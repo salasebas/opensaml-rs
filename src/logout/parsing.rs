@@ -121,15 +121,20 @@ fn parse_logout_response_inner(
 /// [`SamlError::InvalidInResponseTo`]. A non-empty `request_id` that does not
 /// match the SAML response returns [`SamlError::InResponseToMismatch`].
 ///
+/// `IssueInstant` validation establishes only that the required attribute is
+/// present and uses the SAML UTC lexical form. This parser applies no maximum
+/// message age; callers own any additional freshness policy.
+///
 /// # Errors
 ///
 /// Returns an error if `request_id` is empty, `binding` is unsupported,
 /// required binding parameters are missing, the SAML payload cannot be
-/// base64/DEFLATE decoded, XML parsing or extraction fails, the peer issuer
-/// does not match `from_meta`, `InResponseTo` does not match `request_id`, or
-/// logout response signature validation fails when `self_setting` requires
-/// signed responses. Signature failures include missing signatures, untrusted
-/// signing certificates, invalid detached signatures, RelayState/signed-octet
+/// base64/DEFLATE decoded, XML parsing or extraction fails, `IssueInstant` is
+/// missing or is not a UTC SAML timestamp, the peer issuer does not match
+/// `from_meta`, `InResponseTo` does not match `request_id`, or logout response
+/// signature validation fails when `self_setting` requires signed responses.
+/// Signature failures include missing signatures, untrusted signing
+/// certificates, invalid detached signatures, RelayState/signed-octet
 /// correlation failures, and XML signature validation errors.
 pub fn parse_logout_response(
     self_setting: &EntitySetting,
@@ -181,13 +186,17 @@ pub(crate) fn parse_logout_response_at(
 /// legacy interop and custom state machines that perform request correlation
 /// outside this crate.
 ///
+/// Callers using this raw function own request correlation, replay protection,
+/// and any optional message-freshness policy.
+///
 /// # Errors
 ///
 /// Returns an error if `binding` is unsupported, required binding parameters
 /// are missing, the SAML payload cannot be base64/DEFLATE decoded, XML parsing
-/// or extraction fails, the peer issuer does not match `from_meta`, or logout
-/// response signature validation fails when `self_setting` requires signed
-/// responses. Signature failures include missing signatures, untrusted signing
+/// or extraction fails, `IssueInstant` is missing or is not a UTC SAML
+/// timestamp, the peer issuer does not match `from_meta`, or logout response
+/// signature validation fails when `self_setting` requires signed responses.
+/// Signature failures include missing signatures, untrusted signing
 /// certificates, invalid detached signatures, RelayState/signed-octet
 /// correlation failures, and XML signature validation errors. This function
 /// deliberately does not enforce `InResponseTo` correlation.

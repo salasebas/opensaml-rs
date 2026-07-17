@@ -1,13 +1,14 @@
 use super::extract::{
     optional_endpoint, optional_request_id, required_str, session_indexes_from_value,
 };
-use super::identifiers::{MessageId, SessionIndex};
+use super::identifiers::{MessageId, SamlInstant, SessionIndex};
 use super::subject::NameId;
 use super::EndpointUrl;
 use crate::config::EntityId;
 use crate::constants::status_code;
 use crate::error::SamlError;
 use crate::raw::FlowResult;
+use crate::xml::parse_saml_utc_date_time;
 
 /// Subject data used to issue a front-channel Single Logout request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,6 +123,7 @@ impl TryFrom<FlowResult> for LogoutRequest {
 pub struct LogoutResponse {
     id: MessageId,
     issuer: EntityId,
+    issue_instant: SamlInstant,
     in_response_to: Option<MessageId>,
     destination: Option<EndpointUrl>,
     raw_flow: FlowResult,
@@ -136,6 +138,11 @@ impl LogoutResponse {
     /// LogoutResponse issuer.
     pub fn issuer(&self) -> &EntityId {
         &self.issuer
+    }
+
+    /// LogoutResponse `IssueInstant`, normalized according to XML Schema whitespace rules.
+    pub fn issue_instant(&self) -> &SamlInstant {
+        &self.issue_instant
     }
 
     /// InResponseTo, when present.
@@ -159,17 +166,34 @@ impl TryFrom<FlowResult> for LogoutResponse {
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
         let id = MessageId::try_new(required_str(&raw_flow.extract, "response.id")?)?;
+        let issue_instant = issue_instant_from_extract(&raw_flow.extract)?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let in_response_to = optional_request_id(&raw_flow.extract, "response.inResponseTo")?;
         let destination = optional_endpoint(&raw_flow.extract, "response.destination")?;
         Ok(Self {
             id,
             issuer,
+            issue_instant,
             in_response_to,
             destination,
             raw_flow,
         })
     }
+}
+
+fn issue_instant_from_extract(extract: &crate::util::Value) -> Result<SamlInstant, SamlError> {
+    let issue_instant = extract.get_str("response.issueInstant").ok_or_else(|| {
+        SamlError::ProtocolProfile(
+            "LogoutResponse is missing required unqualified attribute IssueInstant".into(),
+        )
+    })?;
+    let issue_instant = parse_saml_utc_date_time(issue_instant).ok_or_else(|| {
+        SamlError::ProtocolProfile(
+            "LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z"
+                .into(),
+        )
+    })?;
+    SamlInstant::try_new(issue_instant)
 }
 
 /// Marker result for completed logout flows.

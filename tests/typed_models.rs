@@ -1229,25 +1229,11 @@ fn typed_models_logout_request_from_flow_result_exposes_session_indexes(
 #[test]
 fn typed_models_logout_response_from_flow_result_exposes_correlation(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let flow = FlowResult {
-        saml_content: "<samlp:LogoutResponse/>".to_string(),
-        sig_alg: None,
-        extract: value_object(vec![
-            (
-                "response",
-                value_object(vec![
-                    ("id", value_str("_logout_response123")),
-                    ("inResponseTo", value_str("_logout123")),
-                    ("destination", value_str("https://sp.example.com/slo")),
-                ]),
-            ),
-            ("issuer", value_str("https://idp.example.com/metadata")),
-        ]),
-    };
-
-    let response = LogoutResponse::try_from(flow)?;
+    let response =
+        LogoutResponse::try_from(logout_response_flow(Some(" \t\n2024-01-01T00:00:00Z\r ")))?;
 
     assert_eq!(response.id().as_str(), "_logout_response123");
+    assert_eq!(response.issue_instant().as_str(), "2024-01-01T00:00:00Z");
     assert_eq!(
         response.in_response_to().map(MessageId::as_str),
         Some("_logout123")
@@ -1257,6 +1243,43 @@ fn typed_models_logout_response_from_flow_result_exposes_correlation(
         Some("https://sp.example.com/slo")
     );
     Ok(())
+}
+
+fn logout_response_flow(issue_instant: Option<&str>) -> FlowResult {
+    let mut response = vec![
+        ("id", value_str("_logout_response123")),
+        ("inResponseTo", value_str("_logout123")),
+        ("destination", value_str("https://sp.example.com/slo")),
+    ];
+    if let Some(issue_instant) = issue_instant {
+        response.push(("issueInstant", value_str(issue_instant)));
+    }
+    FlowResult {
+        saml_content: "<samlp:LogoutResponse/>".to_string(),
+        sig_alg: None,
+        extract: value_object(vec![
+            ("response", value_object(response)),
+            ("issuer", value_str("https://idp.example.com/metadata")),
+        ]),
+    }
+}
+
+#[test]
+fn typed_models_logout_response_rejects_missing_issue_instant_with_profile_context() {
+    assert!(matches!(
+        LogoutResponse::try_from(logout_response_flow(None)),
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("LogoutResponse is missing required unqualified attribute IssueInstant")
+    ));
+}
+
+#[test]
+fn typed_models_logout_response_rejects_malformed_issue_instant_with_profile_context() {
+    assert!(matches!(
+        LogoutResponse::try_from(logout_response_flow(Some("not-an-instant"))),
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z")
+    ));
 }
 
 #[test]

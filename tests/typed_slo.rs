@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use saml_rs::binding::{base64_decode, deflate_raw_decode};
+use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode};
 use saml_rs::error::TimeWindowField;
 use saml_rs::raw::{Binding, FlowResult};
 use saml_rs::util::Value;
@@ -146,6 +146,35 @@ fn validation_with_cache(cache: &mut dyn ReplayCache) -> SamlValidationContext<'
 
 fn post_fields<Message>(outbound: &Outbound<Message>) -> Result<Vec<FormField>, SamlError> {
     Ok(outbound.post_form()?.fields().to_vec())
+}
+
+fn replace_response_issue_instant(
+    fields: Vec<FormField>,
+    replacement: Option<&str>,
+) -> Result<Vec<FormField>, Box<dyn std::error::Error>> {
+    fields
+        .into_iter()
+        .map(|field| {
+            if field.name() != "SAMLResponse" {
+                return Ok(field);
+            }
+            let xml = String::from_utf8(base64_decode(field.value())?)?;
+            let (before, after) = xml
+                .split_once(" IssueInstant=\"")
+                .ok_or("missing IssueInstant attribute")?;
+            let (_, after) = after
+                .split_once('"')
+                .ok_or("unterminated IssueInstant attribute")?;
+            let replacement = replacement
+                .map(|value| format!(" IssueInstant=\"{value}\""))
+                .unwrap_or_default();
+            let xml = format!("{before}{replacement}{after}");
+            Ok(FormField::new(
+                "SAMLResponse",
+                base64_encode(xml.as_bytes()),
+            ))
+        })
+        .collect()
 }
 
 fn outbound_xml<Message>(
@@ -416,6 +445,11 @@ fn typed_facade_runs_sp_initiated_slo() -> Result<(), Box<dyn std::error::Error>
     );
     let response = completed.response().ok_or("missing logout response")?;
     assert_eq!(response.in_response_to(), Some(exchange.pending.id()));
+    assert_eq!(
+        response.issue_instant().as_str(),
+        response.issue_instant().as_str().trim()
+    );
+    assert!(response.issue_instant().as_str().ends_with('Z'));
     assert!(!completed
         .raw_flow()
         .ok_or("missing raw flow")?
@@ -432,6 +466,29 @@ fn typed_facade_runs_sp_initiated_slo() -> Result<(), Box<dyn std::error::Error>
         Some(IDP_ENTITY_ID)
     );
     Ok(())
+}
+
+#[test]
+fn typed_facade_rejects_missing_logout_response_issue_instant_in_real_flow(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = sp_started_exchange()?;
+    let response_fields = replace_response_issue_instant(exchange.response_fields, None)?;
+
+    match exchange.sp.finish_slo(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<LogoutResponse>::post(response_fields),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "LogoutResponse is missing required unqualified attribute IssueInstant",
+            ) =>
+        {
+            Ok(())
+        }
+        other => Err(format!("expected LogoutResponse IssueInstant error, got {other:?}").into()),
+    }
 }
 
 #[test]
