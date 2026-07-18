@@ -1254,7 +1254,7 @@ fn flow_conformance_signed_simplesign_logout_request_with_relay_state_includes_b
     Ok(())
 }
 
-fn logout_response_flow(signed: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn logout_response_flow(binding: Binding, signed: bool) -> Result<(), Box<dyn std::error::Error>> {
     let idp = idp(false);
     let mut idp_recv = idp.clone();
     idp_recv.setting.want_logout_response_signed = signed;
@@ -1263,19 +1263,13 @@ fn logout_response_flow(signed: bool) -> Result<(), Box<dyn std::error::Error>> 
         &sp.setting,
         &sp.metadata,
         &idp.metadata,
-        Binding::Post,
+        binding,
         Some("_r"),
         None,
         signed,
     )?;
-    let request = HttpRequest::post(vec![("SAMLResponse".into(), ctx.context)]);
-    let parsed = parse_logout_response(
-        &idp_recv.setting,
-        &sp.metadata,
-        Binding::Post,
-        &request,
-        "_r",
-    )?;
+    let request = logout_response_to_http(binding, &ctx)?;
+    let parsed = parse_logout_response(&idp_recv.setting, &sp.metadata, binding, &request, "_r")?;
     assert_eq!(
         parsed.extract.get_str("issuer"),
         Some("https://sp.example.com/metadata")
@@ -1285,11 +1279,16 @@ fn logout_response_flow(signed: bool) -> Result<(), Box<dyn std::error::Error>> 
 
 #[test]
 fn flow_conformance_sp_post_logout_response_unsigned() -> Result<(), Box<dyn std::error::Error>> {
-    logout_response_flow(false)
+    logout_response_flow(Binding::Post, false)
 }
 #[test]
 fn flow_conformance_sp_post_logout_response_signed() -> Result<(), Box<dyn std::error::Error>> {
-    logout_response_flow(true)
+    logout_response_flow(Binding::Post, true)
+}
+
+#[test]
+fn flow_conformance_sp_redirect_logout_response_signed() -> Result<(), Box<dyn std::error::Error>> {
+    logout_response_flow(Binding::Redirect, true)
 }
 
 #[test]

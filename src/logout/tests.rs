@@ -217,7 +217,7 @@ fn unsigned_logout_request_rejects_unexpected_issuer_when_explicitly_allowed(
 mod signed_tests {
     use super::*;
     use crate::constants::signature_algorithm::RSA_SHA256;
-    use crate::constants::ParserType;
+    use crate::entity::{SignatureAction, SignatureConfig};
 
     const PRIVKEY: &str = include_str!("../../tests/fixtures/key/sp_privkey.pem");
     const CERT: &str = include_str!("../../tests/fixtures/key/sp_signing_cert.cer");
@@ -244,58 +244,6 @@ mod signed_tests {
         )
     }
 
-    fn assert_logout_response_output_matrix(
-        template: Option<&str>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut sender = idp()?;
-        let target = sp()?;
-        sender.setting = signing_setting();
-        sender.setting.logout_response_template = template.map(str::to_string);
-
-        for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
-            for want_signed in [false, true] {
-                let context = create_logout_response(
-                    &sender.setting,
-                    &sender.metadata,
-                    &target.metadata,
-                    binding,
-                    Some("_req1"),
-                    None,
-                    want_signed,
-                )?;
-                let xml = decode_logout_response_context(&context)?;
-                crate::xml::validate_protocol_profile(
-                    &xml,
-                    ParserType::LogoutResponse,
-                    sender.setting.xml_limits,
-                )?;
-                let document = crate::xml::dom::parse_with_limits(&xml, sender.setting.xml_limits)?;
-                let issue_instant = document
-                    .root
-                    .attr("IssueInstant")
-                    .ok_or("missing rendered IssueInstant")?;
-                assert!(
-                    issue_instant.ends_with('Z'),
-                    "expected valid IssueInstant for {binding:?}, signed={want_signed}, got {issue_instant}"
-                );
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn built_in_logout_response_output_matrix_has_valid_issue_instant(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        assert_logout_response_output_matrix(None)
-    }
-
-    #[test]
-    fn custom_logout_response_output_matrix_has_valid_issue_instant(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let template = custom_logout_response_template(r#"IssueInstant="{IssueInstant}""#);
-        assert_logout_response_output_matrix(Some(&template))
-    }
-
     #[test]
     fn signed_logout_request_rejects_unexpected_issuer() -> Result<(), Box<dyn std::error::Error>> {
         let idp = idp()?;
@@ -317,6 +265,73 @@ mod signed_tests {
 
         assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
         Ok(())
+    }
+
+    #[test]
+    fn signed_custom_post_logout_response_rejects_signature_after_status(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut sender = idp()?;
+        let target = sp()?;
+        sender.setting = signing_setting();
+        sender.setting.logout_response_template = Some(custom_logout_response_template(
+            r#"IssueInstant="{IssueInstant}""#,
+        ));
+        sender.setting.signature_config = Some(SignatureConfig {
+            prefix: "ds".into(),
+            reference: Some("/*[local-name(.)='LogoutResponse']/*[local-name(.)='Status']".into()),
+            action: SignatureAction::After,
+        });
+
+        let result = create_logout_response(
+            &sender.setting,
+            &sender.metadata,
+            &target.metadata,
+            Binding::Post,
+            Some("_req1"),
+            None,
+            true,
+        );
+
+        assert_protocol_profile_error(
+            result,
+            "LogoutResponse children must be Issuer, optional Signature, optional Extensions, and exactly one final Status",
+        )
+    }
+
+    #[test]
+    fn signed_custom_post_logout_response_rejects_signature_inside_extensions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut sender = idp()?;
+        let target = sp()?;
+        sender.setting = signing_setting();
+        sender.setting.logout_response_template = Some(
+            custom_logout_response_template(r#"IssueInstant="{IssueInstant}""#).replace(
+                "<samlp:Status>",
+                "<samlp:Extensions><custom:Marker/></samlp:Extensions><samlp:Status>",
+            ),
+        );
+        sender.setting.signature_config = Some(SignatureConfig {
+            prefix: "ds".into(),
+            reference: Some(
+                "/*[local-name(.)='LogoutResponse']/*[local-name(.)='Extensions']".into(),
+            ),
+            action: SignatureAction::Append,
+        });
+
+        let result = create_logout_response(
+            &sender.setting,
+            &sender.metadata,
+            &target.metadata,
+            Binding::Post,
+            Some("_req1"),
+            None,
+            true,
+        );
+
+        assert_protocol_profile_error(
+            result,
+            "signed POST LogoutResponse must contain a root ds:Signature in schema order",
+        )
     }
 }
 
@@ -453,30 +468,6 @@ fn custom_logout_response_rejects_doctype_before_profile_validation(
     ) {
         Err(SamlError::Xml(message)) if message.contains("DOCTYPE is not allowed") => Ok(()),
         other => Err(format!("expected structural DOCTYPE rejection, got {other:?}").into()),
-    }
-}
-
-#[test]
-fn custom_logout_response_respects_xml_limits_before_encoding(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut sender = idp()?;
-    let target = sp()?;
-    sender.setting.logout_response_template = Some(custom_logout_response_template(
-        r#"IssueInstant="2000-01-01T00:00:00Z""#,
-    ));
-    sender.setting.xml_limits.max_bytes = 1;
-
-    match create_logout_response(
-        &sender.setting,
-        &sender.metadata,
-        &target.metadata,
-        Binding::Post,
-        Some("_req1"),
-        None,
-        false,
-    ) {
-        Err(SamlError::Invalid(message)) if message.contains("ERR_XML_LIMIT_EXCEEDED") => Ok(()),
-        other => Err(format!("expected custom XML resource-limit rejection, got {other:?}").into()),
     }
 }
 

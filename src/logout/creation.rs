@@ -5,8 +5,8 @@ use crate::metadata::Metadata;
 use crate::template::{
     apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
 };
-use crate::xml::dom::{parse_roots_with_limits, parse_with_limits};
-use crate::xml::validate_protocol_profile;
+use crate::xml::dom::Document;
+use crate::xml::{validate_custom_logout_response_outbound, OutboundLogoutValidation};
 
 use super::bindings::unsigned_context;
 use super::rendering::{
@@ -253,11 +253,12 @@ fn create_logout_request_for_subject_inner(
 ///
 /// Returns an error if `binding` is unsupported, `target_meta` has no SLO
 /// endpoint for `binding`, configured XML tag prefixes are invalid, a custom
-/// template's final XML is structurally invalid or violates the LogoutResponse
-/// protocol profile, default XML rendering fails, or Redirect DEFLATE encoding
-/// fails. When `want_signed` is true, missing or invalid signing
-/// keys/certificates, unavailable crypto support, XML signature construction,
-/// and detached-signature construction errors are propagated.
+/// template's final outbound XML violates the enforced LogoutResponse schema
+/// structure or SLO-profile requirements, default XML rendering fails, or
+/// Redirect DEFLATE encoding fails. When `want_signed` is true, missing or
+/// invalid signing keys/certificates, unavailable crypto support, XML
+/// signature construction, and detached-signature construction errors are
+/// propagated.
 pub fn create_logout_response(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -371,6 +372,7 @@ fn create_logout_response_inner(
         .map(str::to_owned)
         .unwrap_or_else(generate_id);
     let issue_instant = now_iso8601();
+    let issuer = issuer_of(init_setting, init_meta);
     let xml = if let Some(template) = init_setting.logout_response_template.as_deref() {
         validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
         validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
@@ -389,26 +391,37 @@ fn create_logout_response_inner(
                     "InResponseTo",
                     in_response_to.unwrap_or_default().to_string(),
                 ),
-                ("Issuer", issuer_of(init_setting, init_meta)),
+                ("Issuer", issuer.clone()),
                 ("StatusCode", status_code::SUCCESS.to_string()),
             ],
         )
     } else {
         render_default_logout_response(
             init_setting,
-            init_meta,
             &id,
             &issue_instant,
             &destination,
             in_response_to,
+            &issuer,
         )?
     };
-    if init_setting.logout_response_template.is_some() {
-        parse_with_limits(&xml, init_setting.xml_limits)?;
-        validate_protocol_profile(&xml, ParserType::LogoutResponse, init_setting.xml_limits)?;
-    }
-    if validate_template_in_response_to && init_setting.logout_response_template.is_some() {
-        validate_logout_response_in_response_to(&xml, in_response_to, init_setting.xml_limits)?;
+    let custom_document = if init_setting.logout_response_template.is_some() {
+        Some(validate_custom_logout_response_outbound(
+            &xml,
+            &id,
+            &destination,
+            &issuer,
+            OutboundLogoutValidation::BeforeSigning {
+                destination_required: want_signed,
+            },
+        )?)
+    } else {
+        None
+    };
+    if validate_template_in_response_to {
+        if let Some(document) = custom_document.as_ref() {
+            validate_logout_response_in_response_to(document, in_response_to)?;
+        }
     }
     let (context, signature, sig_alg) = if want_signed {
         sign_logout(
@@ -432,6 +445,20 @@ fn create_logout_response_inner(
             None,
         )
     };
+    if want_signed
+        && matches!(binding, Binding::Post)
+        && init_setting.logout_response_template.is_some()
+    {
+        let signed_xml = String::from_utf8(crate::binding::base64_decode(&context)?)
+            .map_err(|error| SamlError::Xml(error.to_string()))?;
+        validate_custom_logout_response_outbound(
+            &signed_xml,
+            &id,
+            &destination,
+            &issuer,
+            OutboundLogoutValidation::AfterPostSigning,
+        )?;
+    }
     Ok(BindingContext {
         id,
         context,
@@ -445,15 +472,12 @@ fn create_logout_response_inner(
 }
 
 fn validate_logout_response_in_response_to(
-    xml: &str,
+    document: &Document,
     expected: Option<&str>,
-    limits: crate::xml::XmlLimits,
 ) -> Result<(), SamlError> {
-    let roots = parse_roots_with_limits(xml, limits)?;
-    let actual = roots
-        .iter()
-        .find(|node| node.local_name == "LogoutResponse")
-        .and_then(|node| node.attr("InResponseTo"))
+    let actual = document
+        .root
+        .attr("InResponseTo")
         .filter(|value| !value.is_empty());
     if actual == expected {
         return Ok(());

@@ -6,6 +6,12 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, XmlVersion};
 
+mod outbound_logout;
+
+pub(crate) use outbound_logout::{
+    validate_custom_logout_response_outbound, OutboundLogoutValidation,
+};
+
 const XML_ENCRYPTION_NS: &[u8] = b"http://www.w3.org/2001/04/xmlenc#";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

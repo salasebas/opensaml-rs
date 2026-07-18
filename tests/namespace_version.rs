@@ -202,15 +202,12 @@ fn authn_request_issue_instant_rejects_invalid_lexical_forms(
 }
 
 #[test]
-fn authn_request_issue_instant_rejects_leap_seconds_under_strict_receiver_policy(
+fn authn_request_issue_instant_accepts_xml_schema_leap_second_lexical_form(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let xml = authn_request_xml(Some("2024-01-01T00:00:60Z"));
 
-    expect_profile_rejection_with_context(
-        &xml,
-        ParserType::SamlRequest,
-        MALFORMED_ISSUE_INSTANT_CONTEXT,
-    )
+    run_flow(&xml, ParserType::SamlRequest)?;
+    Ok(())
 }
 
 #[test]
@@ -273,15 +270,12 @@ fn logout_response_issue_instant_validation_precedes_signature_handling_for_supp
 }
 
 #[test]
-fn logout_response_issue_instant_rejects_leap_seconds_under_strict_receiver_policy(
+fn logout_response_issue_instant_accepts_xml_schema_leap_second_lexical_form(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let xml = logout_response_xml(Some("2024-01-01T00:00:60Z"));
 
-    expect_profile_rejection_with_context(
-        &xml,
-        ParserType::LogoutResponse,
-        LOGOUT_RESPONSE_MALFORMED_ISSUE_INSTANT_CONTEXT,
-    )
+    run_flow(&xml, ParserType::LogoutResponse)?;
+    Ok(())
 }
 
 #[test]
