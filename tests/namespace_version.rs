@@ -1,7 +1,7 @@
 use saml_rs::binding::{base64_encode, deflate_raw_encode};
 use saml_rs::constants::{Binding, ParserType};
-use saml_rs::flow::{flow, FlowOptions, HttpRequest};
-use saml_rs::SamlError;
+use saml_rs::flow::{flow, FlowOptions, FlowResult, HttpRequest};
+use saml_rs::{SamlError, SsoSession};
 
 #[cfg(feature = "crypto-bergshamra")]
 use saml_rs::constants::{
@@ -32,12 +32,12 @@ const PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 #[cfg(feature = "crypto-bergshamra")]
 const CERTIFICATE: &str = include_str!("fixtures/key/sp_signing_cert.cer");
 
-fn run_flow_with_binding(
+fn parse_flow_with_binding(
     xml: &str,
     parser_type: ParserType,
     binding: Binding,
     check_signature: bool,
-) -> Result<(), SamlError> {
+) -> Result<FlowResult, SamlError> {
     let encoded = match binding {
         Binding::Redirect => base64_encode(&deflate_raw_encode(xml.as_bytes())?),
         Binding::Post | Binding::SimpleSign => base64_encode(xml.as_bytes()),
@@ -53,7 +53,16 @@ fn run_flow_with_binding(
     options.binding = Some(binding);
     options.parser_type = Some(parser_type);
     options.check_signature = check_signature;
-    flow(&options, &request).map(|_| ())
+    flow(&options, &request)
+}
+
+fn run_flow_with_binding(
+    xml: &str,
+    parser_type: ParserType,
+    binding: Binding,
+    check_signature: bool,
+) -> Result<(), SamlError> {
+    parse_flow_with_binding(xml, parser_type, binding, check_signature).map(|_| ())
 }
 
 fn run_flow(xml: &str, parser_type: ParserType) -> Result<(), SamlError> {
@@ -153,6 +162,32 @@ fn response_xml_with_issue_instants(
     )
 }
 
+#[cfg(feature = "crypto-bergshamra")]
+fn expect_decrypted_assertion_profile_rejection_with_context(
+    xml: &str,
+    context: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let encrypted = encrypt_assertion(xml, CERTIFICATE, AES_256, RSA_OAEP_MGF1P, "a")?;
+    let request = HttpRequest::post(vec![(
+        "SAMLResponse".into(),
+        base64_encode(encrypted.as_bytes()),
+    )]);
+    let mut options = FlowOptions::default();
+    options.binding = Some(Binding::Post);
+    options.parser_type = Some(ParserType::SamlResponse);
+    options.check_signature = true;
+    options.decrypt_key = Some(PRIVATE_KEY);
+    options.allow_insecure_software_rsa_key_transport_decryption = true;
+
+    match flow(&options, &request) {
+        Err(SamlError::ProtocolProfile(message)) if message.contains(context) => Ok(()),
+        Err(SamlError::ProtocolProfile(message)) => {
+            Err(format!("expected {context} context, got {message:?}").into())
+        }
+        other => Err(format!("expected post-decryption ProtocolProfile, got {other:?}").into()),
+    }
+}
+
 #[test]
 fn canonical_prefixes_are_accepted() -> Result<(), Box<dyn std::error::Error>> {
     let xml = response_xml(PROTOCOL_NS, ASSERTION_NS, "Version=\"2.0\"")
@@ -232,15 +267,12 @@ fn authn_request_issue_instant_rejects_invalid_lexical_forms(
 }
 
 #[test]
-fn authn_request_issue_instant_rejects_leap_seconds_under_strict_receiver_policy(
+fn authn_request_issue_instant_accepts_leap_seconds_without_receiver_rule(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let xml = authn_request_xml(Some("2024-01-01T00:00:60Z"));
 
-    expect_profile_rejection_with_context(
-        &xml,
-        ParserType::SamlRequest,
-        MALFORMED_ISSUE_INSTANT_CONTEXT,
-    )
+    run_flow(&xml, ParserType::SamlRequest)?;
+    Ok(())
 }
 
 #[test]
@@ -303,15 +335,12 @@ fn logout_response_issue_instant_validation_precedes_signature_handling_for_supp
 }
 
 #[test]
-fn logout_response_issue_instant_rejects_leap_seconds_under_strict_receiver_policy(
+fn logout_response_issue_instant_accepts_leap_seconds_without_receiver_rule(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let xml = logout_response_xml(Some("2024-01-01T00:00:60Z"));
 
-    expect_profile_rejection_with_context(
-        &xml,
-        ParserType::LogoutResponse,
-        LOGOUT_RESPONSE_MALFORMED_ISSUE_INSTANT_CONTEXT,
-    )
+    run_flow(&xml, ParserType::LogoutResponse)?;
+    Ok(())
 }
 
 #[test]
@@ -473,7 +502,7 @@ fn sso_issue_instant_rejects_qualified_attributes_and_collisions(
 }
 
 #[test]
-fn sso_issue_instant_rejects_leap_seconds_under_strict_receiver_policy(
+fn sso_issue_instant_accepts_leap_seconds_without_receiver_rule(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let xml = response_xml_with_issue_instants(
         PROTOCOL_NS,
@@ -483,11 +512,8 @@ fn sso_issue_instant_rejects_leap_seconds_under_strict_receiver_policy(
         Some("2024-01-01T00:00:60Z"),
     );
 
-    expect_profile_rejection_with_context(
-        &xml,
-        ParserType::SamlResponse,
-        ASSERTION_MALFORMED_ISSUE_INSTANT_CONTEXT,
-    )
+    run_flow(&xml, ParserType::SamlResponse)?;
+    Ok(())
 }
 
 #[test]
@@ -502,6 +528,33 @@ fn sso_issue_instant_accepts_old_values_and_xml_schema_whitespace(
     );
 
     run_flow(&xml, ParserType::SamlResponse)?;
+    Ok(())
+}
+
+#[test]
+fn sso_issue_instant_normalizes_real_flow_values_in_typed_session(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = response_xml_with_issue_instants(
+        PROTOCOL_NS,
+        ASSERTION_NS,
+        "Version=\"2.0\"",
+        Some(" \t\n\r2000-01-01T00:00:00Z \t\n\r"),
+        Some("&#x9;&#xA;&#xD;2000-01-01T00:00:01Z&#x20;&#x9;"),
+    )
+    .replace(
+        "<a:Subject>",
+        "<a:Issuer>https://idp.example.test</a:Issuer>\n<a:Subject><a:NameID>alice@example.test</a:NameID>",
+    );
+    let raw_flow = parse_flow_with_binding(&xml, ParserType::SamlResponse, Binding::Post, false)?;
+    let session = SsoSession::try_from(raw_flow)?;
+
+    assert_eq!(
+        (
+            session.response_issue_instant().as_str(),
+            session.assertion_issue_instant().as_str(),
+        ),
+        ("2000-01-01T00:00:00Z", "2000-01-01T00:00:01Z")
+    );
     Ok(())
 }
 
@@ -708,25 +761,8 @@ fn decrypted_assertion_is_revalidated_before_signature_selection(
         "ID=\"_assertion\" Version=\"2.0\"",
         "ID=\"_assertion\" Version=\"1.0\"",
     );
-    let encrypted = encrypt_assertion(&wrong_version, CERTIFICATE, AES_256, RSA_OAEP_MGF1P, "a")?;
-    let request = HttpRequest::post(vec![(
-        "SAMLResponse".into(),
-        base64_encode(encrypted.as_bytes()),
-    )]);
-    let mut options = FlowOptions::default();
-    options.binding = Some(Binding::Post);
-    options.parser_type = Some(ParserType::SamlResponse);
-    options.check_signature = true;
-    options.decrypt_key = Some(PRIVATE_KEY);
-    options.allow_insecure_software_rsa_key_transport_decryption = true;
 
-    match flow(&options, &request) {
-        Err(SamlError::ProtocolProfile(message)) if message.contains("Version") => Ok(()),
-        Err(SamlError::ProtocolProfile(message)) => {
-            Err(format!("expected Version context, got {message:?}").into())
-        }
-        other => Err(format!("expected post-decryption ProtocolProfile, got {other:?}").into()),
-    }
+    expect_decrypted_assertion_profile_rejection_with_context(&wrong_version, "Version")
 }
 
 #[cfg(feature = "crypto-bergshamra")]
@@ -737,35 +773,33 @@ fn decrypted_assertion_issue_instant_is_revalidated_before_signature_selection(
         "ID=\"_assertion\" Version=\"2.0\" IssueInstant=\"2024-01-01T00:00:00Z\"",
         "ID=\"_assertion\" Version=\"2.0\"",
     );
-    let encrypted = encrypt_assertion(
-        &missing_issue_instant,
-        CERTIFICATE,
-        AES_256,
-        RSA_OAEP_MGF1P,
-        "a",
-    )?;
-    let request = HttpRequest::post(vec![(
-        "SAMLResponse".into(),
-        base64_encode(encrypted.as_bytes()),
-    )]);
-    let mut options = FlowOptions::default();
-    options.binding = Some(Binding::Post);
-    options.parser_type = Some(ParserType::SamlResponse);
-    options.check_signature = true;
-    options.decrypt_key = Some(PRIVATE_KEY);
-    options.allow_insecure_software_rsa_key_transport_decryption = true;
 
-    match flow(&options, &request) {
-        Err(SamlError::ProtocolProfile(message))
-            if message.contains(ASSERTION_MISSING_ISSUE_INSTANT_CONTEXT) =>
-        {
-            Ok(())
-        }
-        Err(SamlError::ProtocolProfile(message)) => {
-            Err(format!("expected Assertion IssueInstant context, got {message:?}").into())
-        }
-        other => Err(format!("expected post-decryption ProtocolProfile, got {other:?}").into()),
-    }
+    expect_decrypted_assertion_profile_rejection_with_context(
+        &missing_issue_instant,
+        ASSERTION_MISSING_ISSUE_INSTANT_CONTEXT,
+    )
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+#[test]
+fn decrypted_assertion_qualified_issue_instant_is_revalidated_before_signature_selection(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let qualified_issue_instant = response_xml_with_issue_instants(
+        PROTOCOL_NS,
+        ASSERTION_NS,
+        "Version=\"2.0\"",
+        Some("2024-01-01T00:00:00Z"),
+        None,
+    )
+    .replace(
+        "ID=\"_assertion\"",
+        "xmlns:x=\"urn:example:foreign\" ID=\"_assertion\" x:IssueInstant=\"2024-01-01T00:00:00Z\"",
+    );
+
+    expect_decrypted_assertion_profile_rejection_with_context(
+        &qualified_issue_instant,
+        "attribute IssueInstant on Assertion must be unqualified",
+    )
 }
 
 #[cfg(feature = "crypto-bergshamra")]
