@@ -45,6 +45,11 @@ work in the repo, not restate the README.
 - Scope conformance claims by role, direction, profile or flow, binding, and
   feature. Lower-level XML support does not imply conformance with a complete
   profile, binding, or SAML V2.0 as a whole.
+- MUST NOT retroactively change existing behavior, defaults, or public APIs
+  solely to align them with the conformance policy unless the task explicitly
+  authorizes that change. If existing behavior appears to predate or conflict
+  with the policy, preserve it, report the normative evidence and compatibility
+  or security impact, and ask for direction before changing it.
 - Do not present library safety or application policy as an OASIS wire
   requirement, and do not invent validation for unspecified behavior.
 
