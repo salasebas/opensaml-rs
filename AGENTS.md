@@ -42,6 +42,9 @@ work in the repo, not restate the README.
 - Mandatory requirements are always enforced. Recommendations are default-on
   and may be relaxed only by an explicit, narrowly named policy. Optional
   capabilities require intentional configuration.
+- Scope conformance claims by role, direction, profile or flow, binding, and
+  feature. Lower-level XML support does not imply conformance with a complete
+  profile, binding, or SAML V2.0 as a whole.
 - Do not present library safety or application policy as an OASIS wire
   requirement, and do not invent validation for unspecified behavior.
 

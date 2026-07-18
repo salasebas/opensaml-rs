@@ -18,17 +18,39 @@ The goal is precise conformance without inventing protocol requirements:
 
 ## Normative Sources
 
-Use the applicable approved OASIS SAML V2.0 documents, official XML schemas,
-and approved errata. Depending on the change, this may include Core, Bindings,
-Profiles, Metadata, Conformance, XML Signature, XML Encryption, and XML Schema.
+Use the exact approved specification, schema, and errata that govern the
+feature under review. The links below are a navigation aid, not a whitelist,
+an exhaustive list, or a statement of the crate's current feature support.
 
-Authoritative starting points include:
+Use these as the canonical catalogs for the SAML V2.0 specification set:
 
-- [OASIS SAML V2.0 document and schema index](https://docs.oasis-open.org/security/saml/v2.0/)
-- [SAML V2.0 Core](https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf)
-- [SAML V2.0 approved Errata 05](https://docs.oasis-open.org/security/saml/v2.0/errata05/os/)
-- [SAML assertion schema](https://docs.oasis-open.org/security/saml/v2.0/saml-schema-assertion-2.0.xsd)
-- [SAML protocol schema](https://docs.oasis-open.org/security/saml/v2.0/saml-schema-protocol-2.0.xsd)
+- [SAML V2.0 Conformance Requirements](https://docs.oasis-open.org/security/saml/v2.0/saml-conformance-2.0-os.pdf),
+  which identifies the documents and schemas that comprise SAML V2.0 and
+  defines its conformance model;
+- the [official OASIS SAML V2.0 document and schema index](https://docs.oasis-open.org/security/saml/v2.0/),
+  which contains the approved documents, schemas, and schema archive.
+
+The base specification set commonly relevant to implementation work includes:
+
+- [Core](https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf)
+- [Bindings](https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf)
+- [Profiles](https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf)
+- [Metadata](https://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf)
+- [Authentication Context](https://docs.oasis-open.org/security/saml/v2.0/saml-authn-context-2.0-os.pdf)
+- [Security and Privacy Considerations](https://docs.oasis-open.org/security/saml/v2.0/saml-sec-consider-2.0-os.pdf)
+- the official assertion, protocol, metadata, authentication-context, and
+  profile schemas in the OASIS index
+- [approved Errata 05](https://docs.oasis-open.org/security/saml/v2.0/errata05/os/)
+
+An applicable feature may also be governed by an approved OASIS SAML extension
+or later OASIS specification and by dependent standards such as XML Schema,
+XML Signature, XML Encryption, HTTP, URI, or TLS. Use each source only within
+its scope, record the exact version and status, and do not treat a draft as the
+default SAML requirement. A draft may be targeted only by an explicitly
+experimental feature.
+
+Requirement-language and dependent-standard references include:
+
 - [RFC 2119 requirement levels](https://www.rfc-editor.org/rfc/rfc2119.html)
 - [RFC 8174 capitalization clarification](https://www.rfc-editor.org/rfc/rfc8174.html)
 - [W3C XML Schema](https://www.w3.org/TR/xmlschema-1/)
@@ -46,6 +68,34 @@ Before implementing or reviewing SAML behavior:
 OASIS SAML Core uses the requirement language defined by RFC 2119. Its schema
 documents take precedence over schema listings in prose when they disagree,
 while normative prose may impose additional constraints beyond the schemas.
+
+## Feature-Scoped Conformance
+
+SAML conformance is not a single global switch. The OASIS conformance model
+defines a feature by the combination of a profile, a message exchange or flow,
+and a selected binding. A conformance or support claim must therefore identify
+the applicable scope, including:
+
+- operational mode and role, such as service provider, identity provider,
+  sender, receiver, metadata publisher, or metadata consumer;
+- protocol, message type, and direction;
+- profile and the portion of its flow being implemented;
+- binding;
+- optional capability, attribute profile, or extension, when applicable.
+
+Parsing or serializing a SAML element, supporting a protocol message, or
+implementing one step of a flow does not by itself imply conformance with an
+entire profile, binding, operational mode, or SAML V2.0 as a whole. A broad
+claim such as "SAML V2.0 conformant" requires a documented support matrix that
+shows the exact claimed features and their normative coverage.
+
+This policy applies to every SAML feature that `saml-rs` implements. It neither
+declares the crate's current support nor limits future support. Bindings,
+profiles, operational modes, queries, extensions, and other capabilities may
+be added incrementally, provided each one has an explicit boundary and meets
+all mandatory requirements within the scope it claims. Unsupported and partial
+features must remain explicit rather than being inferred from lower-level XML
+support.
 
 ## Requirement Vocabulary
 
@@ -186,35 +236,26 @@ unsafe cryptographic backend may remain library invariants even when they are
 not SAML wire requirements. Their rationale must be documented separately and
 must not be cited as if OASIS required a peer's message to be rejected.
 
-## Examples
+## Interpretation Examples
 
-### Required `IssueInstant`
+These examples are illustrative, not exhaustive, and do not define the crate's
+current feature support:
 
-The SAML assertion and response schemas declare `IssueInstant` with
-`use="required"`. Missing values are structurally invalid, so typed inbound
-flows enforce their presence without a disable switch.
-
-SAML time values are `xs:dateTime` values and `MUST` use the UTC form required
-by SAML. This is part of wire conformance, not a freshness policy. Message age,
-clock skew, and replay checks require their own normative or application-policy
-basis.
-
-### Leap Seconds
-
-SAML Core says implementations `MUST NOT generate` time instants that specify
-leap seconds. This is an absolute outbound-generation rule.
-
-That producer requirement does not by itself say that a receiver `MUST reject`
-an inbound leap-second value. Any inbound rejection needs a separate normative
-receiver rule or must be identified as an explicit library/application policy.
-
-### Optional Field With Mandatory Processing
-
-An attribute such as `Destination` can be optional in the message schema while
-the receiver is required to compare it with the actual destination whenever it
-is present. Configuration may control whether an optional outbound value is
-emitted, but it may not disable the mandatory inbound comparison once the
-condition applies.
+- **Required `IssueInstant`:** The assertion and response schemas declare
+  `IssueInstant` with `use="required"`. Missing values are structurally invalid,
+  so typed inbound flows enforce their presence without a disable switch.
+  SAML's UTC wire-format rule is separate from freshness, clock-skew, and
+  replay policies, which require their own basis.
+- **Producer-only leap-second rule:** SAML Core says implementations `MUST NOT
+  generate` time instants that specify leap seconds. This is an absolute
+  outbound rule, but it does not by itself require receivers to reject an
+  inbound leap-second value. Rejection needs a separate normative receiver
+  rule or an explicitly identified library or application policy.
+- **Optional field with mandatory processing:** `Destination` can be optional
+  in the message schema while a receiver is required to compare it with the
+  actual destination whenever it is present. Configuration may control
+  outbound emission, but it may not disable a mandatory inbound comparison
+  once its condition applies.
 
 ## Change And Review Checklist
 
@@ -222,17 +263,21 @@ Every change that adds or alters SAML behavior should answer:
 
 1. What exact standard, schema declaration, profile, binding, or erratum
    governs the behavior?
-2. What is the requirement level?
-3. Who is the obligated actor?
-4. Is the rule conditional?
-5. What message types, roles, bindings, and profiles are in scope?
-6. Does the normative text require generation, processing, acceptance,
+2. What feature-scoped conformance or support claim is affected?
+3. What is the requirement level?
+4. Who is the obligated actor?
+5. Is the rule conditional?
+6. What message types, roles, directions, bindings, and profiles are in scope?
+7. Is the implementation complete for that claimed scope, or does it provide
+   only lower-level parsing, serialization, or partial flow support?
+8. Does the normative text require generation, processing, acceptance,
    verification, or rejection?
-7. Is the implementation enforcing only that requirement, without adding a
+9. Is the implementation enforcing only that requirement, without adding a
    stricter receiver rule?
-8. Is a recommendation default-on and relaxed only through an explicit policy?
-9. Is optional behavior intentionally configured and interoperable?
-10. Do focused tests cover the normative boundary without duplicating unrelated
+10. Is a recommendation default-on and relaxed only through an explicit
+    policy?
+11. Is optional behavior intentionally configured and interoperable?
+12. Do focused tests cover the normative boundary without duplicating unrelated
     guarantees?
 
 When the evidence is ambiguous, investigate the schemas, related OASIS
