@@ -126,3 +126,20 @@ Add regression tests for security fixes.
 - Do not hardcode future release versions in docs. This repository uses
   release-plz and Conventional Commits to decide the next version.
 - The published crate is `saml-rs`, and Rust imports use `saml_rs`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues via the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The default five-role triage label vocabulary is used. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses the single-context layout. See
+`docs/agents/domain.md`.
