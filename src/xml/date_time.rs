@@ -80,9 +80,9 @@ pub(crate) fn parse_saml_utc_date_time(value: &str) -> Option<&str> {
     let hour = parse_two_ascii_digits(bytes, year_separator + 7)?;
     let minute = parse_two_ascii_digits(bytes, year_separator + 10)?;
     let second = parse_two_ascii_digits(bytes, year_separator + 13)?;
-    // SAML Core 2.0 §1.3.3 forbids producers from generating leap seconds, so
-    // this receiver rejects rather than normalizes that non-conformant input.
-    if !is_valid_calendar_day(year, negative_year, month, day) || minute > 59 || second > 59 {
+    // XML Schema permits second 60. SAML Core 2.0 §1.3.3 forbids producers
+    // from generating leap seconds but does not require receivers to reject them.
+    if !is_valid_calendar_day(year, negative_year, month, day) || minute > 59 || second > 60 {
         return None;
     }
 
@@ -134,6 +134,14 @@ mod tests {
     }
 
     #[test]
+    fn accepts_xml_schema_leap_seconds_inbound() {
+        assert_eq!(
+            parse_saml_utc_date_time("2024-01-01T00:00:60Z"),
+            Some("2024-01-01T00:00:60Z")
+        );
+    }
+
+    #[test]
     fn rejects_invalid_calendar_and_time_boundaries() {
         for value in [
             "1900-02-29T00:00:00Z",
@@ -146,7 +154,7 @@ mod tests {
             "2024-01-00T00:00:00Z",
             "2024-04-31T00:00:00Z",
             "2024-01-01T00:60:00Z",
-            "2024-01-01T00:00:60Z",
+            "2024-01-01T00:00:61Z",
             "2024-01-01T24:01:00Z",
             "2024-01-01T24:00:01Z",
             "2024-01-01T25:00:00Z",

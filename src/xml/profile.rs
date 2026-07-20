@@ -191,7 +191,8 @@ fn validate_root(
     }
     let required: &[&[u8]] = match parser_type {
         ParserType::SamlRequest => &[b"ID", b"Version", b"IssueInstant"],
-        ParserType::SamlResponse | ParserType::LogoutRequest => &[b"ID", b"Version"],
+        ParserType::SamlResponse => &[b"ID", b"Version", b"IssueInstant"],
+        ParserType::LogoutRequest => &[b"ID", b"Version"],
         ParserType::LogoutResponse => &[b"ID", b"Version", b"IssueInstant"],
     };
     let attributes = validate_unqualified_attributes(
@@ -203,7 +204,7 @@ fn validate_root(
     require_version_2(&attributes, element)?;
     if matches!(
         parser_type,
-        ParserType::SamlRequest | ParserType::LogoutResponse
+        ParserType::SamlRequest | ParserType::SamlResponse | ParserType::LogoutResponse
     ) {
         require_issue_instant(&attributes, element)?;
     }
@@ -341,9 +342,14 @@ fn validate_element(
     };
     let consumed = consumed_attributes(&expanded);
     if expanded.is(b"Assertion", NamespaceKind::Assertion) {
-        let attributes =
-            validate_unqualified_attributes(reader, element, consumed, &[b"ID", b"Version"])?;
+        let attributes = validate_unqualified_attributes(
+            reader,
+            element,
+            consumed,
+            &[b"ID", b"Version", b"IssueInstant"],
+        )?;
         require_version_2(&attributes, element)?;
+        require_issue_instant(&attributes, element)?;
     } else if !consumed.is_empty() {
         validate_unqualified_attributes(reader, element, consumed, &[])?;
     }

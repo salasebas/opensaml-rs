@@ -237,6 +237,39 @@ fn replace_issue_instant(
     Ok(format!("{before}{replacement}{after}"))
 }
 
+fn response_xml_from_fields(fields: &[FormField]) -> Result<String, Box<dyn std::error::Error>> {
+    let encoded = fields
+        .iter()
+        .find(|field| field.name() == "SAMLResponse")
+        .map(FormField::value)
+        .ok_or("missing SAMLResponse")?;
+    Ok(String::from_utf8(base64_decode(encoded)?)?)
+}
+
+fn response_fields_with_xml(
+    mut fields: Vec<FormField>,
+    xml: &str,
+) -> Result<Vec<FormField>, Box<dyn std::error::Error>> {
+    let field = fields
+        .iter_mut()
+        .find(|field| field.name() == "SAMLResponse")
+        .ok_or("missing SAMLResponse")?;
+    *field = FormField::new("SAMLResponse", base64_encode(xml.as_bytes()));
+    Ok(fields)
+}
+
+fn replace_element_issue_instant(
+    xml: &str,
+    element_start: &str,
+    replacement: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let start = xml.find(element_start).ok_or("missing SAML element")?;
+    let relative_end = xml[start..].find('>').ok_or("unterminated SAML element")?;
+    let end = start + relative_end + 1;
+    let opening = replace_issue_instant(&xml[start..end], replacement)?;
+    Ok(format!("{}{opening}{}", &xml[..start], &xml[end..]))
+}
+
 struct SsoExchange {
     sp: Saml<saml_rs::Sp>,
     idp: Saml<saml_rs::Idp>,
@@ -635,6 +668,11 @@ fn typed_facade_runs_sp_initiated_sso() -> Result<(), Box<dyn std::error::Error>
         session.in_response_to(),
         Some(exchange.pending.request_id())
     );
+    assert_eq!(
+        session.response_issue_instant(),
+        session.assertion_issue_instant()
+    );
+    assert!(session.response_issue_instant().as_str().ends_with('Z'));
     assert_eq!(session.name_id().value(), "alice@example.com");
     assert!(!session.raw_flow().saml_content.is_empty());
     assert_eq!(
@@ -682,8 +720,76 @@ fn typed_facade_runs_simplesign_sso_response_binding() -> Result<(), Box<dyn std
     )?;
 
     assert_eq!(session.in_response_to(), Some(started.pending.request_id()));
+    assert_eq!(
+        session.response_issue_instant(),
+        session.assertion_issue_instant()
+    );
     assert_eq!(session.name_id().value(), "alice@example.com");
     Ok(())
+}
+
+#[test]
+fn typed_facade_finish_sso_post_rejects_missing_response_issue_instant(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = start_receive_respond()?;
+    let xml = replace_element_issue_instant(
+        &response_xml_from_fields(&exchange.response_fields)?,
+        "<samlp:Response",
+        None,
+    )?;
+    let fields = response_fields_with_xml(exchange.response_fields, &xml)?;
+
+    match exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message
+                .contains("Response is missing required unqualified attribute IssueInstant") =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "expected Response IssueInstant ProtocolProfile from finish_sso POST, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn typed_facade_finish_sso_simplesign_rejects_malformed_assertion_issue_instant(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = start_receive_respond_with(
+        StartSso::post().response_binding(SsoResponseBinding::SimpleSign),
+        RespondSso::simple_sign(),
+    )?;
+    let xml = replace_element_issue_instant(
+        &response_xml_from_fields(&exchange.response_fields)?,
+        "<saml:Assertion",
+        Some("not-an-instant"),
+    )?;
+    let fields = response_fields_with_xml(exchange.response_fields, &xml)?;
+
+    match exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::simple_sign(fields),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "Assertion IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
+            ) =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "expected Assertion IssueInstant ProtocolProfile from finish_sso SimpleSign, got {other:?}"
+        )
+        .into()),
+    }
 }
 
 #[test]
@@ -1036,6 +1142,75 @@ fn typed_facade_accepts_unsolicited_sso_explicitly() -> Result<(), Box<dyn std::
 
     assert_eq!(session.issuer().as_str(), IDP_ENTITY_ID);
     assert_eq!(session.in_response_to(), None);
+    assert_eq!(
+        session.response_issue_instant(),
+        session.assertion_issue_instant()
+    );
     assert_eq!(session.name_id().value(), "alice@example.com");
     Ok(())
+}
+
+#[test]
+fn typed_facade_accept_unsolicited_sso_post_rejects_missing_assertion_issue_instant(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let response = idp.initiate_sso(&sp_descriptor, subject(), RespondSso::post())?;
+    let fields = post_fields(&response)?;
+    let xml = replace_element_issue_instant(
+        &response_xml_from_fields(&fields)?,
+        "<saml:Assertion",
+        None,
+    )?;
+    let fields = response_fields_with_xml(fields, &xml)?;
+
+    match sp.accept_unsolicited_sso(
+        &idp_descriptor,
+        BrowserInput::<SsoResponse>::post(fields),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message
+                .contains("Assertion is missing required unqualified attribute IssueInstant") =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "expected Assertion IssueInstant ProtocolProfile from unsolicited POST, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn typed_facade_accept_unsolicited_sso_simplesign_rejects_non_utc_response_issue_instant(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let response = idp.initiate_sso(&sp_descriptor, subject(), RespondSso::simple_sign())?;
+    let fields = post_fields(&response)?;
+    let xml = replace_element_issue_instant(
+        &response_xml_from_fields(&fields)?,
+        "<samlp:Response",
+        Some("2024-01-01T00:00:00+00:00"),
+    )?;
+    let fields = response_fields_with_xml(fields, &xml)?;
+
+    match sp.accept_unsolicited_sso(
+        &idp_descriptor,
+        BrowserInput::<SsoResponse>::simple_sign(fields),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "Response IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
+            ) =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "expected Response IssueInstant ProtocolProfile from unsolicited SimpleSign, got {other:?}"
+        )
+        .into()),
+    }
 }
