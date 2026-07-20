@@ -1,5 +1,5 @@
 use super::{AssertionId, MessageId};
-use crate::error::SamlError;
+use crate::error::{SamlError, TimeWindowField};
 use std::time::{Duration, SystemTime};
 use time::OffsetDateTime;
 
@@ -250,6 +250,24 @@ impl<'a> SamlValidationContext<'a> {
         }
     }
 
+    pub(crate) fn check_and_store_message_replay_until(
+        &mut self,
+        key: ReplayKey,
+        derived_deadline: Option<OffsetDateTime>,
+    ) -> Result<(), SamlError> {
+        if matches!(&self.replay, ReplayPolicy::DisabledForCompatibility) {
+            return Ok(());
+        }
+        let expires_at = derived_deadline
+            .map(system_time_from_offset_datetime)
+            .transpose()?
+            .map_or_else(|| self.message_replay_expires_at(), Ok)?;
+        match &mut self.replay {
+            ReplayPolicy::DisabledForCompatibility => Ok(()),
+            ReplayPolicy::RequireCache(cache) => cache.check_and_store(key, expires_at),
+        }
+    }
+
     fn message_replay_expires_at(&self) -> Result<SystemTime, SamlError> {
         let Some(retention) = self.replay_retention else {
             return Err(SamlError::TimeWindowInvalid {
@@ -267,4 +285,16 @@ impl<'a> SamlValidationContext<'a> {
                 field: crate::error::TimeWindowField::ReplayExpiration,
             })
     }
+}
+
+fn system_time_from_offset_datetime(deadline: OffsetDateTime) -> Result<SystemTime, SamlError> {
+    let since_epoch = deadline - OffsetDateTime::UNIX_EPOCH;
+    let converted = if since_epoch.is_negative() {
+        SystemTime::UNIX_EPOCH.checked_sub(since_epoch.unsigned_abs())
+    } else {
+        SystemTime::UNIX_EPOCH.checked_add(since_epoch.unsigned_abs())
+    };
+    converted.ok_or(SamlError::TimeWindowInvalid {
+        field: TimeWindowField::ReplayExpiration,
+    })
 }

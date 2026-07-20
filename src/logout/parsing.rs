@@ -7,14 +7,22 @@ use std::time::SystemTime;
 
 /// Parse a `<LogoutRequest>` from `from`.
 ///
+/// `IssueInstant` is required and must use the SAML UTC `xs:dateTime` lexical
+/// form. No maximum request age is inferred from `IssueInstant`. An optional
+/// `NotOnOrAfter` uses the same UTC form; saml-rs rejects the request at or
+/// after that instant, widened by the configured `NotOnOrAfter` clock drift.
+/// This fail-closed expiration check is library policy: SAML permits, but does
+/// not require, a recipient to discard an expired request.
+///
 /// # Errors
 ///
 /// Returns an error if `binding` is unsupported, required binding parameters
 /// are missing, the SAML payload cannot be base64/DEFLATE decoded, XML parsing
-/// or extraction fails, the peer issuer does not match `from_meta`, or logout
-/// request signature validation fails when `self_setting` requires signed
-/// requests. Signature failures include missing signatures, untrusted signing
-/// certificates, invalid detached signatures, RelayState/signed-octet
+/// or extraction fails, `IssueInstant` or `NotOnOrAfter` is not conformant,
+/// `NotOnOrAfter` has expired, the peer issuer does not match `from_meta`, or
+/// logout request signature validation fails when `self_setting` requires
+/// signed requests. Signature failures include missing signatures, untrusted
+/// signing certificates, invalid detached signatures, RelayState/signed-octet
 /// correlation failures, and XML signature validation errors.
 pub fn parse_logout_request(
     self_setting: &EntitySetting,

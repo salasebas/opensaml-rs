@@ -13,7 +13,10 @@ use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
 use crate::model::RelayStateParam;
 use crate::model::{authn_statement_not_on_or_after_values, earliest_authn_session_expiration};
 use crate::util::Value;
-use crate::validator::{check_status_with_limits, conditions_time_bounds, verify_time_at};
+use crate::validator::{
+    check_status_with_limits, conditions_time_bounds, logout_request_not_on_or_after_deadline,
+    verify_time_at,
+};
 use crate::xml::{
     extract_with_limits, fields, validate_protocol_profile, ExtractorField, XmlLimits,
 };
@@ -791,6 +794,13 @@ fn validate_context(
                 field: TimeWindowField::Conditions,
             });
         }
+    }
+    if parser_type == ParserType::LogoutRequest {
+        logout_request_not_on_or_after_deadline(
+            extracted,
+            opts.validation_now()?,
+            opts.clock_drifts.1,
+        )?;
     }
     Ok(())
 }

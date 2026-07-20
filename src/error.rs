@@ -93,6 +93,8 @@ impl fmt::Display for SubjectConfirmationReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TimeWindowField {
+    /// LogoutRequest `NotOnOrAfter`.
+    LogoutRequestNotOnOrAfter,
     /// Assertion session `SessionNotOnOrAfter`.
     SessionNotOnOrAfter,
     /// Assertion `Conditions` NotBefore/NotOnOrAfter window.
@@ -104,6 +106,7 @@ pub enum TimeWindowField {
 impl fmt::Display for TimeWindowField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::LogoutRequestNotOnOrAfter => f.write_str("LogoutRequest@NotOnOrAfter"),
             Self::SessionNotOnOrAfter => f.write_str("SessionNotOnOrAfter"),
             Self::Conditions => f.write_str("Conditions"),
             Self::ReplayExpiration => f.write_str("ReplayExpiration"),
@@ -202,7 +205,7 @@ pub enum SamlError {
         /// Optional second-tier status code.
         second: Option<String>,
     },
-    /// Assertion or session time bounds are not satisfied.
+    /// A SAML message, assertion, session, or replay time bound is not satisfied.
     #[error("SAML time window is invalid for {field}")]
     TimeWindowInvalid {
         /// SAML field or validation scope whose time window failed.

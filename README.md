@@ -133,6 +133,14 @@ typed walkthrough and the [doctested SLO
 fragment](https://docs.rs/saml-rs/latest/saml_rs/#single-logout) for the compact
 shape.
 
+Inbound `LogoutRequest` messages require a UTC `IssueInstant`; saml-rs does not
+invent a maximum age for it. `NotOnOrAfter` remains optional, but when present
+it must be UTC and saml-rs rejects the request at its effective exclusive
+deadline. That fail-closed rejection is a library policy permitted by SAML,
+not an OASIS receiver `MUST`. `ClockSkew` controls the `NotOnOrAfter` tolerance,
+and replay storage uses the same skew-adjusted deadline instead of generic
+retention when the attribute is present.
+
 ### Metadata
 
 Metadata trust is explicit. The rustdoc

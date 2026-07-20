@@ -251,6 +251,12 @@ current feature support:
   outbound rule, but it does not by itself require receivers to reject an
   inbound leap-second value. Rejection needs a separate normative receiver
   rule or an explicitly identified library or application policy.
+- **LogoutRequest expiration:** `LogoutRequest@NotOnOrAfter` is optional for
+  inbound general LogoutRequest processing, and Core says a recipient may
+  discard the message after that instant. saml-rs' fail-closed rejection of an
+  expired value is therefore documented as library policy, not an OASIS
+  receiver `MUST`. The required UTC `IssueInstant` is checked separately and
+  does not imply a library-selected maximum request age.
 - **Optional field with mandatory processing:** `Destination` can be optional
   in the message schema while a receiver is required to compare it with the
   actual destination whenever it is present. Configuration may control

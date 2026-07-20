@@ -6,6 +6,7 @@ use crate::error::SamlError;
 use crate::flow::HttpRequest;
 use crate::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use crate::{IdentityProvider, ServiceProvider};
+use std::time::{Duration, SystemTime};
 use url::Url;
 
 fn sp() -> Result<ServiceProvider, SamlError> {
@@ -149,6 +150,132 @@ fn parse_unsigned_logout_response(
         &logout_response_request(issue_instant_attribute),
         "_req1",
     )
+}
+
+fn logout_request_request(issue_instant: &str, not_on_or_after: Option<&str>) -> HttpRequest {
+    let not_on_or_after = not_on_or_after
+        .map(|value| format!(r#" NotOnOrAfter="{value}""#))
+        .unwrap_or_default();
+    let xml = format!(
+        r#"<samlp:LogoutRequest
+    xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+    ID="_request1" Version="2.0" IssueInstant="{issue_instant}"{not_on_or_after}
+    Destination="https://idp/slo">
+  <saml:Issuer>https://sp.example.com/metadata</saml:Issuer>
+  <saml:NameID>alice@example.com</saml:NameID>
+</samlp:LogoutRequest>"#
+    );
+    HttpRequest::post(vec![("SAMLRequest".into(), base64_encode(xml.as_bytes()))])
+}
+
+fn parse_unsigned_logout_request_at(
+    issue_instant: &str,
+    not_on_or_after: Option<&str>,
+    now: SystemTime,
+    clock_drifts: (i64, i64),
+) -> Result<crate::flow::FlowResult, SamlError> {
+    let mut receiver = idp()?;
+    let sender = sp()?;
+    receiver.setting.want_logout_request_signed = false;
+    parse_logout_request_at(
+        &receiver.setting,
+        &sender.metadata,
+        Binding::Post,
+        &logout_request_request(issue_instant, not_on_or_after),
+        now,
+        clock_drifts,
+    )
+}
+
+fn unix_time(seconds: u64) -> Result<SystemTime, Box<dyn std::error::Error>> {
+    SystemTime::UNIX_EPOCH
+        .checked_add(Duration::from_secs(seconds))
+        .ok_or_else(|| "platform SystemTime cannot represent the test instant".into())
+}
+
+#[test]
+fn logout_request_accepts_old_issue_instant_without_not_on_or_after(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let result = parse_unsigned_logout_request_at(
+        "2000-01-01T00:00:00Z",
+        None,
+        unix_time(1_735_689_600)?,
+        (0, 0),
+    )?;
+
+    assert_eq!(
+        result.extract.get_str("request.issueInstant"),
+        Some("2000-01-01T00:00:00Z")
+    );
+    Ok(())
+}
+
+#[test]
+fn logout_request_extracts_future_not_on_or_after() -> Result<(), Box<dyn std::error::Error>> {
+    let result = parse_unsigned_logout_request_at(
+        "2000-01-01T00:00:00Z",
+        Some("2025-01-01T00:01:00Z"),
+        unix_time(1_735_689_600)?,
+        (0, 0),
+    )?;
+
+    assert_eq!(
+        result.extract.get_str("request.notOnOrAfter"),
+        Some("2025-01-01T00:01:00Z")
+    );
+    Ok(())
+}
+
+#[test]
+fn logout_request_rejects_not_on_or_after_at_exact_boundary(
+) -> Result<(), Box<dyn std::error::Error>> {
+    match parse_unsigned_logout_request_at(
+        "2000-01-01T00:00:00Z",
+        Some("2025-01-01T00:00:00Z"),
+        unix_time(1_735_689_600)?,
+        (0, 0),
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(
+                field,
+                crate::error::TimeWindowField::LogoutRequestNotOnOrAfter
+            );
+            Ok(())
+        }
+        other => Err(format!("expected LogoutRequest NotOnOrAfter error, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn logout_request_runtime_unrepresentable_not_on_or_after_fails_as_time_window_policy(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for not_on_or_after in [
+        "2025-01-01T00:00:60Z",
+        "2025-01-01T24:00:00Z",
+        "12345-01-01T00:00:00Z",
+    ] {
+        match parse_unsigned_logout_request_at(
+            "2000-01-01T00:00:00Z",
+            Some(not_on_or_after),
+            unix_time(1_735_689_600)?,
+            (0, 0),
+        ) {
+            Err(SamlError::TimeWindowInvalid { field }) => {
+                assert_eq!(
+                    field,
+                    crate::error::TimeWindowField::LogoutRequestNotOnOrAfter
+                );
+            }
+            other => {
+                return Err(format!(
+                    "expected runtime time-window failure for {not_on_or_after}, got {other:?}"
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
 }
 
 #[test]

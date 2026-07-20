@@ -1349,6 +1349,8 @@ fn typed_models_logout_request_from_flow_result_exposes_session_indexes(
                 "request",
                 value_object(vec![
                     ("id", value_str("_logout123")),
+                    ("issueInstant", value_str(" \t\n2024-01-01T00:00:00Z\r ")),
+                    ("notOnOrAfter", value_str(" \t\n2024-01-01T00:05:00Z\r ")),
                     ("destination", value_str("https://idp.example.com/slo")),
                 ]),
             ),
@@ -1364,6 +1366,11 @@ fn typed_models_logout_request_from_flow_result_exposes_session_indexes(
     let request = LogoutRequest::try_from(flow)?;
 
     assert_eq!(request.id().as_str(), "_logout123");
+    assert_eq!(request.issue_instant().as_str(), "2024-01-01T00:00:00Z");
+    assert_eq!(
+        request.not_on_or_after().map(SamlInstant::as_str),
+        Some("2024-01-01T00:05:00Z")
+    );
     assert_eq!(request.issuer().as_str(), "https://sp.example.com/metadata");
     assert_eq!(
         request
