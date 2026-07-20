@@ -352,8 +352,11 @@ pub struct TemplatePolicy {
     /// Logout response template.
     ///
     /// After prefix and placeholder substitution, the final outbound XML must
-    /// satisfy the schema structure and SLO-profile requirements enforced for
-    /// generated LogoutResponse messages.
+    /// satisfy the enforced LogoutResponse structure, issuer, destination, and
+    /// request-correlation requirements. A root `<ds:Signature>` is rejected
+    /// before signing so the library owns signature construction. When
+    /// `InResponseTo` is `None`, an attribute whose complete value is the
+    /// `{InResponseTo}` placeholder is omitted.
     pub logout_response_template: Option<String>,
     /// Embedded-signature placement and prefix.
     pub signature_config: Option<SignatureConfig>,

@@ -11,5 +11,5 @@ pub(crate) use date_time::{parse_generated_saml_utc_date_time, parse_saml_utc_da
 pub use dom::XmlLimits;
 pub use extract::{extract, extract_with_limits, ExtractorField, LocalPath};
 pub(crate) use profile::{
-    validate_custom_logout_response_outbound, validate_protocol_profile, OutboundLogoutValidation,
+    validate_logout_response_outbound, validate_protocol_profile, OutboundLogoutValidation,
 };

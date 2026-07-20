@@ -5,8 +5,7 @@ use crate::metadata::Metadata;
 use crate::template::{
     apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
 };
-use crate::xml::dom::Document;
-use crate::xml::{validate_custom_logout_response_outbound, OutboundLogoutValidation};
+use crate::xml::{validate_logout_response_outbound, OutboundLogoutValidation};
 
 use super::bindings::unsigned_context;
 use super::rendering::{
@@ -252,13 +251,14 @@ fn create_logout_request_for_subject_inner(
 /// # Errors
 ///
 /// Returns an error if `binding` is unsupported, `target_meta` has no SLO
-/// endpoint for `binding`, configured XML tag prefixes are invalid, a custom
-/// template's final outbound XML violates the enforced LogoutResponse schema
-/// structure or SLO-profile requirements, default XML rendering fails, or
-/// Redirect DEFLATE encoding fails. When `want_signed` is true, missing or
-/// invalid signing keys/certificates, unavailable crypto support, XML
-/// signature construction, and detached-signature construction errors are
-/// propagated.
+/// endpoint for `binding`, configured XML tag prefixes are invalid, the final
+/// outbound XML violates the enforced LogoutResponse schema structure,
+/// correlation, or SLO-profile requirements, default XML rendering fails, or
+/// Redirect DEFLATE encoding fails. A custom template must not contain a root
+/// XML signature before library signing. When `want_signed` is true, missing
+/// or invalid signing keys/certificates, unavailable crypto support, XML
+/// signature construction, detached-signature construction, and invalid
+/// post-signing placement errors are propagated.
 pub fn create_logout_response(
     init_setting: &EntitySetting,
     init_meta: &Metadata,
@@ -289,7 +289,6 @@ struct LogoutResponseInput<'a> {
     relay_state: Option<&'a str>,
     want_signed: bool,
     message_id: Option<&'a str>,
-    validate_template_in_response_to: bool,
 }
 
 /// Like [`create_logout_response`] but uses `message_id` when provided.
@@ -318,29 +317,6 @@ pub fn create_logout_response_with_id(
         relay_state,
         want_signed,
         message_id,
-        validate_template_in_response_to: false,
-    })
-}
-
-pub(crate) fn create_logout_response_checked(
-    init_setting: &EntitySetting,
-    init_meta: &Metadata,
-    target_meta: &Metadata,
-    binding: Binding,
-    in_response_to: Option<&str>,
-    relay_state: Option<&str>,
-    want_signed: bool,
-) -> Result<BindingContext, SamlError> {
-    create_logout_response_inner(LogoutResponseInput {
-        init_setting,
-        init_meta,
-        target_meta,
-        binding,
-        in_response_to,
-        relay_state,
-        want_signed,
-        message_id: None,
-        validate_template_in_response_to: true,
     })
 }
 
@@ -356,7 +332,6 @@ fn create_logout_response_inner(
         relay_state,
         want_signed,
         message_id,
-        validate_template_in_response_to,
     } = input;
 
     if matches!(binding, Binding::Artifact) {
@@ -381,19 +356,19 @@ fn create_logout_response_inner(
             &init_setting.tag_prefix_protocol,
             &init_setting.tag_prefix_assertion,
         );
-        replace_tags_by_value(
+        let xml = replace_tags_by_value(
             &template,
             &[
                 ("ID", id.clone()),
                 ("IssueInstant", issue_instant),
                 ("Destination", destination.clone()),
-                (
-                    "InResponseTo",
-                    in_response_to.unwrap_or_default().to_string(),
-                ),
                 ("Issuer", issuer.clone()),
                 ("StatusCode", status_code::SUCCESS.to_string()),
             ],
+        );
+        replace_tags_by_optional_value(
+            &xml,
+            &[("InResponseTo", in_response_to.map(str::to_string))],
         )
     } else {
         render_default_logout_response(
@@ -405,24 +380,16 @@ fn create_logout_response_inner(
             &issuer,
         )?
     };
-    let custom_document = if init_setting.logout_response_template.is_some() {
-        Some(validate_custom_logout_response_outbound(
-            &xml,
-            &id,
-            &destination,
-            &issuer,
-            OutboundLogoutValidation::BeforeSigning {
-                destination_required: want_signed,
-            },
-        )?)
-    } else {
-        None
-    };
-    if validate_template_in_response_to {
-        if let Some(document) = custom_document.as_ref() {
-            validate_logout_response_in_response_to(document, in_response_to)?;
-        }
-    }
+    validate_logout_response_outbound(
+        &xml,
+        &id,
+        &destination,
+        &issuer,
+        in_response_to,
+        OutboundLogoutValidation::BeforeSigning {
+            destination_required: want_signed,
+        },
+    )?;
     let (context, signature, sig_alg) = if want_signed {
         sign_logout(
             init_setting,
@@ -445,17 +412,15 @@ fn create_logout_response_inner(
             None,
         )
     };
-    if want_signed
-        && matches!(binding, Binding::Post)
-        && init_setting.logout_response_template.is_some()
-    {
+    if want_signed && matches!(binding, Binding::Post) {
         let signed_xml = String::from_utf8(crate::binding::base64_decode(&context)?)
             .map_err(|error| SamlError::Xml(error.to_string()))?;
-        validate_custom_logout_response_outbound(
+        validate_logout_response_outbound(
             &signed_xml,
             &id,
             &destination,
             &issuer,
+            in_response_to,
             OutboundLogoutValidation::AfterPostSigning,
         )?;
     }
@@ -469,18 +434,4 @@ fn create_logout_response_inner(
         signature,
         sig_alg,
     })
-}
-
-fn validate_logout_response_in_response_to(
-    document: &Document,
-    expected: Option<&str>,
-) -> Result<(), SamlError> {
-    let actual = document
-        .root
-        .attr("InResponseTo")
-        .filter(|value| !value.is_empty());
-    if actual == expected {
-        return Ok(());
-    }
-    Err(SamlError::in_response_to_mismatch(expected, actual))
 }

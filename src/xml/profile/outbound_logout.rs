@@ -1,12 +1,12 @@
 use super::{
-    classify_namespace, element_label, profile_error, require_version_2, root_consumed_attributes,
-    validate_unqualified_attributes, NamespaceKind,
+    classify_namespace, element_label, profile_error, require_version_2,
+    validate_closed_unqualified_attributes, NamespaceKind,
 };
-use crate::constants::{name_id_format, namespace, status_code, ParserType};
+use crate::constants::{name_id_format, namespace, status_code};
 use crate::error::SamlError;
 use crate::xml::dom::{parse_with_limits, Document, XmlLimits};
 use crate::xml::parse_generated_saml_utc_date_time;
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::NsReader;
 use url::Url;
 
@@ -15,7 +15,7 @@ enum OutboundLogoutElement {
     Root,
     Issuer,
     Signature,
-    Extensions,
+    Extensions { child_seen: bool },
     Status,
     StatusCode { child_seen: bool },
     StatusMessage,
@@ -35,6 +35,7 @@ struct OutboundLogoutExpectation<'a> {
     id: &'a str,
     destination: &'a str,
     issuer: &'a str,
+    in_response_to: Option<&'a str>,
     validation: OutboundLogoutValidation,
 }
 
@@ -55,6 +56,10 @@ impl OutboundLogoutValidation {
     }
 
     fn root_signature_required(self) -> bool {
+        matches!(self, Self::AfterPostSigning)
+    }
+
+    fn root_signature_allowed(self) -> bool {
         matches!(self, Self::AfterPostSigning)
     }
 }
@@ -138,10 +143,17 @@ fn validate_outbound_logout_root(
             element_label(element),
         )));
     }
-    let attributes = validate_unqualified_attributes(
+    let attributes = validate_closed_unqualified_attributes(
         reader,
         element,
-        root_consumed_attributes(ParserType::LogoutResponse),
+        &[
+            b"ID",
+            b"InResponseTo",
+            b"Version",
+            b"IssueInstant",
+            b"Destination",
+            b"Consent",
+        ],
         &[b"ID", b"Version", b"IssueInstant"],
     )?;
     require_version_2(&attributes, element)?;
@@ -157,19 +169,47 @@ fn validate_outbound_logout_root(
     }
     if id != expectation.id {
         return Err(SamlError::Invalid(format!(
-            "custom LogoutResponse ID mismatch: expected {}, got {id}",
+            "outbound LogoutResponse ID mismatch: expected {}, got {id}",
             expectation.id
         )));
     }
 
     state.destination = attribute_value(&attributes, b"Destination").map(str::to_string);
     if let Some(actual) = state.destination.as_deref() {
+        if !is_absolute_saml_uri(actual) {
+            return Err(profile_error(
+                "LogoutResponse Destination must be a non-empty absolute URI without whitespace",
+            ));
+        }
         if actual != expectation.destination {
             return Err(SamlError::destination_mismatch(
                 expectation.destination,
                 Some(actual),
             ));
         }
+    }
+
+    if let Some(consent) = attribute_value(&attributes, b"Consent") {
+        if !is_absolute_saml_uri(consent) {
+            return Err(profile_error(
+                "LogoutResponse Consent must be a non-empty absolute URI without whitespace",
+            ));
+        }
+    }
+
+    let actual_in_response_to = attribute_value(&attributes, b"InResponseTo");
+    if actual_in_response_to.is_some_and(|value| !is_ncname(value)) {
+        return Err(profile_error(
+            "LogoutResponse InResponseTo must use the XML Schema NCName lexical form",
+        ));
+    }
+    // SAML Core 2.0 §3.2.2 requires correlation when the request is known and
+    // requires omission when there is no known request to reference.
+    if actual_in_response_to != expectation.in_response_to {
+        return Err(SamlError::in_response_to_mismatch(
+            expectation.in_response_to,
+            actual_in_response_to,
+        ));
     }
     Ok(())
 }
@@ -182,7 +222,7 @@ fn validate_outbound_issuer(
     if element_namespace != NamespaceKind::Assertion {
         return Err(profile_error("Issuer has an invalid namespace"));
     }
-    let attributes = validate_unqualified_attributes(
+    let attributes = validate_closed_unqualified_attributes(
         reader,
         element,
         &[
@@ -215,7 +255,7 @@ fn validate_outbound_issuer(
     Ok(())
 }
 
-fn is_absolute_status_code_uri(value: &str) -> bool {
+fn is_absolute_saml_uri(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_whitespace) && Url::parse(value).is_ok()
 }
 
@@ -228,11 +268,12 @@ fn validate_outbound_status_code(
     if element_namespace != NamespaceKind::Protocol {
         return Err(profile_error("StatusCode has an invalid namespace"));
     }
-    let attributes = validate_unqualified_attributes(reader, element, &[b"Value"], &[b"Value"])?;
+    let attributes =
+        validate_closed_unqualified_attributes(reader, element, &[b"Value"], &[b"Value"])?;
     let value = attribute_value(&attributes, b"Value").ok_or_else(|| {
         profile_error("StatusCode is missing required unqualified attribute Value")
     })?;
-    if !is_absolute_status_code_uri(value) {
+    if !is_absolute_saml_uri(value) {
         return Err(profile_error(
             "StatusCode Value must be a non-empty absolute URI without whitespace",
         ));
@@ -257,6 +298,7 @@ fn validate_outbound_root_child(
     reader: &NsReader<&[u8]>,
     element: &BytesStart<'_>,
     element_namespace: NamespaceKind,
+    expectation: &OutboundLogoutExpectation<'_>,
     state: &mut OutboundLogoutState,
 ) -> Result<OutboundLogoutElement, SamlError> {
     let local = element.local_name();
@@ -267,15 +309,25 @@ fn validate_outbound_root_child(
             Ok(OutboundLogoutElement::Issuer)
         }
         (b"Signature", NamespaceKind::Dsig, 1) => {
+            if !expectation.validation.root_signature_allowed() {
+                // Library policy centralizes root signature construction. This
+                // also ensures Redirect can meet Bindings 2.0 §3.4.4.1 before
+                // DEFLATE without teaching generic binding helpers about XML.
+                return Err(profile_error(
+                    "outbound LogoutResponse templates must not contain a root ds:Signature before library signing",
+                ));
+            }
             state.root_stage = 2;
             state.saw_signature = true;
             Ok(OutboundLogoutElement::Signature)
         }
         (b"Extensions", NamespaceKind::Protocol, 1 | 2) => {
+            validate_closed_unqualified_attributes(reader, element, &[], &[])?;
             state.root_stage = 3;
-            Ok(OutboundLogoutElement::Extensions)
+            Ok(OutboundLogoutElement::Extensions { child_seen: false })
         }
         (b"Status", NamespaceKind::Protocol, 1..=3) => {
+            validate_closed_unqualified_attributes(reader, element, &[], &[])?;
             state.root_stage = 4;
             Ok(OutboundLogoutElement::Status)
         }
@@ -299,10 +351,12 @@ fn validate_outbound_status_child(
             Ok(OutboundLogoutElement::StatusCode { child_seen: false })
         }
         (b"StatusMessage", NamespaceKind::Protocol, 1) => {
+            validate_closed_unqualified_attributes(reader, element, &[], &[])?;
             state.status_stage = 2;
             Ok(OutboundLogoutElement::StatusMessage)
         }
         (b"StatusDetail", NamespaceKind::Protocol, 1 | 2) => {
+            validate_closed_unqualified_attributes(reader, element, &[], &[])?;
             state.status_stage = 3;
             Ok(OutboundLogoutElement::StatusDetail)
         }
@@ -327,7 +381,7 @@ fn validate_outbound_logout_start(
 
     match parent {
         OutboundLogoutElement::Root => {
-            validate_outbound_root_child(reader, element, element_namespace, state)
+            validate_outbound_root_child(reader, element, element_namespace, expectation, state)
         }
         OutboundLogoutElement::Issuer => Err(profile_error(
             "LogoutResponse Issuer must not contain child elements",
@@ -351,9 +405,22 @@ fn validate_outbound_logout_start(
         OutboundLogoutElement::StatusMessage => Err(profile_error(
             "StatusMessage must not contain child elements",
         )),
-        OutboundLogoutElement::Signature
-        | OutboundLogoutElement::Extensions
-        | OutboundLogoutElement::StatusDetail
+        OutboundLogoutElement::Extensions { child_seen } => {
+            // Core 2.0 §3.2.2 narrows the protocol schema's ##other wildcard:
+            // direct extension elements must use a namespace not defined by SAML.
+            if !matches!(
+                element_namespace,
+                NamespaceKind::Dsig | NamespaceKind::XmlEncryption | NamespaceKind::Other
+            ) {
+                return Err(profile_error(
+                    "Extensions direct children must use a namespace not defined by SAML",
+                ));
+            }
+            *child_seen = true;
+            Ok(OutboundLogoutElement::ExtensionContent)
+        }
+        OutboundLogoutElement::StatusDetail
+        | OutboundLogoutElement::Signature
         | OutboundLogoutElement::ExtensionContent => Ok(OutboundLogoutElement::ExtensionContent),
     }
 }
@@ -369,6 +436,9 @@ fn finish_outbound_logout_element(
         OutboundLogoutElement::Status if state.status_stage == 0 => Err(profile_error(
             "Status must contain exactly one StatusCode as its first child",
         )),
+        OutboundLogoutElement::Extensions { child_seen: false } => Err(profile_error(
+            "Extensions must contain at least one extension element",
+        )),
         _ => Ok(()),
     }
 }
@@ -377,18 +447,42 @@ fn validate_structural_text(
     parent: Option<&OutboundLogoutElement>,
     text: &[u8],
 ) -> Result<(), SamlError> {
-    let requires_whitespace = matches!(
+    if is_structural_element(parent)
+        && !text
+            .iter()
+            .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+    {
+        return Err(profile_error(
+            "structural LogoutResponse elements may contain only whitespace text",
+        ));
+    }
+    Ok(())
+}
+
+fn is_structural_element(parent: Option<&OutboundLogoutElement>) -> bool {
+    matches!(
         parent,
         Some(
             OutboundLogoutElement::Root
                 | OutboundLogoutElement::Status
                 | OutboundLogoutElement::StatusCode { .. }
+                | OutboundLogoutElement::Extensions { .. }
+                | OutboundLogoutElement::StatusDetail
         )
-    );
-    if requires_whitespace
-        && !text
-            .iter()
-            .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+    )
+}
+
+fn validate_structural_reference(
+    parent: Option<&OutboundLogoutElement>,
+    reference: &BytesRef<'_>,
+) -> Result<(), SamlError> {
+    if is_structural_element(parent)
+        && !matches!(
+            reference
+                .resolve_char_ref()
+                .map_err(|error| SamlError::Xml(error.to_string()))?,
+            Some(' ' | '\t' | '\r' | '\n')
+        )
     {
         return Err(profile_error(
             "structural LogoutResponse elements may contain only whitespace text",
@@ -448,19 +542,8 @@ fn validate_outbound_logout_stream(
             Event::CData(text) => {
                 validate_structural_text(stack.last(), text.as_ref())?;
             }
-            Event::GeneralRef(_) => {
-                if matches!(
-                    stack.last(),
-                    Some(
-                        OutboundLogoutElement::Root
-                            | OutboundLogoutElement::Status
-                            | OutboundLogoutElement::StatusCode { .. }
-                    )
-                ) {
-                    return Err(profile_error(
-                        "structural LogoutResponse elements may contain only whitespace text",
-                    ));
-                }
+            Event::GeneralRef(reference) => {
+                validate_structural_reference(stack.last(), &reference)?;
             }
             Event::DocType(_) => return Err(SamlError::Xml("DOCTYPE is not allowed".into())),
             Event::Eof => break,
@@ -470,11 +553,12 @@ fn validate_outbound_logout_stream(
     Ok(state)
 }
 
-pub(crate) fn validate_custom_logout_response_outbound(
+pub(crate) fn validate_logout_response_outbound(
     xml: &str,
     expected_id: &str,
     expected_destination: &str,
     expected_issuer: &str,
+    expected_in_response_to: Option<&str>,
     validation: OutboundLogoutValidation,
 ) -> Result<Document, SamlError> {
     let document = parse_with_limits(xml, XmlLimits::unbounded())?;
@@ -482,6 +566,7 @@ pub(crate) fn validate_custom_logout_response_outbound(
         id: expected_id,
         destination: expected_destination,
         issuer: expected_issuer,
+        in_response_to: expected_in_response_to,
         validation,
     };
     let state = validate_outbound_logout_stream(xml, &expectation)?;
@@ -524,16 +609,25 @@ mod tests {
     const ISSUER: &str = "https://idp.example.com/metadata";
     const RESPONSE_ID: &str = "_response";
 
-    fn response_xml(id: &str, destination: Option<&str>, children: &str) -> String {
+    fn response_xml_with_attributes(
+        id: &str,
+        destination: Option<&str>,
+        additional_attributes: &str,
+        children: &str,
+    ) -> String {
         let destination = destination
             .map(|value| format!(r#" Destination="{value}""#))
             .unwrap_or_default();
         format!(
-            r#"<samlp:LogoutResponse xmlns:samlp="{protocol}" xmlns:saml="{assertion}" xmlns:ds="{dsig}" xmlns:x="urn:example:extension" ID="{id}" Version="2.0" IssueInstant="2026-01-01T00:00:00Z"{destination}>{children}</samlp:LogoutResponse>"#,
+            r#"<samlp:LogoutResponse xmlns:samlp="{protocol}" xmlns:saml="{assertion}" xmlns:ds="{dsig}" xmlns:x="urn:example:extension" ID="{id}" Version="2.0" IssueInstant="2026-01-01T00:00:00Z"{destination}{additional_attributes}>{children}</samlp:LogoutResponse>"#,
             protocol = namespace::PROTOCOL,
             assertion = namespace::ASSERTION,
             dsig = namespace::DSIG,
         )
+    }
+
+    fn response_xml(id: &str, destination: Option<&str>, children: &str) -> String {
+        response_xml_with_attributes(id, destination, "", children)
     }
 
     fn issuer(attributes: &str, value: &str) -> String {
@@ -553,18 +647,28 @@ mod tests {
 
     fn canonical_children() -> String {
         format!(
-            r#"{issuer}<ds:Signature><ds:SignedInfo/></ds:Signature><samlp:Extensions><x:Extension/></samlp:Extensions><samlp:Status><samlp:StatusCode Value="{success}"><samlp:StatusCode Value="urn:example:subordinate"/></samlp:StatusCode><samlp:StatusMessage>completed</samlp:StatusMessage><samlp:StatusDetail><x:Detail/></samlp:StatusDetail></samlp:Status>"#,
+            r#"{issuer}<samlp:Extensions><x:Extension/></samlp:Extensions><samlp:Status><samlp:StatusCode Value="{success}"><samlp:StatusCode Value="urn:example:subordinate"/></samlp:StatusCode><samlp:StatusMessage>completed</samlp:StatusMessage><samlp:StatusDetail><x:Detail/></samlp:StatusDetail></samlp:Status>"#,
             issuer = issuer(&format!(r#" Format="{}""#, name_id_format::ENTITY), ISSUER),
             success = status_code::SUCCESS,
         )
     }
 
     fn validate(xml: &str, expected_id: &str, signed: bool) -> Result<Document, SamlError> {
-        validate_custom_logout_response_outbound(
+        validate_with_in_response_to(xml, expected_id, None, signed)
+    }
+
+    fn validate_with_in_response_to(
+        xml: &str,
+        expected_id: &str,
+        expected_in_response_to: Option<&str>,
+        signed: bool,
+    ) -> Result<Document, SamlError> {
+        validate_logout_response_outbound(
             xml,
             expected_id,
             DESTINATION,
             ISSUER,
+            expected_in_response_to,
             OutboundLogoutValidation::BeforeSigning {
                 destination_required: signed,
             },
@@ -581,7 +685,15 @@ mod tests {
     #[test]
     fn outbound_logout_response_accepts_canonical_schema_and_slo_profile(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let xml = response_xml(RESPONSE_ID, Some(DESTINATION), &canonical_children());
+        let xml = response_xml_with_attributes(
+            RESPONSE_ID,
+            Some(DESTINATION),
+            r#" Consent="urn:oasis:names:tc:SAML:2.0:consent:unspecified" xmlns:opaque="urn:example:opaque""#,
+            &canonical_children().replace(
+                "<x:Extension/>",
+                r#"<x:Extension opaque:attribute="value">opaque text<samlp:Nested/></x:Extension>"#,
+            ),
+        );
         let document = validate(&xml, RESPONSE_ID, true)?;
 
         assert_eq!(document.root.attr("ID"), Some(RESPONSE_ID));
@@ -777,5 +889,231 @@ mod tests {
 
         validate(&omitted, RESPONSE_ID, false)?;
         Ok(())
+    }
+
+    #[test]
+    fn outbound_logout_response_enforces_in_response_to_correlation_and_ncname(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let children = format!("{}{}", issuer("", ISSUER), success_status());
+        let matching = response_xml_with_attributes(
+            RESPONSE_ID,
+            Some(DESTINATION),
+            r#" InResponseTo="_request""#,
+            &children,
+        );
+        validate_with_in_response_to(&matching, RESPONSE_ID, Some("_request"), false)?;
+
+        let cases = [
+            (
+                response_xml(RESPONSE_ID, Some(DESTINATION), &children),
+                Some("_request"),
+            ),
+            (
+                response_xml_with_attributes(
+                    RESPONSE_ID,
+                    Some(DESTINATION),
+                    r#" InResponseTo="_other""#,
+                    &children,
+                ),
+                Some("_request"),
+            ),
+            (
+                response_xml_with_attributes(
+                    RESPONSE_ID,
+                    Some(DESTINATION),
+                    r#" InResponseTo="_request""#,
+                    &children,
+                ),
+                None,
+            ),
+        ];
+        for (xml, expected) in cases {
+            match validate_with_in_response_to(&xml, RESPONSE_ID, expected, false) {
+                Err(SamlError::InResponseToMismatch { .. }) => {}
+                other => {
+                    return Err(format!("expected InResponseToMismatch, got {other:?}").into());
+                }
+            }
+        }
+
+        for invalid in ["", "9request", "bad:request", "bad request"] {
+            let xml = response_xml_with_attributes(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                &format!(r#" InResponseTo="{invalid}""#),
+                &children,
+            );
+            match validate_with_in_response_to(&xml, RESPONSE_ID, Some(invalid), false) {
+                Err(SamlError::ProtocolProfile(_)) => {}
+                other => {
+                    return Err(format!("expected invalid NCName rejection, got {other:?}").into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn outbound_logout_response_rejects_unexpected_known_element_attributes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let status_code = format!(r#"<samlp:StatusCode Value="{}"/>"#, status_code::SUCCESS);
+        let cases = [
+            response_xml_with_attributes(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                r#" Unexpected="value""#,
+                &format!("{}{}", issuer("", ISSUER), status(&status_code)),
+            ),
+            response_xml_with_attributes(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                r#" x:Unexpected="value""#,
+                &format!("{}{}", issuer("", ISSUER), status(&status_code)),
+            ),
+            response_xml_with_attributes(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                r#" x:ID="_qualified""#,
+                &format!("{}{}", issuer("", ISSUER), status(&status_code)),
+            ),
+            response_xml(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                &format!(
+                    "{}{}",
+                    issuer(r#" Unexpected="value""#, ISSUER),
+                    status(&status_code)
+                ),
+            ),
+            response_xml(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                &format!(
+                    "{}{}",
+                    issuer("", ISSUER),
+                    r#"<samlp:Status Unexpected="value"><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>"#
+                ),
+            ),
+            response_xml(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                &format!(
+                    "{}{}",
+                    issuer("", ISSUER),
+                    status(
+                        r#"<samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success" Unexpected="value"/>"#
+                    )
+                ),
+            ),
+            response_xml(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                &format!(
+                    "{}{}",
+                    issuer("", ISSUER),
+                    status(&format!(
+                        r#"{status_code}<samlp:StatusMessage Unexpected="value">message</samlp:StatusMessage>"#
+                    ))
+                ),
+            ),
+            response_xml(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                &format!(
+                    "{}{}",
+                    issuer("", ISSUER),
+                    status(&format!(
+                        r#"{status_code}<samlp:StatusDetail Unexpected="value"/>"#
+                    ))
+                ),
+            ),
+            response_xml(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                &format!(
+                    r#"{}<samlp:Extensions Unexpected="value"><x:Extension/></samlp:Extensions>{}"#,
+                    issuer("", ISSUER),
+                    success_status()
+                ),
+            ),
+        ];
+
+        for xml in cases {
+            expect_profile_error(&xml)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn outbound_logout_response_rejects_invalid_destination_or_consent_uri(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let children = format!("{}{}", issuer("", ISSUER), success_status());
+        expect_profile_error(&response_xml(RESPONSE_ID, Some("relative/path"), &children))?;
+        expect_profile_error(&response_xml_with_attributes(
+            RESPONSE_ID,
+            Some(DESTINATION),
+            r#" Consent="relative consent""#,
+            &children,
+        ))
+    }
+
+    #[test]
+    fn outbound_logout_response_enforces_extensions_boundary(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let issuer = issuer("", ISSUER);
+        let status = success_status();
+        let cases = [
+            format!("{issuer}<samlp:Extensions/>{status}"),
+            format!("{issuer}<samlp:Extensions>text</samlp:Extensions>{status}"),
+            format!("{issuer}<samlp:Extensions><Extension/></samlp:Extensions>{status}"),
+            format!("{issuer}<samlp:Extensions><samlp:Extension/></samlp:Extensions>{status}"),
+            format!("{issuer}<samlp:Extensions><saml:Extension/></samlp:Extensions>{status}"),
+        ];
+        for children in cases {
+            expect_profile_error(&response_xml(RESPONSE_ID, Some(DESTINATION), &children))?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn outbound_logout_response_keeps_status_detail_open_but_element_only(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let issuer = issuer("", ISSUER);
+        let code = format!(r#"<samlp:StatusCode Value="{}"/>"#, status_code::SUCCESS);
+        for detail in [
+            "<samlp:StatusDetail/>",
+            r#"<samlp:StatusDetail><Arbitrary attr="value">opaque</Arbitrary></samlp:StatusDetail>"#,
+        ] {
+            let xml = response_xml(
+                RESPONSE_ID,
+                Some(DESTINATION),
+                &format!("{issuer}{}", status(&format!("{code}{detail}"))),
+            );
+            validate(&xml, RESPONSE_ID, false)?;
+        }
+
+        let invalid = response_xml(
+            RESPONSE_ID,
+            Some(DESTINATION),
+            &format!(
+                "{issuer}{}",
+                status(&format!(
+                    "{code}<samlp:StatusDetail>text</samlp:StatusDetail>"
+                ))
+            ),
+        );
+        expect_profile_error(&invalid)
+    }
+
+    #[test]
+    fn outbound_logout_response_rejects_root_signature_before_library_signing(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let children = format!(
+            "{}<ds:Signature><ds:SignedInfo/></ds:Signature>{}",
+            issuer("", ISSUER),
+            success_status()
+        );
+
+        expect_profile_error(&response_xml(RESPONSE_ID, Some(DESTINATION), &children))
     }
 }

@@ -5,8 +5,8 @@ use crate::entity::EntitySetting;
 use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
 use crate::logout::{
-    create_logout_request_with_session_indexes, create_logout_response_checked,
-    parse_logout_request_at, parse_logout_response_at, LogoutRequestSessionIndexes,
+    create_logout_request_with_session_indexes, create_logout_response, parse_logout_request_at,
+    parse_logout_response_at, LogoutRequestSessionIndexes,
 };
 use crate::metadata::Metadata;
 use crate::model::{
@@ -433,7 +433,7 @@ fn respond_slo_impl(
         .relay_state
         .unwrap_or_else(|| request.relay_state().clone());
     relay_state.validate()?;
-    let context = create_logout_response_checked(
+    let context = create_logout_response(
         local_setting,
         local_metadata,
         peer_metadata,

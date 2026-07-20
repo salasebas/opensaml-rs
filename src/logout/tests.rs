@@ -268,34 +268,42 @@ mod signed_tests {
     }
 
     #[test]
-    fn signed_custom_post_logout_response_rejects_signature_after_status(
+    fn signed_post_logout_response_rejects_signature_after_status_for_default_and_custom_renderers(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut sender = idp()?;
-        let target = sp()?;
-        sender.setting = signing_setting();
-        sender.setting.logout_response_template = Some(custom_logout_response_template(
-            r#"IssueInstant="{IssueInstant}""#,
-        ));
-        sender.setting.signature_config = Some(SignatureConfig {
-            prefix: "ds".into(),
-            reference: Some("/*[local-name(.)='LogoutResponse']/*[local-name(.)='Status']".into()),
-            action: SignatureAction::After,
-        });
-
-        let result = create_logout_response(
-            &sender.setting,
-            &sender.metadata,
-            &target.metadata,
-            Binding::Post,
-            Some("_req1"),
+        for template in [
             None,
-            true,
-        );
+            Some(custom_logout_response_template(
+                r#"IssueInstant="{IssueInstant}""#,
+            )),
+        ] {
+            let mut sender = idp()?;
+            let target = sp()?;
+            sender.setting = signing_setting();
+            sender.setting.logout_response_template = template;
+            sender.setting.signature_config = Some(SignatureConfig {
+                prefix: "ds".into(),
+                reference: Some(
+                    "/*[local-name(.)='LogoutResponse']/*[local-name(.)='Status']".into(),
+                ),
+                action: SignatureAction::After,
+            });
 
-        assert_protocol_profile_error(
-            result,
-            "LogoutResponse children must be Issuer, optional Signature, optional Extensions, and exactly one final Status",
-        )
+            let result = create_logout_response(
+                &sender.setting,
+                &sender.metadata,
+                &target.metadata,
+                Binding::Post,
+                Some("_req1"),
+                None,
+                true,
+            );
+
+            assert_protocol_profile_error(
+                result,
+                "LogoutResponse children must be Issuer, optional Signature, optional Extensions, and exactly one final Status",
+            )?;
+        }
+        Ok(())
     }
 
     #[test]
@@ -420,31 +428,96 @@ fn custom_logout_response_rejects_leap_second_before_redirect_signing(
 }
 
 #[test]
-fn checked_custom_logout_response_validates_profile_before_correlation_and_signing(
+fn public_custom_logout_response_enforces_in_response_to_correlation(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut sender = idp()?;
     let target = sp()?;
     sender.setting.logout_response_template = Some(
-        custom_logout_response_template(r#"IssueInstant="not-a-date""#).replace(
+        custom_logout_response_template(r#"IssueInstant="{IssueInstant}""#).replace(
             r#"InResponseTo="{InResponseTo}""#,
             r#"InResponseTo="_wrong""#,
         ),
     );
 
-    let result = create_logout_response_checked(
+    let result = create_logout_response(
         &sender.setting,
         &sender.metadata,
         &target.metadata,
         Binding::Post,
         Some("_req1"),
         None,
-        true,
+        false,
     );
 
-    assert_protocol_profile_error(
-        result,
-        "LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
-    )
+    match result {
+        Err(SamlError::InResponseToMismatch { expected, actual })
+            if expected.as_deref() == Some("_req1") && actual.as_deref() == Some("_wrong") =>
+        {
+            Ok(())
+        }
+        other => Err(format!("expected public InResponseToMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn custom_logout_response_omits_optional_in_response_to_placeholder(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template = Some(custom_logout_response_template(
+        r#"IssueInstant="{IssueInstant}""#,
+    ));
+
+    let context = create_logout_response(
+        &sender.setting,
+        &sender.metadata,
+        &target.metadata,
+        Binding::Post,
+        None,
+        None,
+        false,
+    )?;
+    let xml = decode_logout_response_context(&context)?;
+
+    assert!(!xml.contains("InResponseTo"));
+    Ok(())
+}
+
+#[test]
+fn custom_logout_response_rejects_root_signature_before_each_supported_binding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template = Some(
+        custom_logout_response_template(r#"IssueInstant="{IssueInstant}""#)
+            .replace(
+                r#"xmlns:custom="urn:example:custom""#,
+                &format!(
+                    r#"xmlns:custom="urn:example:custom" xmlns:ds="{}""#,
+                    crate::constants::namespace::DSIG
+                ),
+            )
+            .replace(
+                "<samlp:Status>",
+                "<ds:Signature><ds:SignedInfo/></ds:Signature><samlp:Status>",
+            ),
+    );
+
+    for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
+        assert_protocol_profile_error(
+            create_logout_response(
+                &sender.setting,
+                &sender.metadata,
+                &target.metadata,
+                binding,
+                Some("_req1"),
+                None,
+                false,
+            ),
+            "must not contain a root ds:Signature before library signing",
+        )?;
+    }
+    Ok(())
 }
 
 #[test]
