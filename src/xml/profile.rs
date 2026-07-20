@@ -6,6 +6,10 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, XmlVersion};
 
+mod outbound_logout;
+
+pub(crate) use outbound_logout::{validate_logout_response_outbound, OutboundLogoutValidation};
+
 const XML_ENCRYPTION_NS: &[u8] = b"http://www.w3.org/2001/04/xmlenc#";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,17 +72,34 @@ fn element_label(element: &BytesStart<'_>) -> String {
     String::from_utf8_lossy(element.local_name().as_ref()).into_owned()
 }
 
-fn validate_unqualified_attributes(
+#[derive(Debug, Clone, Copy)]
+enum UnexpectedAttributePolicy {
+    Ignore,
+    Reject,
+}
+
+fn validate_attributes(
     reader: &NsReader<&[u8]>,
     element: &BytesStart<'_>,
     consumed: &[&[u8]],
     required: &[&[u8]],
+    unexpected: UnexpectedAttributePolicy,
 ) -> Result<Vec<(Vec<u8>, String)>, SamlError> {
     let mut values = Vec::new();
     for attribute in element.attributes() {
         let attribute = attribute.map_err(|error| SamlError::Xml(error.to_string()))?;
+        if attribute.key.as_namespace_binding().is_some() {
+            continue;
+        }
         let (resolved, local) = reader.resolver().resolve_attribute(attribute.key);
         if !consumed.contains(&local.as_ref()) {
+            if matches!(unexpected, UnexpectedAttributePolicy::Reject) {
+                return Err(profile_error(format!(
+                    "unexpected attribute {} on {}",
+                    String::from_utf8_lossy(attribute.key.as_ref()),
+                    element_label(element),
+                )));
+            }
             continue;
         }
         if !matches!(resolved, ResolveResult::Unbound) {
@@ -105,6 +126,36 @@ fn validate_unqualified_attributes(
         }
     }
     Ok(values)
+}
+
+fn validate_unqualified_attributes(
+    reader: &NsReader<&[u8]>,
+    element: &BytesStart<'_>,
+    consumed: &[&[u8]],
+    required: &[&[u8]],
+) -> Result<Vec<(Vec<u8>, String)>, SamlError> {
+    validate_attributes(
+        reader,
+        element,
+        consumed,
+        required,
+        UnexpectedAttributePolicy::Ignore,
+    )
+}
+
+fn validate_closed_unqualified_attributes(
+    reader: &NsReader<&[u8]>,
+    element: &BytesStart<'_>,
+    consumed: &[&[u8]],
+    required: &[&[u8]],
+) -> Result<Vec<(Vec<u8>, String)>, SamlError> {
+    validate_attributes(
+        reader,
+        element,
+        consumed,
+        required,
+        UnexpectedAttributePolicy::Reject,
+    )
 }
 
 fn require_version_2(

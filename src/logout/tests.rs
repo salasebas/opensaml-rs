@@ -1,7 +1,7 @@
 use super::*;
 use crate::binding::{base64_decode, base64_encode, deflate_raw_decode};
 use crate::constants::Binding;
-use crate::entity::{EntitySetting, User};
+use crate::entity::{BindingContext, EntitySetting, User};
 use crate::error::SamlError;
 use crate::flow::HttpRequest;
 use crate::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
@@ -15,6 +15,7 @@ fn sp() -> Result<ServiceProvider, SamlError> {
             single_logout_service: vec![
                 Endpoint::new(Binding::Redirect, "https://sp/slo"),
                 Endpoint::new(Binding::Post, "https://sp/slo"),
+                Endpoint::new(Binding::SimpleSign, "https://sp/slo"),
             ],
             assertion_consumer_service: vec![Endpoint::new(Binding::Post, "https://sp/acs")],
             ..Default::default()
@@ -31,6 +32,7 @@ fn idp() -> Result<IdentityProvider, SamlError> {
             single_logout_service: vec![
                 Endpoint::new(Binding::Redirect, "https://idp/slo"),
                 Endpoint::new(Binding::Post, "https://idp/slo"),
+                Endpoint::new(Binding::SimpleSign, "https://idp/slo"),
             ],
             ..Default::default()
         },
@@ -55,6 +57,67 @@ fn unsigned_sp(entity_id: &str) -> Result<ServiceProvider, SamlError> {
         },
         unsigned_setting(),
     )
+}
+
+fn custom_logout_response_template(issue_instant_attribute: &str) -> String {
+    format!(
+        r#"<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:custom="urn:example:custom" ID="{{ID}}" Version="2.0" {issue_instant_attribute} Destination="{{Destination}}" InResponseTo="{{InResponseTo}}"><saml:Issuer>{{Issuer}}</saml:Issuer><samlp:Status><samlp:StatusCode Value="{{StatusCode}}"/></samlp:Status></samlp:LogoutResponse>"#
+    )
+}
+
+fn create_custom_logout_response(
+    issue_instant_attribute: &str,
+    binding: Binding,
+    want_signed: bool,
+) -> Result<BindingContext, SamlError> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template =
+        Some(custom_logout_response_template(issue_instant_attribute));
+    create_logout_response(
+        &sender.setting,
+        &sender.metadata,
+        &target.metadata,
+        binding,
+        Some("_req1"),
+        None,
+        want_signed,
+    )
+}
+
+fn assert_protocol_profile_error(
+    result: Result<BindingContext, SamlError>,
+    expected_message: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match result {
+        Err(SamlError::ProtocolProfile(message)) if message.contains(expected_message) => Ok(()),
+        Err(SamlError::ProtocolProfile(message)) => {
+            Err(format!("unexpected ProtocolProfile error: {message}").into())
+        }
+        Err(other) => Err(format!("expected ProtocolProfile, got {other:?}").into()),
+        Ok(_) => Err("expected ProtocolProfile, got successful LogoutResponse".into()),
+    }
+}
+
+fn decode_logout_response_context(
+    context: &BindingContext,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match context.binding {
+        Binding::Post | Binding::SimpleSign => {
+            Ok(String::from_utf8(base64_decode(&context.context)?)?)
+        }
+        Binding::Redirect => {
+            let url = Url::parse(&context.context)?;
+            let encoded = url
+                .query_pairs()
+                .find_map(|(key, value)| (key == "SAMLResponse").then_some(value.into_owned()))
+                .ok_or("missing SAMLResponse")?;
+            Ok(String::from_utf8(deflate_raw_decode(&base64_decode(
+                &encoded,
+            )?)?)?)
+        }
+        Binding::Artifact => Err("Artifact binding is unsupported".into()),
+    }
 }
 
 fn logout_response_request(issue_instant_attribute: &str) -> HttpRequest {
@@ -154,6 +217,7 @@ fn unsigned_logout_request_rejects_unexpected_issuer_when_explicitly_allowed(
 mod signed_tests {
     use super::*;
     use crate::constants::signature_algorithm::RSA_SHA256;
+    use crate::entity::{SignatureAction, SignatureConfig};
 
     const PRIVKEY: &str = include_str!("../../tests/fixtures/key/sp_privkey.pem");
     const CERT: &str = include_str!("../../tests/fixtures/key/sp_signing_cert.cer");
@@ -202,6 +266,81 @@ mod signed_tests {
         assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
         Ok(())
     }
+
+    #[test]
+    fn signed_post_logout_response_rejects_signature_after_status_for_default_and_custom_renderers(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for template in [
+            None,
+            Some(custom_logout_response_template(
+                r#"IssueInstant="{IssueInstant}""#,
+            )),
+        ] {
+            let mut sender = idp()?;
+            let target = sp()?;
+            sender.setting = signing_setting();
+            sender.setting.logout_response_template = template;
+            sender.setting.signature_config = Some(SignatureConfig {
+                prefix: "ds".into(),
+                reference: Some(
+                    "/*[local-name(.)='LogoutResponse']/*[local-name(.)='Status']".into(),
+                ),
+                action: SignatureAction::After,
+            });
+
+            let result = create_logout_response(
+                &sender.setting,
+                &sender.metadata,
+                &target.metadata,
+                Binding::Post,
+                Some("_req1"),
+                None,
+                true,
+            );
+
+            assert_protocol_profile_error(
+                result,
+                "LogoutResponse children must be Issuer, optional Signature, optional Extensions, and exactly one final Status",
+            )?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn signed_custom_post_logout_response_rejects_signature_inside_extensions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut sender = idp()?;
+        let target = sp()?;
+        sender.setting = signing_setting();
+        sender.setting.logout_response_template = Some(
+            custom_logout_response_template(r#"IssueInstant="{IssueInstant}""#).replace(
+                "<samlp:Status>",
+                "<samlp:Extensions><custom:Marker/></samlp:Extensions><samlp:Status>",
+            ),
+        );
+        sender.setting.signature_config = Some(SignatureConfig {
+            prefix: "ds".into(),
+            reference: Some(
+                "/*[local-name(.)='LogoutResponse']/*[local-name(.)='Extensions']".into(),
+            ),
+            action: SignatureAction::Append,
+        });
+
+        let result = create_logout_response(
+            &sender.setting,
+            &sender.metadata,
+            &target.metadata,
+            Binding::Post,
+            Some("_req1"),
+            None,
+            true,
+        );
+
+        assert_protocol_profile_error(
+            result,
+            "signed POST LogoutResponse must contain a root ds:Signature in schema order",
+        )
+    }
 }
 
 #[test]
@@ -227,6 +366,241 @@ fn logout_response_post_round_trips() -> Result<(), Box<dyn std::error::Error>> 
     assert_eq!(
         result.extract.get_str("issuer"),
         Some("https://idp.example.com/metadata")
+    );
+    Ok(())
+}
+
+#[test]
+fn custom_logout_response_rejects_missing_issue_instant_before_post_encoding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_protocol_profile_error(
+        create_custom_logout_response("", Binding::Post, false),
+        "LogoutResponse is missing required unqualified attribute IssueInstant",
+    )
+}
+
+#[test]
+fn custom_logout_response_rejects_qualified_issue_instant_before_redirect_encoding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_protocol_profile_error(
+        create_custom_logout_response(
+            r#"custom:IssueInstant="2000-01-01T00:00:00Z""#,
+            Binding::Redirect,
+            false,
+        ),
+        "attribute IssueInstant on LogoutResponse must be unqualified",
+    )
+}
+
+#[test]
+fn custom_logout_response_rejects_malformed_issue_instant_before_simplesign_encoding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_protocol_profile_error(
+        create_custom_logout_response(r#"IssueInstant="not-a-date""#, Binding::SimpleSign, false),
+        "LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
+    )
+}
+
+#[test]
+fn custom_logout_response_rejects_offset_issue_instant_before_post_signing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_protocol_profile_error(
+        create_custom_logout_response(
+            r#"IssueInstant="2000-01-01T00:00:00+00:00""#,
+            Binding::Post,
+            true,
+        ),
+        "LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
+    )
+}
+
+#[test]
+fn custom_logout_response_rejects_leap_second_before_redirect_signing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_protocol_profile_error(
+        create_custom_logout_response(
+            r#"IssueInstant="2000-01-01T00:00:60Z""#,
+            Binding::Redirect,
+            true,
+        ),
+        "LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z",
+    )
+}
+
+#[test]
+fn public_custom_logout_response_enforces_in_response_to_correlation(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template = Some(
+        custom_logout_response_template(r#"IssueInstant="{IssueInstant}""#).replace(
+            r#"InResponseTo="{InResponseTo}""#,
+            r#"InResponseTo="_wrong""#,
+        ),
+    );
+
+    let result = create_logout_response(
+        &sender.setting,
+        &sender.metadata,
+        &target.metadata,
+        Binding::Post,
+        Some("_req1"),
+        None,
+        false,
+    );
+
+    match result {
+        Err(SamlError::InResponseToMismatch { expected, actual })
+            if expected.as_deref() == Some("_req1") && actual.as_deref() == Some("_wrong") =>
+        {
+            Ok(())
+        }
+        other => Err(format!("expected public InResponseToMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn custom_logout_response_omits_optional_in_response_to_placeholder(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template = Some(custom_logout_response_template(
+        r#"IssueInstant="{IssueInstant}""#,
+    ));
+
+    let context = create_logout_response(
+        &sender.setting,
+        &sender.metadata,
+        &target.metadata,
+        Binding::Post,
+        None,
+        None,
+        false,
+    )?;
+    let xml = decode_logout_response_context(&context)?;
+
+    assert!(!xml.contains("InResponseTo"));
+    Ok(())
+}
+
+#[test]
+fn custom_logout_response_rejects_root_signature_before_each_supported_binding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template = Some(
+        custom_logout_response_template(r#"IssueInstant="{IssueInstant}""#)
+            .replace(
+                r#"xmlns:custom="urn:example:custom""#,
+                &format!(
+                    r#"xmlns:custom="urn:example:custom" xmlns:ds="{}""#,
+                    crate::constants::namespace::DSIG
+                ),
+            )
+            .replace(
+                "<samlp:Status>",
+                "<ds:Signature><ds:SignedInfo/></ds:Signature><samlp:Status>",
+            ),
+    );
+
+    for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
+        assert_protocol_profile_error(
+            create_logout_response(
+                &sender.setting,
+                &sender.metadata,
+                &target.metadata,
+                binding,
+                Some("_req1"),
+                None,
+                false,
+            ),
+            "must not contain a root ds:Signature before library signing",
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn custom_logout_response_rejects_doctype_before_profile_validation(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template = Some(format!(
+        r#"<!DOCTYPE samlp:LogoutResponse>{}"#,
+        custom_logout_response_template(r#"IssueInstant="2000-01-01T00:00:00Z""#)
+    ));
+
+    match create_logout_response(
+        &sender.setting,
+        &sender.metadata,
+        &target.metadata,
+        Binding::Post,
+        Some("_req1"),
+        None,
+        false,
+    ) {
+        Err(SamlError::Xml(message)) if message.contains("DOCTYPE is not allowed") => Ok(()),
+        other => Err(format!("expected structural DOCTYPE rejection, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn custom_logout_response_accepts_issue_instant_placeholder_for_all_supported_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template = Some(custom_logout_response_template(
+        r#"IssueInstant="{IssueInstant}""#,
+    ));
+
+    for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
+        let context = create_logout_response(
+            &sender.setting,
+            &sender.metadata,
+            &target.metadata,
+            binding,
+            Some("_req1"),
+            None,
+            false,
+        )?;
+        let xml = decode_logout_response_context(&context)?;
+        let document = crate::xml::dom::parse(&xml)?;
+        let issue_instant = document
+            .root
+            .attr("IssueInstant")
+            .ok_or("missing rendered IssueInstant")?;
+        assert!(
+            issue_instant.ends_with('Z'),
+            "expected generated UTC IssueInstant for {binding:?}, got {issue_instant}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn custom_logout_response_preserves_valid_literal_without_destination(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender = idp()?;
+    let target = sp()?;
+    sender.setting.logout_response_template = Some(
+        r#"<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="{ID}" Version="2.0" IssueInstant="2000-01-01T00:00:00Z" InResponseTo="{InResponseTo}"><saml:Issuer>{Issuer}</saml:Issuer><samlp:Status><samlp:StatusCode Value="{StatusCode}"/></samlp:Status></samlp:LogoutResponse>"#.to_string(),
+    );
+
+    let context = create_logout_response_with_id(
+        &sender.setting,
+        &sender.metadata,
+        &target.metadata,
+        Binding::Post,
+        Some("_req1"),
+        None,
+        false,
+        Some("_fixed"),
+    )?;
+    let xml = decode_logout_response_context(&context)?;
+
+    assert_eq!(
+        xml,
+        r#"<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_fixed" Version="2.0" IssueInstant="2000-01-01T00:00:00Z" InResponseTo="_req1"><saml:Issuer>https://idp.example.com/metadata</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status></samlp:LogoutResponse>"#
     );
     Ok(())
 }

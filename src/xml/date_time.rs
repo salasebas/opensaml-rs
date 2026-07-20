@@ -45,6 +45,17 @@ fn is_xml_schema_whitespace(value: char) -> bool {
 
 /// Parse the SAML UTC subset of `xs:dateTime` and return its collapsed value.
 pub(crate) fn parse_saml_utc_date_time(value: &str) -> Option<&str> {
+    parse_saml_utc_date_time_with_seconds(value).map(|(normalized, _)| normalized)
+}
+
+/// Parse a UTC `xs:dateTime` that a SAML producer is allowed to generate.
+pub(crate) fn parse_generated_saml_utc_date_time(value: &str) -> Option<&str> {
+    parse_saml_utc_date_time_with_seconds(value)
+        .filter(|(_, second)| *second < 60)
+        .map(|(normalized, _)| normalized)
+}
+
+fn parse_saml_utc_date_time_with_seconds(value: &str) -> Option<(&str, u8)> {
     let value = value.trim_matches(is_xml_schema_whitespace);
     let without_timezone = value.strip_suffix('Z')?;
     let bytes = without_timezone.as_bytes();
@@ -102,18 +113,19 @@ pub(crate) fn parse_saml_utc_date_time(value: &str) -> Option<&str> {
             && fractional
                 .get(1..)
                 .is_none_or(|digits| digits.iter().all(|digit| *digit == b'0'))))
-    .then_some(value)
+    .then_some((value, second))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_saml_utc_date_time;
+    use super::{parse_generated_saml_utc_date_time, parse_saml_utc_date_time};
 
     #[test]
     fn accepts_and_normalizes_saml_utc_date_times() {
         let cases = [
             ("2004-02-29T23:59:59Z", "2004-02-29T23:59:59Z"),
             ("2000-02-29T00:00:00Z", "2000-02-29T00:00:00Z"),
+            ("2024-01-01T00:00:60Z", "2024-01-01T00:00:60Z"),
             ("-0001-02-29T00:00:00Z", "-0001-02-29T00:00:00Z"),
             ("-0401-02-29T00:00:00Z", "-0401-02-29T00:00:00Z"),
             (
@@ -176,5 +188,13 @@ mod tests {
         ] {
             assert_eq!(parse_saml_utc_date_time(value), None, "{value:?}");
         }
+    }
+
+    #[test]
+    fn generated_saml_date_time_rejects_leap_seconds() {
+        assert_eq!(
+            parse_generated_saml_utc_date_time("2024-01-01T00:00:60Z"),
+            None
+        );
     }
 }

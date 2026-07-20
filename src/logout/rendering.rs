@@ -29,11 +29,11 @@ impl<'a> LogoutRequestSubject<'a> {
 
 pub(super) fn render_default_logout_response(
     setting: &EntitySetting,
-    meta: &Metadata,
     id: &str,
     issue_instant: &str,
     destination: &str,
     in_response_to: Option<&str>,
+    issuer: &str,
 ) -> Result<String, SamlError> {
     validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
     validate_tag_prefix("assertion", &setting.tag_prefix_assertion)?;
@@ -46,8 +46,6 @@ pub(super) fn render_default_logout_response(
     let status_code_name = format!("{protocol_prefix}:StatusCode");
     let xmlns_protocol = format!("xmlns:{protocol_prefix}");
     let xmlns_assertion = format!("xmlns:{assertion_prefix}");
-    let issuer = issuer_of(setting, meta);
-
     let mut attrs = vec![
         (xmlns_protocol.as_str(), namespace::PROTOCOL),
         (xmlns_assertion.as_str(), namespace::ASSERTION),
@@ -62,7 +60,7 @@ pub(super) fn render_default_logout_response(
 
     let mut writer = XmlWriter::new();
     writer.start(&root_name, &attrs);
-    writer.text_element(&issuer_name, &[], &issuer);
+    writer.text_element(&issuer_name, &[], issuer);
     writer.start(&status_name, &[]);
     writer.empty(&status_code_name, &[("Value", status_code::SUCCESS)]);
     writer.end(&status_name);

@@ -675,7 +675,7 @@ fn logout_request_session_index_escapes_xml_markup_before_signing() -> TestResul
 }
 
 #[test]
-fn logout_response_in_response_to_escapes_xml_markup_before_signing() -> TestResult {
+fn logout_response_rejects_non_ncname_in_response_to_before_signing() -> TestResult {
     let idp = idp(signing())?;
     let sp = sp()?;
     let injected_request_id = concat!(
@@ -684,7 +684,7 @@ fn logout_response_in_response_to_escapes_xml_markup_before_signing() -> TestRes
         "<samlp:LogoutResponse ID=\"evil\">"
     );
 
-    let ctx = create_logout_response(
+    let result = create_logout_response(
         &idp.setting,
         &idp.metadata,
         &sp.metadata,
@@ -692,14 +692,16 @@ fn logout_response_in_response_to_escapes_xml_markup_before_signing() -> TestRes
         Some(injected_request_id),
         None,
         true,
-    )?;
-    let xml = decode_binding_context(&ctx.context)?;
+    );
 
-    assert!(xml.contains("<ds:Signature"));
-    assert_eq!(xml.matches("<samlp:LogoutResponse").count(), 1);
-    assert!(xml.contains("InResponseTo=\"_req&quot; injected=&quot;yes"));
-    assert!(xml.contains("&lt;/samlp:LogoutResponse&gt;"));
-    assert!(!xml.contains(" injected=\"yes"));
-    assert!(!xml.contains("<samlp:LogoutResponse ID=\"evil\">"));
-    Ok(())
+    match result {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains(
+                "LogoutResponse InResponseTo must use the XML Schema NCName lexical form",
+            ) =>
+        {
+            Ok(())
+        }
+        other => Err(format!("expected NCName rejection before signing, got {other:?}").into()),
+    }
 }

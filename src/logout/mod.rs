@@ -14,8 +14,7 @@ pub use creation::{
     create_logout_response_with_id,
 };
 pub(crate) use creation::{
-    create_logout_request_with_session_indexes, create_logout_response_checked,
-    LogoutRequestSessionIndexes,
+    create_logout_request_with_session_indexes, LogoutRequestSessionIndexes,
 };
 pub use parsing::{
     parse_logout_request, parse_logout_response, parse_logout_response_without_request_id,
