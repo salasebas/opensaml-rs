@@ -278,11 +278,17 @@ fn sso_session() -> Result<SsoSession, SamlError> {
         extract: value_object(vec![
             (
                 "response",
-                value_object(vec![("id", value_str("_response123"))]),
+                value_object(vec![
+                    ("id", value_str("_response123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
             (
                 "assertion",
-                value_object(vec![("id", value_str("_assertion123"))]),
+                value_object(vec![
+                    ("id", value_str("_assertion123")),
+                    ("issueInstant", value_str("2024-01-01T00:00:01Z")),
+                ]),
             ),
             ("issuer", value_str(IDP_ENTITY_ID)),
             ("nameID", value_str("alice@example.com")),

@@ -114,11 +114,17 @@ fn session_flow_with_ids(response_id: &str, assertion_id: &str) -> FlowResult {
         extract: value_object(vec![
             (
                 "response",
-                value_object(vec![("id", value_str(response_id))]),
+                value_object(vec![
+                    ("id", value_str(response_id)),
+                    ("issueInstant", value_str("2024-01-01T00:00:00Z")),
+                ]),
             ),
             (
                 "assertion",
-                value_object(vec![("id", value_str(assertion_id))]),
+                value_object(vec![
+                    ("id", value_str(assertion_id)),
+                    ("issueInstant", value_str("2024-01-01T00:00:01Z")),
+                ]),
             ),
             ("issuer", value_str("https://idp.example.com/metadata")),
             ("nameID", value_str("alice@example.com")),

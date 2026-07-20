@@ -28,8 +28,30 @@ work in the repo, not restate the README.
 - If a user has local changes, preserve them and work around them.
 - Keep non-mechanical diffs reviewable. If a change grows large, split it into
   the smallest coherent stages.
-- New SAML behavior should be justified by the SAML specifications,
-  interoperability evidence, or focused local tests.
+- New SAML behavior must follow `docs/standards-conformance.md`.
+
+## Standards Conformance
+
+- Read `docs/standards-conformance.md` before adding or changing SAML
+  generation, parsing, validation, bindings, profiles, or metadata behavior.
+- Cite and verify the applicable OASIS standard, schema, profile/binding, and
+  approved errata. Identify the obligated actor, condition, and scope.
+- A producer `MUST` or `MUST NOT` does not automatically require a receiver to
+  reject non-conforming input. Add rejection only when an applicable normative
+  receiver or schema rule requires it.
+- Mandatory requirements are always enforced. Recommendations are default-on
+  and may be relaxed only by an explicit, narrowly named policy. Optional
+  capabilities require intentional configuration.
+- Scope conformance claims by role, direction, profile or flow, binding, and
+  feature. Lower-level XML support does not imply conformance with a complete
+  profile, binding, or SAML V2.0 as a whole.
+- MUST NOT retroactively change existing behavior, defaults, or public APIs
+  solely to align them with the conformance policy unless the task explicitly
+  authorizes that change. If existing behavior appears to predate or conflict
+  with the policy, preserve it, report the normative evidence and compatibility
+  or security impact, and ask for direction before changing it.
+- Do not present library safety or application policy as an OASIS wire
+  requirement, and do not invent validation for unspecified behavior.
 
 ## Fixture Provenance
 
