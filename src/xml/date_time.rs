@@ -122,7 +122,6 @@ mod tests {
             ),
             ("2024-01-01T24:00:00Z", "2024-01-01T24:00:00Z"),
             ("2024-01-01T24:00:00.000Z", "2024-01-01T24:00:00.000Z"),
-            ("2024-01-01T00:00:60Z", "2024-01-01T00:00:60Z"),
             (
                 " \t\n\r2024-01-01T00:00:00.123Z \t\n\r",
                 "2024-01-01T00:00:00.123Z",
@@ -132,6 +131,14 @@ mod tests {
         for (value, normalized) in cases {
             assert_eq!(parse_saml_utc_date_time(value), Some(normalized));
         }
+    }
+
+    #[test]
+    fn accepts_xml_schema_leap_seconds_inbound() {
+        assert_eq!(
+            parse_saml_utc_date_time("2024-01-01T00:00:60Z"),
+            Some("2024-01-01T00:00:60Z")
+        );
     }
 
     #[test]

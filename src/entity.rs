@@ -289,6 +289,12 @@ pub fn now_iso8601() -> String {
 /// UTC time `seconds` from now as ISO-8601 (`YYYY-MM-DDTHH:MM:SSZ`).
 pub fn iso8601_offset(seconds: i64) -> String {
     let t = time::OffsetDateTime::now_utc() + time::Duration::seconds(seconds);
+    format_saml_utc_date_time(t)
+}
+
+// `OffsetDateTime` represents seconds in the range 0..=59, so this outbound
+// formatter cannot emit the leap-second value prohibited by SAML Core §1.3.3.
+fn format_saml_utc_date_time(t: time::OffsetDateTime) -> String {
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         t.year(),
@@ -298,6 +304,24 @@ pub fn iso8601_offset(seconds: i64) -> String {
         t.minute(),
         t.second(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_saml_utc_date_time;
+
+    #[test]
+    fn outbound_saml_instants_do_not_generate_leap_seconds(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // The final representable second before the 2016 leap-second boundary.
+        let last_second = time::OffsetDateTime::from_unix_timestamp(1_483_228_799)?;
+
+        assert_eq!(
+            format_saml_utc_date_time(last_second),
+            "2016-12-31T23:59:59Z"
+        );
+        Ok(())
+    }
 }
 
 /// The product of building an outbound message for a binding.
