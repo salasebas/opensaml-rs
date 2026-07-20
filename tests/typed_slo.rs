@@ -81,13 +81,17 @@ fn sp_config() -> Result<SpConfig, SamlError> {
 }
 
 fn idp_config() -> Result<IdpConfig, SamlError> {
+    idp_config_with_validation(IdpValidationPolicy::strict())
+}
+
+fn idp_config_with_validation(validation: IdpValidationPolicy) -> Result<IdpConfig, SamlError> {
     IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
         .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
         .slo_endpoint(SloEndpoint::post(IDP_SLO_POST)?)
         .slo_endpoint(SloEndpoint::redirect(IDP_SLO_REDIRECT)?)
         .slo_endpoint(SloEndpoint::simple_sign(IDP_SLO_SIMPLESIGN)?)
         .credentials(credentials())
-        .validation(IdpValidationPolicy::strict())
+        .validation(validation)
         .build()
 }
 
@@ -380,6 +384,29 @@ fn typed_slo_start_and_response_bindings_use_peer_endpoints(
     );
     assert!(simple_sign_response_form.value("SigAlg").is_some());
     assert!(simple_sign_response_form.value("Signature").is_some());
+    Ok(())
+}
+
+#[test]
+fn typed_slo_signs_front_channel_responses_despite_compatibility_policy(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_config()?)?;
+    let idp = Saml::idp(idp_config_with_validation(
+        IdpValidationPolicy::compatibility(),
+    )?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let request_input = BrowserInput::<LogoutRequest>::post(post_fields(&started.outbound)?);
+    let received = idp.receive_slo(&sp_descriptor, request_input, validation())?;
+
+    let post = idp.respond_slo(&sp_descriptor, &received, RespondSlo::post())?;
+    assert!(outbound_xml(&post, "SAMLResponse")?.contains("<ds:Signature"));
+
+    let redirect = idp.respond_slo(&sp_descriptor, &received, RespondSlo::redirect())?;
+    let redirect_url = Url::parse(redirect.redirect_url()?)?;
+    assert!(redirect_url
+        .query_pairs()
+        .any(|(name, value)| name == "Signature" && !value.is_empty()));
     Ok(())
 }
 
@@ -913,7 +940,7 @@ fn typed_facade_rejects_custom_logout_response_profile_before_correlation(
 }
 
 #[test]
-fn typed_facade_allows_explicit_unsigned_slo_for_compatibility(
+fn typed_facade_allows_explicit_unsigned_logout_request_for_compatibility(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (sp, idp) = facades()?;
     let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;

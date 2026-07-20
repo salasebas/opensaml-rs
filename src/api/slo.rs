@@ -440,7 +440,9 @@ fn respond_slo_impl(
         options.binding.as_binding(),
         Some(request.message().id().as_str()),
         relay_state.as_deref(),
-        logout_response_signing(local_setting, options.signing),
+        // SAML Profiles 2.0 §§4.4.3.4 and 4.4.4.2 require front-channel
+        // LogoutResponses to authenticate the responder and protect integrity.
+        true,
     )?;
     Outbound::<LogoutResponse>::try_from(context)
 }
@@ -484,14 +486,6 @@ fn finish_slo_impl(
 fn logout_request_signing(setting: &EntitySetting, signing: LogoutSigning) -> bool {
     match signing {
         LogoutSigning::FollowLocalPolicy => setting.want_logout_request_signed,
-        LogoutSigning::Sign => true,
-        LogoutSigning::DoNotSignForCompatibility => false,
-    }
-}
-
-fn logout_response_signing(setting: &EntitySetting, signing: LogoutSigning) -> bool {
-    match signing {
-        LogoutSigning::FollowLocalPolicy => setting.want_logout_response_signed,
         LogoutSigning::Sign => true,
         LogoutSigning::DoNotSignForCompatibility => false,
     }

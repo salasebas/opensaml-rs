@@ -115,7 +115,7 @@ impl RespondSso {
     }
 }
 
-/// Explicit signing choice for typed Single Logout messages.
+/// Explicit signing choice for typed Single Logout requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogoutSigning {
     /// Use the local typed logout policy.
@@ -176,7 +176,6 @@ impl StartSlo {
 pub struct RespondSlo {
     pub(super) binding: LogoutBinding,
     pub(super) relay_state: Option<RelayStateParam>,
-    pub(super) signing: LogoutSigning,
 }
 
 impl RespondSlo {
@@ -199,7 +198,6 @@ impl RespondSlo {
         Self {
             binding,
             relay_state: None,
-            signing: LogoutSigning::FollowLocalPolicy,
         }
     }
 
@@ -209,12 +207,6 @@ impl RespondSlo {
     /// [`RelayStateParam::absent`] to suppress echo.
     pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
         self.relay_state = Some(relay_state);
-        self
-    }
-
-    /// Set logout response signing behavior.
-    pub fn signing(mut self, signing: LogoutSigning) -> Self {
-        self.signing = signing;
         self
     }
 }
