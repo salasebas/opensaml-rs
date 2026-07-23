@@ -1,45 +1,116 @@
-# Issue tracker: GitHub
+# Issue tracking: public GitHub and private Linear
 
-Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+This repo deliberately uses two issue trackers:
 
-## Conventions
+- **GitHub Issues** is the public intake and collaboration surface.
+- The **private `OpenSaml` Linear team** is the maintainer's planning surface
+  for private engineering work.
 
-- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
-- **Read an issue**: `gh issue view <number> --comments`, filtering comments by `jq` and also fetching labels.
-- **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
-- **Comment on an issue**: `gh issue comment <number> --body "..."`
-- **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
+An item has one canonical tracker. Do not mirror whole issues, comments, or
+private planning between trackers.
+
+## Routing
+
+Choose the tracker before the first write:
+
+| Work | Canonical tracker |
+| --- | --- |
+| Public bug report or feature request | GitHub |
+| `/triage`, including every raw external request | GitHub |
+| A GitHub URL, `#<number>`, or public contributor task | GitHub |
+| Private planning initiated by the maintainer | Linear |
+| Maintainer-initiated `/to-tickets` or `/wayfinder` | Linear |
+| A Linear URL or issue identifier | Linear |
+| `/implement` | The tracker of the supplied ticket |
+
+When a private planning flow starts from a public GitHub issue, the GitHub
+issue remains the canonical public conversation and status. Private planning
+and child tickets may live in Linear and may link **to** the GitHub issue.
+Never add the private Linear link or private planning detail back to GitHub.
+
+If routing is still ambiguous, ask the maintainer before publishing. Reading
+the codebase and drafting work locally do not require that clarification.
+
+## Public GitHub operations
+
+Infer the repository from `git remote -v` and use the `gh` CLI.
+
+- **Create**: `gh issue create --title "..." --body "..."`
+- **Read**: `gh issue view <number> --comments`
+- **List**: `gh issue list --state open --json number,title,body,labels,comments`
+- **Comment**: `gh issue comment <number> --body "..."`
+- **Label**: `gh issue edit <number> --add-label "..."` or
+  `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
+Public tickets produced specifically for an external collaborator remain on
+GitHub and use the triage labels in `docs/agents/triage-labels.md`.
 
-## Pull requests as a triage surface
+### Pull requests as a triage surface
 
-**PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
+**PRs as a request surface: no.**
 
-When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr` equivalents:
+Pull requests remain public code-review artifacts, but `/triage` does not
+discover them as incoming requests. Resolve an explicitly supplied bare
+`#<number>` with `gh pr view <number>` and fall back to
+`gh issue view <number>`.
 
-- **Read a PR**: `gh pr view <number> --comments` and `gh pr diff <number>` for the diff.
-- **List external PRs for triage**: `gh pr list --state open --json number,title,body,labels,author,authorAssociation,comments` then keep only `authorAssociation` of `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, or `NONE` (drop `OWNER`/`MEMBER`/`COLLABORATOR`).
-- **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
+## Private Linear operations
 
-GitHub shares one number space across issues and PRs, so a bare `#42` may be either — resolve with `gh pr view 42` and fall back to `gh issue view 42`.
+Use the connected Linear app, resolve the team by the exact name `OpenSaml`,
+and use the returned opaque identifier for that session. Do not commit the
+workspace or team UUID, a private issue URL, or exported private issue data.
 
-## When a skill says "publish to the issue tracker"
+The maintainer has approved `OpenSaml` as the private planning destination; do
+not ask for a URL or re-confirm the destination on every write. If Linear
+reports that the team is visible beyond the intended workspace membership,
+stop before publishing and ask the maintainer to correct its visibility.
 
-Create a GitHub issue.
+For `/to-tickets`:
 
-## When a skill says "fetch the relevant ticket"
+1. Create issues in dependency order in `OpenSaml`.
+2. Set each ready ticket to `Todo` and apply `ready-for-agent`.
+3. Express blocking edges with Linear's native `blockedBy` relationships.
+4. If the source is public, attach its GitHub URL from Linear only.
+5. Do not create a matching GitHub issue.
 
-Run `gh issue view <number> --comments`.
+For a Linear ticket passed to `/implement`, fetch its full description and
+relationships, assign it to the acting maintainer when work starts, and move it
+through `In Progress`, `In Review`, and `Done` as those states become true.
+The code and pull request may still be public; keep their prose limited to
+information intentionally ready for publication.
 
-## Wayfinding operations
+## Cross-tracker privacy
 
-Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
+- Do not enable automatic GitHub Issues sync for this workflow.
+- Do not copy Linear titles, descriptions, comments, URLs, or identifiers into
+  public GitHub issues, commits, branch names, or pull requests.
+- Do not use Linear-generated branch names for private tickets.
+- Do not use GitHub magic words that link a public PR to a private Linear issue.
+- Public updates derived from private planning must be deliberately rewritten
+  as standalone, sanitized summaries.
+- Existing GitHub issues stay on GitHub; setup never imports, closes, or
+  duplicates them.
 
-- **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
-- **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
-- **Blocking**: GitHub's **native issue dependencies** — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed.
-- **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
-- **Claim**: `gh issue edit <n> --add-assignee @me` — the session's first write.
-- **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
+Collaborators and agents without Linear access work only from GitHub. If a
+private Linear ticket is required but cannot be accessed, do not create a
+public fallback ticket; report the access blocker to the maintainer.
+
+## Linear wayfinding operations
+
+Used by maintainer-initiated `/wayfinder`:
+
+- **Map**: one Linear issue in `OpenSaml`, labelled `wayfinder:map`.
+- **Child ticket**: a Linear sub-issue of the map, labelled
+  `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, or
+  `wayfinder:task`.
+- **Blocking**: Linear's native `blockedBy` relationships. An issue is
+  unblocked only when every blocker is complete.
+- **Frontier**: open child issues with no incomplete blocker and no assignee,
+  in map order.
+- **Claim**: assign the issue to the acting maintainer and move it to
+  `In Progress` before doing any work.
+- **Resolve**: post the resolution, move the issue to `Done`, and append a
+  one-line linked gist to the map's `Decisions so far`.
+
+Never resolve more than one non-research wayfinding ticket per session.
