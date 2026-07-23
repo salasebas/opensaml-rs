@@ -128,6 +128,19 @@ flows should not. Use `SamlValidationContext` in `finish_sso`,
 `accept_unsolicited_sso`, `receive_sso`, `receive_slo`, `finish_slo`, and any
 other inbound signed, timed, or replay-sensitive browser-message validation.
 
+LogoutRequest time errors preserve the standards/policy boundary:
+
+- missing, qualified, malformed, or non-UTC `IssueInstant`, and a qualified,
+  malformed, or non-UTC `NotOnOrAfter`, are `ProtocolProfile` failures;
+- an expired `NotOnOrAfter`, or one that is lexically conformant but cannot be
+  represented for runtime comparison, is `TimeWindowInvalid` for
+  `LogoutRequestNotOnOrAfter`;
+- an effective deadline that cannot be represented by the caller's
+  `SystemTime` replay cache is `TimeWindowInvalid` for `ReplayExpiration`.
+
+Replay-disabled compatibility skips storage only. It does not disable the
+LogoutRequest expiration policy.
+
 RelayState comparison is exact tri-state:
 
 ```rust

@@ -56,6 +56,8 @@ impl LogoutSubject {
 #[derive(Debug, Clone)]
 pub struct LogoutRequest {
     id: MessageId,
+    issue_instant: SamlInstant,
+    not_on_or_after: Option<SamlInstant>,
     issuer: EntityId,
     name_id: Option<NameId>,
     session_indexes: Vec<SessionIndex>,
@@ -67,6 +69,16 @@ impl LogoutRequest {
     /// LogoutRequest ID.
     pub fn id(&self) -> &MessageId {
         &self.id
+    }
+
+    /// LogoutRequest `IssueInstant`, normalized according to XML Schema whitespace rules.
+    pub fn issue_instant(&self) -> &SamlInstant {
+        &self.issue_instant
+    }
+
+    /// LogoutRequest `NotOnOrAfter`, normalized according to XML Schema whitespace rules.
+    pub fn not_on_or_after(&self) -> Option<&SamlInstant> {
+        self.not_on_or_after.as_ref()
     }
 
     /// LogoutRequest issuer.
@@ -100,6 +112,23 @@ impl TryFrom<FlowResult> for LogoutRequest {
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
         let id = MessageId::try_new(required_str(&raw_flow.extract, "request.id")?)?;
+        let issue_instant = logout_request_instant_from_extract(
+            &raw_flow.extract,
+            "issueInstant",
+            "IssueInstant",
+            true,
+        )?
+        .ok_or_else(|| {
+            SamlError::ProtocolProfile(
+                "LogoutRequest is missing required unqualified attribute IssueInstant".into(),
+            )
+        })?;
+        let not_on_or_after = logout_request_instant_from_extract(
+            &raw_flow.extract,
+            "notOnOrAfter",
+            "NotOnOrAfter",
+            false,
+        )?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let name_id = raw_flow
             .extract
@@ -109,6 +138,8 @@ impl TryFrom<FlowResult> for LogoutRequest {
         let destination = optional_endpoint(&raw_flow.extract, "request.destination")?;
         Ok(Self {
             id,
+            issue_instant,
+            not_on_or_after,
             issuer,
             name_id,
             session_indexes,
@@ -116,6 +147,29 @@ impl TryFrom<FlowResult> for LogoutRequest {
             raw_flow,
         })
     }
+}
+
+fn logout_request_instant_from_extract(
+    extract: &crate::util::Value,
+    extract_field: &str,
+    attribute: &str,
+    required: bool,
+) -> Result<Option<SamlInstant>, SamlError> {
+    let path = format!("request.{extract_field}");
+    let Some(value) = extract.get_str(&path) else {
+        if required {
+            return Err(SamlError::ProtocolProfile(format!(
+                "LogoutRequest is missing required unqualified attribute {attribute}"
+            )));
+        }
+        return Ok(None);
+    };
+    let normalized = parse_saml_utc_date_time(value).ok_or_else(|| {
+        SamlError::ProtocolProfile(format!(
+            "LogoutRequest {attribute} must use the SAML-conformant UTC xs:dateTime form ending in Z"
+        ))
+    })?;
+    SamlInstant::try_new(normalized).map(Some)
 }
 
 /// Parsed LogoutResponse result.

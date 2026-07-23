@@ -9,6 +9,12 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+### Fixed
+
+- *(slo)* [**breaking**] require UTC LogoutRequest `IssueInstant`, validate
+  optional `NotOnOrAfter`, and derive replay expiry from its skew-adjusted
+  deadline
+
 ## [0.3.0](https://github.com/salasebas/opensaml-rs/compare/v0.2.1...v0.3.0) - 2026-07-16
 
 ### Fixed

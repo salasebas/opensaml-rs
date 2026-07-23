@@ -196,6 +196,24 @@ fn require_issue_instant(
     Ok(())
 }
 
+fn require_optional_saml_utc_date_time(
+    values: &[(Vec<u8>, String)],
+    element: &BytesStart<'_>,
+    attribute: &[u8],
+) -> Result<(), SamlError> {
+    let value = values
+        .iter()
+        .find_map(|(name, value)| (name == attribute).then_some(value.as_str()));
+    if value.is_some_and(|value| parse_saml_utc_date_time(value).is_none()) {
+        return Err(profile_error(format!(
+            "{} {} must use the SAML-conformant UTC xs:dateTime form ending in Z",
+            element_label(element),
+            String::from_utf8_lossy(attribute),
+        )));
+    }
+    Ok(())
+}
+
 fn root_consumed_attributes(parser_type: ParserType) -> &'static [&'static [u8]] {
     match parser_type {
         ParserType::SamlRequest => &[
@@ -214,7 +232,13 @@ fn root_consumed_attributes(parser_type: ParserType) -> &'static [&'static [u8]]
             b"Destination",
             b"InResponseTo",
         ],
-        ParserType::LogoutRequest => &[b"ID", b"Version", b"IssueInstant", b"Destination"],
+        ParserType::LogoutRequest => &[
+            b"ID",
+            b"Version",
+            b"IssueInstant",
+            b"Destination",
+            b"NotOnOrAfter",
+        ],
         ParserType::LogoutResponse => &[
             b"ID",
             b"Version",
@@ -243,7 +267,7 @@ fn validate_root(
     let required: &[&[u8]] = match parser_type {
         ParserType::SamlRequest => &[b"ID", b"Version", b"IssueInstant"],
         ParserType::SamlResponse => &[b"ID", b"Version", b"IssueInstant"],
-        ParserType::LogoutRequest => &[b"ID", b"Version"],
+        ParserType::LogoutRequest => &[b"ID", b"Version", b"IssueInstant"],
         ParserType::LogoutResponse => &[b"ID", b"Version", b"IssueInstant"],
     };
     let attributes = validate_unqualified_attributes(
@@ -255,9 +279,15 @@ fn validate_root(
     require_version_2(&attributes, element)?;
     if matches!(
         parser_type,
-        ParserType::SamlRequest | ParserType::SamlResponse | ParserType::LogoutResponse
+        ParserType::SamlRequest
+            | ParserType::SamlResponse
+            | ParserType::LogoutRequest
+            | ParserType::LogoutResponse
     ) {
         require_issue_instant(&attributes, element)?;
+    }
+    if parser_type == ParserType::LogoutRequest {
+        require_optional_saml_utc_date_time(&attributes, element, b"NotOnOrAfter")?;
     }
     Ok(())
 }

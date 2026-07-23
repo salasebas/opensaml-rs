@@ -101,6 +101,7 @@ pub fn logout_request_fields() -> Vec<ExtractorField> {
             "ID",
             "IssueInstant",
             "Destination",
+            "NotOnOrAfter",
         ]),
         ExtractorField::new("issuer", &["LogoutRequest", "Issuer"]),
         ExtractorField::new("nameID", &["LogoutRequest", "NameID"]),

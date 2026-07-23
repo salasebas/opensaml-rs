@@ -10,13 +10,15 @@ use saml_rs::error::TimeWindowField;
 use saml_rs::raw::{Binding, FlowResult};
 use saml_rs::util::Value;
 use saml_rs::{
-    AcsEndpoint, BrowserInput, CertificatePem, Credentials, EntityId, FormField, IdpConfig,
-    IdpDescriptor, IdpValidationPolicy, LogoutBinding, LogoutRequest, LogoutResponse,
+    AcsEndpoint, BrowserInput, CertificatePem, ClockSkew, Credentials, EntityId, FormField,
+    IdpConfig, IdpDescriptor, IdpValidationPolicy, LogoutBinding, LogoutRequest, LogoutResponse,
     LogoutSigning, LogoutSubject, MetadataTrustPolicy, NameId, Outbound, PendingLogoutRequest,
     PendingSnapshot, PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey,
     ReplayPolicy, RespondSlo, Saml, SamlError, SamlValidationContext, SessionIndex, SloEndpoint,
     SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoSession, StartSlo, TemplatePolicy,
 };
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use url::Url;
 
 const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
@@ -45,6 +47,26 @@ const BAD_LOGOUT_RESPONSE_TEMPLATE: &str = r#"
 </samlp:LogoutResponse>
 "#;
 
+const CUSTOM_LOGOUT_REQUEST_TEMPLATE: &str = r#"
+<samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+    ID="{ID}" Version="2.0" IssueInstant="__ISSUE_INSTANT__"__NOT_ON_OR_AFTER__
+    Destination="{Destination}">
+    <saml:Issuer>{Issuer}</saml:Issuer>
+    <saml:NameID Format="{NameIDFormat}">{NameID}</saml:NameID>
+    <samlp:SessionIndex>{SessionIndex}</samlp:SessionIndex>
+</samlp:LogoutRequest>
+"#;
+
+fn logout_request_template(issue_instant: &str, not_on_or_after: Option<&str>) -> String {
+    let not_on_or_after = not_on_or_after
+        .map(|value| format!(r#" NotOnOrAfter="{value}""#))
+        .unwrap_or_default();
+    CUSTOM_LOGOUT_REQUEST_TEMPLATE
+        .replace("__ISSUE_INSTANT__", issue_instant)
+        .replace("__NOT_ON_OR_AFTER__", &not_on_or_after)
+}
+
 fn credentials() -> Credentials {
     Credentials {
         signing_key: Some(PrivateKeyPem::new(PRIVKEY)),
@@ -69,6 +91,32 @@ impl ReplayCache for MemoryReplayCache {
     }
 }
 
+struct ExpiringReplayCache {
+    now: SystemTime,
+    seen: HashMap<String, SystemTime>,
+}
+
+impl ExpiringReplayCache {
+    fn new(now: SystemTime) -> Self {
+        Self {
+            now,
+            seen: HashMap::new(),
+        }
+    }
+}
+
+impl ReplayCache for ExpiringReplayCache {
+    fn check_and_store(&mut self, key: ReplayKey, expires_at: SystemTime) -> Result<(), SamlError> {
+        self.seen.retain(|_, deadline| self.now < *deadline);
+        let cache_key = key.cache_key();
+        if self.seen.contains_key(&cache_key) {
+            return Err(SamlError::ReplayDetected { key: cache_key });
+        }
+        self.seen.insert(cache_key, expires_at);
+        Ok(())
+    }
+}
+
 fn sp_config() -> Result<SpConfig, SamlError> {
     SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
         .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
@@ -77,6 +125,21 @@ fn sp_config() -> Result<SpConfig, SamlError> {
         .slo_endpoint(SloEndpoint::simple_sign(SP_SLO_SIMPLESIGN)?)
         .credentials(credentials())
         .validation(SpValidationPolicy::strict())
+        .build()
+}
+
+fn sp_config_with_logout_request_template(template: &str) -> Result<SpConfig, SamlError> {
+    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
+        .slo_endpoint(SloEndpoint::post(SP_SLO_POST)?)
+        .slo_endpoint(SloEndpoint::redirect(SP_SLO_REDIRECT)?)
+        .slo_endpoint(SloEndpoint::simple_sign(SP_SLO_SIMPLESIGN)?)
+        .credentials(credentials())
+        .validation(SpValidationPolicy::strict())
+        .templates(TemplatePolicy {
+            logout_request_template: Some(template.to_string()),
+            ..TemplatePolicy::default()
+        })
         .build()
 }
 
@@ -163,6 +226,53 @@ fn validation_with_cache(cache: &mut dyn ReplayCache) -> SamlValidationContext<'
 
 fn post_fields<Message>(outbound: &Outbound<Message>) -> Result<Vec<FormField>, SamlError> {
     Ok(outbound.post_form()?.fields().to_vec())
+}
+
+fn logout_request_input(
+    outbound: &Outbound<LogoutRequest>,
+    binding: LogoutBinding,
+) -> Result<BrowserInput<LogoutRequest>, SamlError> {
+    match binding {
+        LogoutBinding::Redirect => {
+            let url = outbound.redirect_url()?;
+            let (_, query) = url
+                .split_once('?')
+                .ok_or_else(|| SamlError::Invalid("redirect URL is missing a query".into()))?;
+            Ok(BrowserInput::<LogoutRequest>::redirect(query))
+        }
+        LogoutBinding::Post => Ok(BrowserInput::<LogoutRequest>::post(post_fields(outbound)?)),
+        LogoutBinding::SimpleSign => Ok(BrowserInput::<LogoutRequest>::simple_sign(post_fields(
+            outbound,
+        )?)),
+    }
+}
+
+fn start_slo_for_binding(binding: LogoutBinding) -> StartSlo {
+    match binding {
+        LogoutBinding::Redirect => StartSlo::redirect(),
+        LogoutBinding::Post => StartSlo::post(),
+        LogoutBinding::SimpleSign => StartSlo::simple_sign(),
+    }
+}
+
+fn receive_custom_logout_request(
+    template: &str,
+    binding: LogoutBinding,
+    validation: SamlValidationContext<'_>,
+) -> Result<Received<LogoutRequest>, SamlError> {
+    let sp = Saml::sp(sp_config_with_logout_request_template(template)?)?;
+    let idp = Saml::idp(idp_config()?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, start_slo_for_binding(binding))?;
+    idp.receive_slo(
+        &sp_descriptor,
+        logout_request_input(&started.outbound, binding)?,
+        validation,
+    )
+}
+
+fn system_time(value: &str) -> Result<SystemTime, Box<dyn std::error::Error>> {
+    Ok(SystemTime::from(OffsetDateTime::parse(value, &Rfc3339)?))
 }
 
 fn replace_response_issue_instant(
@@ -564,6 +674,118 @@ fn typed_facade_receive_slo_checks_logout_request_replay() -> Result<(), Box<dyn
             Ok(())
         }
         other => Err(format!("expected LogoutRequest ReplayDetected, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_facade_rejects_expired_signed_logout_request_before_replay_for_all_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T12:00:00Z"));
+    for binding in [
+        LogoutBinding::Post,
+        LogoutBinding::Redirect,
+        LogoutBinding::SimpleSign,
+    ] {
+        let mut cache = MemoryReplayCache::default();
+        let validation = SamlValidationContext::new(
+            system_time("2026-07-15T12:00:00Z")?,
+            ReplayPolicy::RequireCache(&mut cache),
+        );
+        match receive_custom_logout_request(&template, binding, validation) {
+            Err(SamlError::TimeWindowInvalid { field }) => {
+                assert_eq!(field, TimeWindowField::LogoutRequestNotOnOrAfter);
+                assert!(cache.seen.is_empty());
+            }
+            other => {
+                return Err(format!(
+                    "expected expired signed LogoutRequest for {binding:?}, got {other:?}"
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_facade_receive_slo_uses_not_on_or_after_deadline_without_generic_retention(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T12:01:00Z"));
+    let mut cache = MemoryReplayCache::default();
+    let validation = SamlValidationContext::new(
+        system_time("2026-07-15T12:00:00Z")?,
+        ReplayPolicy::RequireCache(&mut cache),
+    )
+    .with_clock_skew(ClockSkew::strict().with_not_on_or_after_millis(30_000));
+
+    let received = receive_custom_logout_request(&template, LogoutBinding::Post, validation)?;
+    let replay_key = format!("logout_request_id:{}", received.message().id().as_str());
+    assert_eq!(
+        cache.seen.get(&replay_key),
+        Some(&system_time("2026-07-15T12:01:30Z")?)
+    );
+    assert_eq!(
+        received.message().issue_instant().as_str(),
+        "2000-01-01T00:00:00Z"
+    );
+    assert_eq!(
+        received
+            .message()
+            .not_on_or_after()
+            .map(saml_rs::SamlInstant::as_str),
+        Some("2026-07-15T12:01:00Z")
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_facade_replay_deadline_includes_not_on_or_after_skew(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T12:01:00Z"));
+    let sp = Saml::sp(sp_config_with_logout_request_template(&template)?)?;
+    let idp = Saml::idp(idp_config()?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let request_fields = post_fields(&started.outbound)?;
+    let first_now = system_time("2026-07-15T12:00:00Z")?;
+    let mut cache = ExpiringReplayCache::new(first_now);
+    let skew = ClockSkew::strict().with_not_on_or_after_millis(30_000);
+
+    let received = idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields.clone()),
+        SamlValidationContext::new(first_now, ReplayPolicy::RequireCache(&mut cache))
+            .with_clock_skew(skew),
+    )?;
+    let replay_key = format!("logout_request_id:{}", received.message().id().as_str());
+    assert_eq!(
+        cache.seen.get(&replay_key),
+        Some(&system_time("2026-07-15T12:01:30Z")?)
+    );
+
+    cache.now = system_time("2026-07-15T12:01:01Z")?;
+    match idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields.clone()),
+        SamlValidationContext::new(cache.now, ReplayPolicy::RequireCache(&mut cache))
+            .with_clock_skew(skew),
+    ) {
+        Err(SamlError::ReplayDetected { key }) => assert_eq!(key, replay_key),
+        other => return Err(format!("expected skew-retained replay, got {other:?}").into()),
+    }
+
+    cache.now = system_time("2026-07-15T12:01:30Z")?;
+    match idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields),
+        SamlValidationContext::new(cache.now, ReplayPolicy::RequireCache(&mut cache))
+            .with_clock_skew(skew),
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::LogoutRequestNotOnOrAfter);
+            Ok(())
+        }
+        other => Err(format!("expected exact effective deadline rejection, got {other:?}").into()),
     }
 }
 

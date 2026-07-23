@@ -154,6 +154,12 @@
 //! returned [`PendingLogoutRequest`], and finish only with the matching
 //! [`LogoutResponse`]. Receiving and responding to peer-initiated logout uses
 //! [`Received<LogoutRequest>`] instead of free-form request ID strings.
+//! Inbound LogoutRequest messages require a UTC `IssueInstant`, but saml-rs
+//! applies no library-selected maximum age to it. Optional UTC
+//! `NotOnOrAfter` values are rejected at their skew-adjusted exclusive
+//! deadline as a fail-closed saml-rs policy, not an OASIS receiver `MUST`.
+//! [`ClockSkew`] controls that tolerance, and replay storage uses the same
+//! effective deadline when it is present.
 //!
 //! ```no_run
 //! use saml_rs::{

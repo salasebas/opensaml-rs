@@ -1,9 +1,9 @@
 //! SAML time-window and status validation.
 
 use crate::constants::{status_code, ParserType};
-use crate::error::SamlError;
+use crate::error::{SamlError, TimeWindowField};
 use crate::util::Value;
-use crate::xml::{extract_with_limits, fields, XmlLimits};
+use crate::xml::{extract_with_limits, fields, parse_saml_utc_date_time, XmlLimits};
 use std::time::SystemTime;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
@@ -25,6 +25,39 @@ pub(crate) fn offset_datetime_from_system_time(
     converted.ok_or_else(|| {
         SamlError::Invalid("validation instant is outside the supported SAML time range".into())
     })
+}
+
+/// Validate saml-rs' fail-closed expiration policy for an inbound LogoutRequest.
+///
+/// The protocol profile layer owns SAML lexical conformance. Values that are
+/// lexically valid but cannot be represented by the runtime clock fail here as
+/// a library time-window policy decision.
+pub(crate) fn logout_request_not_on_or_after_deadline(
+    extracted: &Value,
+    now: OffsetDateTime,
+    not_on_or_after_skew_ms: i64,
+) -> Result<Option<OffsetDateTime>, SamlError> {
+    let Some(value) = extracted.get_str("request.notOnOrAfter") else {
+        return Ok(None);
+    };
+    let normalized = parse_saml_utc_date_time(value).ok_or(SamlError::TimeWindowInvalid {
+        field: TimeWindowField::LogoutRequestNotOnOrAfter,
+    })?;
+    let deadline =
+        OffsetDateTime::parse(normalized, &Rfc3339).map_err(|_| SamlError::TimeWindowInvalid {
+            field: TimeWindowField::LogoutRequestNotOnOrAfter,
+        })?;
+    let effective_deadline = deadline
+        .checked_add(Duration::milliseconds(not_on_or_after_skew_ms))
+        .ok_or(SamlError::TimeWindowInvalid {
+            field: TimeWindowField::LogoutRequestNotOnOrAfter,
+        })?;
+    if now >= effective_deadline {
+        return Err(SamlError::TimeWindowInvalid {
+            field: TimeWindowField::LogoutRequestNotOnOrAfter,
+        });
+    }
+    Ok(Some(effective_deadline))
 }
 
 /// Validate a `NotBefore` / `NotOnOrAfter` window.

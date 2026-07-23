@@ -27,6 +27,12 @@ const LOGOUT_RESPONSE_MISSING_ISSUE_INSTANT_CONTEXT: &str =
     "LogoutResponse is missing required unqualified attribute IssueInstant";
 const LOGOUT_RESPONSE_MALFORMED_ISSUE_INSTANT_CONTEXT: &str =
     "LogoutResponse IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z";
+const LOGOUT_REQUEST_MISSING_ISSUE_INSTANT_CONTEXT: &str =
+    "LogoutRequest is missing required unqualified attribute IssueInstant";
+const LOGOUT_REQUEST_MALFORMED_ISSUE_INSTANT_CONTEXT: &str =
+    "LogoutRequest IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z";
+const LOGOUT_REQUEST_MALFORMED_NOT_ON_OR_AFTER_CONTEXT: &str =
+    "LogoutRequest NotOnOrAfter must use the SAML-conformant UTC xs:dateTime form ending in Z";
 #[cfg(feature = "crypto-bergshamra")]
 const PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 #[cfg(feature = "crypto-bergshamra")]
@@ -126,6 +132,18 @@ fn logout_response_xml(issue_instant: Option<&str>) -> String {
         .unwrap_or_default();
     format!(
         r#"<p:LogoutResponse xmlns:p="{PROTOCOL_NS}" ID="_response" Version="2.0"{issue_instant}><p:Status><p:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></p:Status></p:LogoutResponse>"#
+    )
+}
+
+fn logout_request_xml(issue_instant: Option<&str>, not_on_or_after: Option<&str>) -> String {
+    let issue_instant = issue_instant
+        .map(|value| format!(r#" IssueInstant="{value}""#))
+        .unwrap_or_default();
+    let not_on_or_after = not_on_or_after
+        .map(|value| format!(r#" NotOnOrAfter="{value}""#))
+        .unwrap_or_default();
+    format!(
+        r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" ID="_request" Version="2.0"{issue_instant}{not_on_or_after}/>"#
     )
 }
 
@@ -239,6 +257,92 @@ fn authn_request_issue_instant_validation_precedes_signature_handling_for_suppor
                 context,
             )?;
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn logout_request_time_attributes_precede_signature_handling_for_supported_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cases = [
+        (
+            logout_request_xml(None, None),
+            LOGOUT_REQUEST_MISSING_ISSUE_INSTANT_CONTEXT,
+        ),
+        (
+            logout_request_xml(Some("not-an-instant"), None),
+            LOGOUT_REQUEST_MALFORMED_ISSUE_INSTANT_CONTEXT,
+        ),
+        (
+            logout_request_xml(Some("2024-01-01T00:00:00+00:00"), None),
+            LOGOUT_REQUEST_MALFORMED_ISSUE_INSTANT_CONTEXT,
+        ),
+        (
+            logout_request_xml(Some("2024-01-01T00:00:00Z"), Some("not-an-instant")),
+            LOGOUT_REQUEST_MALFORMED_NOT_ON_OR_AFTER_CONTEXT,
+        ),
+        (
+            logout_request_xml(
+                Some("2024-01-01T00:00:00Z"),
+                Some("2024-01-01T00:00:00+00:00"),
+            ),
+            LOGOUT_REQUEST_MALFORMED_NOT_ON_OR_AFTER_CONTEXT,
+        ),
+    ];
+    for binding in [Binding::Post, Binding::Redirect, Binding::SimpleSign] {
+        for (xml, context) in &cases {
+            expect_profile_rejection_with_binding_and_context(
+                xml,
+                ParserType::LogoutRequest,
+                binding,
+                context,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn logout_request_time_attributes_reject_qualified_aliases(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let qualified_issue_instant = format!(
+        r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" Version="2.0" x:IssueInstant="2024-01-01T00:00:00Z"/>"#
+    );
+    expect_profile_rejection_with_context(
+        &qualified_issue_instant,
+        ParserType::LogoutRequest,
+        "attribute IssueInstant on LogoutRequest must be unqualified",
+    )?;
+
+    let qualified_not_on_or_after = format!(
+        r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" xmlns:x="urn:example:foreign" ID="_request" Version="2.0" IssueInstant="2024-01-01T00:00:00Z" x:NotOnOrAfter="2999-01-01T00:00:00Z"/>"#
+    );
+    expect_profile_rejection_with_context(
+        &qualified_not_on_or_after,
+        ParserType::LogoutRequest,
+        "attribute NotOnOrAfter on LogoutRequest must be unqualified",
+    )
+}
+
+#[test]
+fn logout_request_accepts_old_issue_instant_without_age_policy(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = logout_request_xml(Some("2000-01-01T00:00:00Z"), None);
+
+    run_flow(&xml, ParserType::LogoutRequest)?;
+    Ok(())
+}
+
+#[test]
+fn logout_request_issue_instant_accepts_lexical_leap_second_and_whitespace(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for issue_instant in [
+        "2024-01-01T00:00:60Z",
+        " \t\n\r2000-01-01T00:00:00Z \t\n\r",
+        "&#x9;&#xA;&#xD;2000-01-01T00:00:00Z&#x20;&#x9;",
+    ] {
+        let xml = logout_request_xml(Some(issue_instant), None);
+        run_flow(&xml, ParserType::LogoutRequest)?;
     }
     Ok(())
 }
@@ -708,7 +812,9 @@ fn all_parser_roots_require_version_2() -> Result<(), Box<dyn std::error::Error>
         ),
         (
             ParserType::LogoutRequest,
-            format!(r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0"/>"#),
+            format!(
+                r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="1.0" IssueInstant="2024-01-01T00:00:00Z"/>"#
+            ),
         ),
         (
             ParserType::LogoutResponse,
@@ -738,7 +844,9 @@ fn all_parser_roots_accept_version_2() -> Result<(), Box<dyn std::error::Error>>
         ),
         (
             ParserType::LogoutRequest,
-            format!(r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0"/>"#),
+            format!(
+                r#"<p:LogoutRequest xmlns:p="{PROTOCOL_NS}" ID="_id" Version="2.0" IssueInstant="2024-01-01T00:00:00Z"/>"#
+            ),
         ),
         (
             ParserType::LogoutResponse,

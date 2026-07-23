@@ -68,9 +68,11 @@ impl Saml<Sp> {
     ///
     /// Returns [`SamlError`] when the browser input or relay state is invalid,
     /// the binding is unsupported for logout, IdP metadata cannot be parsed,
-    /// XML parsing or signature/trust validation fails, the destination does
-    /// not match local metadata, or replay validation detects a duplicate or
-    /// expired message.
+    /// XML parsing or signature/trust validation fails, required
+    /// `IssueInstant` or optional `NotOnOrAfter` is not conformant,
+    /// `NotOnOrAfter` has expired under saml-rs' fail-closed policy, the
+    /// destination does not match local metadata, or replay validation detects
+    /// a duplicate or unusable expiration.
     pub fn receive_slo(
         &self,
         idp: &IdpDescriptor,
@@ -218,9 +220,11 @@ impl Saml<Idp> {
     ///
     /// Returns [`SamlError`] when the browser input or relay state is invalid,
     /// the binding is unsupported for logout, SP metadata cannot be parsed, XML
-    /// parsing or signature/trust validation fails, the destination does not
-    /// match local metadata, or replay validation detects a duplicate or
-    /// expired message.
+    /// parsing or signature/trust validation fails, required `IssueInstant` or
+    /// optional `NotOnOrAfter` is not conformant, `NotOnOrAfter` has expired
+    /// under saml-rs' fail-closed policy, the destination does not match local
+    /// metadata, or replay validation detects a duplicate or unusable
+    /// expiration.
     ///
     /// # Examples
     ///
@@ -416,9 +420,17 @@ fn receive_slo_impl(
         validation.now(),
         validation.clock_skew().as_millis(),
     )?;
+    let replay_deadline = crate::validator::logout_request_not_on_or_after_deadline(
+        &flow.extract,
+        validation.now_offset()?,
+        validation.clock_skew().not_on_or_after_millis(),
+    )?;
     let logout = LogoutRequest::try_from(flow)?;
     ensure_logout_destination(local_metadata, binding, logout.destination())?;
-    validation.check_and_store_message_replay(ReplayKey::LogoutRequestId(logout.id().clone()))?;
+    validation.check_and_store_message_replay_until(
+        ReplayKey::LogoutRequestId(logout.id().clone()),
+        replay_deadline,
+    )?;
     Ok(Received::new(logout).with_relay_state(relay_state))
 }
 
