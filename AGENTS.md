@@ -131,8 +131,9 @@ Add regression tests for security fixes.
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues via the `gh` CLI. See
-`docs/agents/issue-tracker.md`.
+Public requests and external collaboration use GitHub Issues. Private planning
+initiated by the maintainer uses the private `OpenSaml` Linear team. See
+`docs/agents/issue-tracker.md` for routing and privacy rules.
 
 ### Triage labels
 
