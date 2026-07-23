@@ -160,6 +160,29 @@ pub(crate) enum AssertionSignatureRequirement {
     Direct,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResponseSignatureRequirement {
+    Optional,
+    RequiredForEncryptedCbc,
+    Required,
+}
+
+#[derive(Debug)]
+struct PreparedMessage {
+    saml_content: String,
+    assertion: Option<String>,
+    response_authenticated: bool,
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+#[derive(Debug)]
+struct EmbeddedSignatureEvidence {
+    verified: bool,
+    verified_node: Option<String>,
+    assertion_directly_covered: bool,
+    response_covered: bool,
+}
+
 /// Result of a successful flow.
 #[derive(Debug, Clone)]
 pub struct FlowResult {
@@ -371,30 +394,18 @@ fn required_xml_signature_failed(signature_present: bool) -> SamlError {
 fn verify_embedded_signature(
     xml: &str,
     opts: &FlowOptions<'_>,
-    assertion_signature: AssertionSignatureRequirement,
-) -> Result<(bool, Option<String>, bool), SamlError> {
-    use crate::crypto::verify::{
-        verify_signature_with_limits, verify_signatures_detailed_with_limits,
-    };
-
-    match assertion_signature {
-        AssertionSignatureRequirement::Compatible => {
-            let (verified, signed_content) =
-                verify_signature_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
-            Ok((verified, signed_content, false))
-        }
-        AssertionSignatureRequirement::Direct => {
-            let verification =
-                verify_signatures_detailed_with_limits(xml, opts.signing_certs, opts.xml_limits)?;
-            let verified = verification.verified();
-            let assertion_directly_covered = verification.assertion_directly_covered();
-            Ok((
-                verified,
-                verification.into_signed_content(),
-                assertion_directly_covered,
-            ))
-        }
-    }
+) -> Result<EmbeddedSignatureEvidence, SamlError> {
+    let verification = crate::crypto::verify::verify_signatures_detailed_with_limits(
+        xml,
+        opts.signing_certs,
+        opts.xml_limits,
+    )?;
+    Ok(EmbeddedSignatureEvidence {
+        verified: verification.verified(),
+        assertion_directly_covered: verification.assertion_directly_covered(),
+        response_covered: verification.response_covered(),
+        verified_node: verification.into_signed_content(),
+    })
 }
 
 #[cfg(feature = "crypto-bergshamra")]
@@ -408,6 +419,56 @@ fn require_direct_assertion_coverage(
     Ok(())
 }
 
+#[cfg(feature = "crypto-bergshamra")]
+fn require_response_coverage(
+    response_signature_required: bool,
+    response_covered: bool,
+) -> Result<(), SamlError> {
+    if response_signature_required && !response_covered {
+        return Err(SamlError::SignedReferenceMismatch);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn response_uses_cbc_encrypted_assertion(xml: &str, limits: XmlLimits) -> Result<bool, SamlError> {
+    let document = crate::xml::dom::parse_with_limits(xml, limits)?;
+    Ok(document
+        .root
+        .children
+        .iter()
+        .filter(|child| child.local_name == "EncryptedAssertion")
+        .filter_map(|encrypted_assertion| {
+            encrypted_assertion
+                .children
+                .iter()
+                .find(|child| child.local_name == "EncryptedData")
+        })
+        .filter_map(|encrypted_data| {
+            encrypted_data
+                .children
+                .iter()
+                .find(|child| child.local_name == "EncryptionMethod")
+        })
+        .filter_map(|encryption_method| encryption_method.attr("Algorithm"))
+        .any(crate::constants::is_xml_encryption_cbc_algorithm))
+}
+
+#[cfg(feature = "crypto-bergshamra")]
+fn response_signature_is_required(
+    requirement: ResponseSignatureRequirement,
+    xml: &str,
+    limits: XmlLimits,
+) -> Result<bool, SamlError> {
+    match requirement {
+        ResponseSignatureRequirement::Optional => Ok(false),
+        ResponseSignatureRequirement::RequiredForEncryptedCbc => {
+            response_uses_cbc_encrypted_assertion(xml, limits)
+        }
+        ResponseSignatureRequirement::Required => Ok(true),
+    }
+}
+
 /// Verify and optionally decrypt the message, returning the authenticated
 /// `(saml_content, assertion)`. Requires `crypto-bergshamra`.
 #[cfg(feature = "crypto-bergshamra")]
@@ -416,7 +477,8 @@ fn verify_and_prepare(
     parser_type: ParserType,
     opts: &FlowOptions<'_>,
     assertion_signature: AssertionSignatureRequirement,
-) -> Result<(String, Option<String>), SamlError> {
+    response_signature: ResponseSignatureRequirement,
+) -> Result<PreparedMessage, SamlError> {
     use crate::crypto::{
         decrypt_assertion_with_limits,
         enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
@@ -425,8 +487,15 @@ fn verify_and_prepare(
     };
 
     let signature_present = has_xml_signature_with_limits(xml, opts.xml_limits)?;
-    let (verified, verified_node, assertion_directly_covered) =
-        verify_embedded_signature(xml, opts, assertion_signature)?;
+    let evidence = verify_embedded_signature(xml, opts)?;
+    let response_signature_required =
+        response_signature_is_required(response_signature, xml, opts.xml_limits)?;
+    if response_signature_required {
+        if !evidence.verified {
+            return Err(required_xml_signature_failed(signature_present));
+        }
+        require_response_coverage(response_signature_required, evidence.response_covered)?;
+    }
     let decrypt_required = opts.decrypt_key.is_some();
     if decrypt_required && !opts.allow_insecure_software_rsa_key_transport_decryption {
         return Err(software_rsa_decryption_disabled());
@@ -437,12 +506,12 @@ fn verify_and_prepare(
     };
     let load_key = || load_private_key(opts.decrypt_key.unwrap_or_default(), opts.decrypt_key_pass);
 
-    if decrypt_required && verified && parser_type == ParserType::SamlResponse {
-        if let Some(node) = verified_node {
+    if decrypt_required && evidence.verified && parser_type == ParserType::SamlResponse {
+        if let Some(node) = evidence.verified_node.as_deref() {
             // signed-then-encrypted: the verified content is a Response carrying
             // an EncryptedAssertion.
             let (content, assertion) = decrypt_assertion_with_limits(
-                &node,
+                node,
                 &load_key()?,
                 decrypt_options,
                 opts.xml_limits,
@@ -452,20 +521,23 @@ fn verify_and_prepare(
             if assertion_signature == AssertionSignatureRequirement::Direct {
                 let decrypted_signature_present =
                     has_xml_signature_with_limits(&assertion, opts.xml_limits)?;
-                let (decrypted_verified, _, decrypted_assertion_covered) =
-                    verify_embedded_signature(&assertion, opts, assertion_signature)?;
-                if !decrypted_verified {
+                let decrypted_evidence = verify_embedded_signature(&assertion, opts)?;
+                if !decrypted_evidence.verified {
                     return Err(required_xml_signature_failed(decrypted_signature_present));
                 }
                 require_direct_assertion_coverage(
                     assertion_signature,
-                    decrypted_assertion_covered,
+                    decrypted_evidence.assertion_directly_covered,
                 )?;
             }
-            return Ok((content, Some(assertion)));
+            return Ok(PreparedMessage {
+                saml_content: content,
+                assertion: Some(assertion),
+                response_authenticated: evidence.response_covered,
+            });
         }
     }
-    if decrypt_required && !verified {
+    if decrypt_required && !evidence.verified {
         // encrypted-then-signed: decrypt first, then verify the result.
         let (content, assertion) =
             decrypt_assertion_with_limits(xml, &load_key()?, decrypt_options, opts.xml_limits)?;
@@ -477,31 +549,50 @@ fn verify_and_prepare(
             content.as_str()
         };
         let signature_present = has_xml_signature_with_limits(verification_xml, opts.xml_limits)?;
-        let (re_verified, re_node, re_assertion_directly_covered) =
-            verify_embedded_signature(verification_xml, opts, assertion_signature)?;
-        return if re_verified {
-            require_direct_assertion_coverage(assertion_signature, re_assertion_directly_covered)?;
+        let re_evidence = verify_embedded_signature(verification_xml, opts)?;
+        return if re_evidence.verified {
+            require_direct_assertion_coverage(
+                assertion_signature,
+                re_evidence.assertion_directly_covered,
+            )?;
             let verified_assertion = if assertion_signature == AssertionSignatureRequirement::Direct
             {
                 Some(assertion)
             } else {
-                re_node
+                re_evidence.verified_node
             };
-            Ok((content, verified_assertion))
+            Ok(PreparedMessage {
+                saml_content: content,
+                assertion: verified_assertion,
+                response_authenticated: false,
+            })
         } else {
             Err(required_xml_signature_failed(signature_present))
         };
     }
-    if verified {
-        require_direct_assertion_coverage(assertion_signature, assertion_directly_covered)?;
+    if evidence.verified {
+        require_direct_assertion_coverage(
+            assertion_signature,
+            evidence.assertion_directly_covered,
+        )?;
         if matches!(
             parser_type,
             ParserType::SamlRequest | ParserType::LogoutRequest | ParserType::LogoutResponse
         ) {
-            let content = verified_node.ok_or_else(verified_content_not_covered)?;
-            return Ok((content, None));
+            let content = evidence
+                .verified_node
+                .ok_or_else(verified_content_not_covered)?;
+            return Ok(PreparedMessage {
+                saml_content: content,
+                assertion: None,
+                response_authenticated: evidence.response_covered,
+            });
         }
-        return Ok((xml.to_string(), verified_node));
+        return Ok(PreparedMessage {
+            saml_content: xml.to_string(),
+            assertion: evidence.verified_node,
+            response_authenticated: evidence.response_covered,
+        });
     }
     Err(required_xml_signature_failed(signature_present))
 }
@@ -512,7 +603,8 @@ fn verify_and_prepare(
     _parser_type: ParserType,
     _opts: &FlowOptions<'_>,
     _assertion_signature: AssertionSignatureRequirement,
-) -> Result<(String, Option<String>), SamlError> {
+    _response_signature: ResponseSignatureRequirement,
+) -> Result<PreparedMessage, SamlError> {
     Err(SamlError::Unsupported(
         "signature verification requires feature crypto-bergshamra".into(),
     ))
@@ -712,14 +804,17 @@ fn validate_subject_confirmation(
 fn validate_response_destination(
     extracted: &Value,
     expected_recipient: Option<&str>,
+    response_authenticated: bool,
 ) -> Result<(), SamlError> {
     let Some(expected) = expected_recipient else {
         return Ok(());
     };
-    if let Some(destination) = extracted.get_str("response.destination") {
-        if destination != expected {
-            return Err(SamlError::destination_mismatch(expected, Some(destination)));
-        }
+    let destination = extracted.get_str("response.destination");
+    if response_authenticated && destination.is_none() {
+        return Err(SamlError::destination_mismatch(expected, None));
+    }
+    if destination.is_some_and(|destination| destination != expected) {
+        return Err(SamlError::destination_mismatch(expected, destination));
     }
     Ok(())
 }
@@ -730,6 +825,7 @@ fn validate_context(
     extracted: &Value,
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
+    response_authenticated: bool,
 ) -> Result<(), SamlError> {
     let should_validate_issuer = matches!(
         parser_type,
@@ -759,7 +855,7 @@ fn validate_context(
         }
     }
     if parser_type == ParserType::SamlResponse {
-        validate_response_destination(extracted, expected_recipient)?;
+        validate_response_destination(extracted, expected_recipient, response_authenticated)?;
         validate_subject_confirmation(extracted, opts, expected_recipient)?;
         if let Some(expected) = opts.expected_audience {
             if !audience_restrictions_contain(assertion, expected, opts.xml_limits)? {
@@ -810,6 +906,7 @@ fn flow_inner(
     request: &HttpRequest,
     expected_recipient: Option<&str>,
     assertion_signature: AssertionSignatureRequirement,
+    response_signature: ResponseSignatureRequirement,
 ) -> Result<FlowResult, SamlError> {
     let binding = opts
         .binding
@@ -829,28 +926,53 @@ fn flow_inner(
     validate_protocol_profile(&xml, parser_type, opts.xml_limits)?;
     check_status_with_limits(&xml, parser_type, opts.xml_limits)?;
 
-    let (saml_content, assertion, sig_alg) = if opts.check_signature {
+    let (saml_content, assertion, sig_alg, response_authenticated) = if opts.check_signature {
         match binding {
             Binding::Redirect | Binding::SimpleSign => {
                 let sig_alg = verify_detached(binding, parser_type, request, opts, &xml)?;
-                let (saml_content, assertion) = if parser_type == ParserType::SamlResponse
+                let prepared = if parser_type == ParserType::SamlResponse
                     && assertion_signature == AssertionSignatureRequirement::Direct
                 {
-                    verify_and_prepare(&xml, parser_type, opts, assertion_signature)?
+                    verify_and_prepare(
+                        &xml,
+                        parser_type,
+                        opts,
+                        assertion_signature,
+                        ResponseSignatureRequirement::Optional,
+                    )?
                 } else {
                     let assertion = if parser_type == ParserType::SamlResponse {
                         assertion_shortcut(&xml, opts.xml_limits)?
                     } else {
                         None
                     };
-                    (xml, assertion)
+                    PreparedMessage {
+                        saml_content: xml,
+                        assertion,
+                        response_authenticated: false,
+                    }
                 };
-                (saml_content, assertion, Some(sig_alg))
+                (
+                    prepared.saml_content,
+                    prepared.assertion,
+                    Some(sig_alg),
+                    true,
+                )
             }
             _ => {
-                let (content, assertion) =
-                    verify_and_prepare(&xml, parser_type, opts, assertion_signature)?;
-                (content, assertion, None)
+                let prepared = verify_and_prepare(
+                    &xml,
+                    parser_type,
+                    opts,
+                    assertion_signature,
+                    response_signature,
+                )?;
+                (
+                    prepared.saml_content,
+                    prepared.assertion,
+                    None,
+                    prepared.response_authenticated,
+                )
             }
         }
     } else {
@@ -859,7 +981,7 @@ fn flow_inner(
         } else {
             None
         };
-        (xml, assertion, None)
+        (xml, assertion, None, false)
     };
 
     let fields = default_fields(parser_type, assertion.as_deref())?;
@@ -870,6 +992,7 @@ fn flow_inner(
         &extracted,
         opts,
         expected_recipient,
+        response_authenticated,
     )?;
 
     Ok(FlowResult {
@@ -886,6 +1009,7 @@ pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult,
         request,
         None,
         AssertionSignatureRequirement::Compatible,
+        ResponseSignatureRequirement::Optional,
     )
 }
 
@@ -894,6 +1018,13 @@ pub(crate) fn flow_with_expected_recipient(
     request: &HttpRequest,
     expected_recipient: &str,
     assertion_signature: AssertionSignatureRequirement,
+    response_signature: ResponseSignatureRequirement,
 ) -> Result<FlowResult, SamlError> {
-    flow_inner(opts, request, Some(expected_recipient), assertion_signature)
+    flow_inner(
+        opts,
+        request,
+        Some(expected_recipient),
+        assertion_signature,
+        response_signature,
+    )
 }

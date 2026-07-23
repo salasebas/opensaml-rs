@@ -12,10 +12,10 @@ use saml_rs::{
     AcsEndpoint, AssertionSignaturePolicy, AuthnRequest, AuthnRequestSigningPolicy,
     AuthnRequestValidationPolicy, BrowserInput, CertificatePem, EntityId, IdentityProvider,
     IdpConfig, IdpDescriptor, IdpValidationPolicy, LogoutSignaturePolicy, LogoutSigning,
-    LogoutSubject, MessageSignaturePolicy, MetadataTrustPolicy, NameId, RelayStateParam,
-    ReplayPolicy, Saml, SamlError, SamlValidationContext, ServiceProvider, SloEndpoint, SpConfig,
-    SpDescriptor, SpValidationPolicy, SsoEndpoint, StartSlo, StartSso, XmlEncryptionPolicy,
-    XmlPolicy,
+    LogoutSubject, MetadataTrustPolicy, NameId, RelayStateParam, ReplayPolicy,
+    ResponseSignaturePolicy, Saml, SamlError, SamlValidationContext, ServiceProvider, SloEndpoint,
+    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, StartSlo, StartSso,
+    XmlEncryptionPolicy, XmlPolicy,
 };
 use std::time::SystemTime;
 
@@ -260,10 +260,10 @@ fn sp_required_assertion_signatures_return_unsupported_without_default_crypto(
 }
 
 #[test]
-fn sp_required_message_signatures_return_unsupported_without_default_crypto(
+fn sp_required_response_signatures_return_unsupported_without_default_crypto(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut validation = SpValidationPolicy::compatibility();
-    validation.messages = MessageSignaturePolicy::RequireSigned;
+    validation.responses = ResponseSignaturePolicy::RequireSigned;
 
     assert_unsupported(sp_config_builder()?.validation(validation).build());
     Ok(())

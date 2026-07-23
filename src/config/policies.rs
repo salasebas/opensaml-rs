@@ -19,14 +19,29 @@ pub enum AssertionSignaturePolicy {
     AllowUnsignedForCompatibility,
 }
 
-/// Whether SPs require message-level signatures.
+/// Whether SPs require trusted authentication of the SAML Response.
+///
+/// The Web Browser SSO profile permits HTTP-POST assertions to be protected by
+/// signing either each Assertion or the enclosing Response. These variants are
+/// library policy choices layered on top of that profile rule. When Response
+/// authentication is required, HTTP-POST requires trusted XML-DSig coverage of
+/// the Response root; supported detached bindings use their binding-defined
+/// message signatures.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum MessageSignaturePolicy {
-    /// Reject unsigned protocol messages.
-    RequireSigned,
-    /// Accept unsigned protocol messages for legacy interoperability.
+pub enum ResponseSignaturePolicy {
+    /// Allow CBC-encrypted assertions without outer integrity protection for
+    /// legacy interoperability.
+    ///
+    /// This explicitly relaxes the recommendation in SAML V2.0 Approved
+    /// Errata 05 E93.
     #[default]
-    AllowUnsignedForCompatibility,
+    AllowUnsignedEncryptedCbcForCompatibility,
+    /// Require Response authentication when an `<EncryptedAssertion>` uses a
+    /// known CBC-mode data-encryption algorithm.
+    RequireForEncryptedCbc,
+    /// Require trusted Response authentication through root-covering XML-DSig
+    /// or a supported binding-defined detached signature.
+    RequireSigned,
 }
 
 /// Whether an SP signs outgoing AuthnRequests.
@@ -84,8 +99,8 @@ pub enum NameIdCreationPolicy {
 pub struct SpValidationPolicy {
     /// Assertion signature requirement.
     pub assertions: AssertionSignaturePolicy,
-    /// Response/message signature requirement.
-    pub messages: MessageSignaturePolicy,
+    /// Top-level SAML Response signature requirement.
+    pub responses: ResponseSignaturePolicy,
     /// Outbound AuthnRequest signing behavior.
     pub authn_requests: AuthnRequestSigningPolicy,
     /// Audience validation behavior.
@@ -101,7 +116,7 @@ impl SpValidationPolicy {
     pub fn strict() -> Self {
         Self {
             assertions: AssertionSignaturePolicy::RequireSigned,
-            messages: MessageSignaturePolicy::RequireSigned,
+            responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
             authn_requests: AuthnRequestSigningPolicy::Sign,
             audience: AudienceValidationPolicy::Validate,
             name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
@@ -113,7 +128,7 @@ impl SpValidationPolicy {
     pub fn compatibility() -> Self {
         Self {
             assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
-            messages: MessageSignaturePolicy::AllowUnsignedForCompatibility,
+            responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility,
             authn_requests: AuthnRequestSigningPolicy::DoNotSignForCompatibility,
             audience: AudienceValidationPolicy::SkipForCompatibility,
             name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
@@ -389,8 +404,12 @@ pub(super) fn assertion_signature_required(policy: AssertionSignaturePolicy) -> 
     matches!(policy, AssertionSignaturePolicy::RequireSigned)
 }
 
-pub(super) fn message_signature_required(policy: MessageSignaturePolicy) -> bool {
-    matches!(policy, MessageSignaturePolicy::RequireSigned)
+pub(super) fn response_signature_required(policy: ResponseSignaturePolicy) -> bool {
+    matches!(policy, ResponseSignaturePolicy::RequireSigned)
+}
+
+pub(super) fn encrypted_cbc_response_signature_required(policy: ResponseSignaturePolicy) -> bool {
+    matches!(policy, ResponseSignaturePolicy::RequireForEncryptedCbc)
 }
 
 pub(super) fn logout_signature_required(policy: LogoutSignaturePolicy) -> Result<bool, SamlError> {

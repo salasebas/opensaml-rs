@@ -217,6 +217,15 @@ pub mod data_encryption_algorithm {
     pub const AES_128_GCM: &str = "http://www.w3.org/2009/xmlenc11#aes128-gcm";
 }
 
+pub(crate) fn is_xml_encryption_cbc_algorithm(algorithm: &str) -> bool {
+    matches!(
+        algorithm,
+        data_encryption_algorithm::AES_128
+            | data_encryption_algorithm::AES_256
+            | data_encryption_algorithm::TRIPLE_DES
+    )
+}
+
 /// XML key encryption algorithm URIs (`algorithms.encryption.key`).
 pub mod key_encryption_algorithm {
     /// RSA-OAEP-MGF1P.

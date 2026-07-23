@@ -172,13 +172,19 @@ impl Saml<Idp> {
         subject: Subject,
         options: RespondSso,
     ) -> Result<Outbound<SsoResponse>, SamlError> {
+        let idp_setting = &self.raw_identity_provider().setting;
+        let sign_response = options.should_sign_response(
+            idp_setting.is_assertion_encrypted,
+            &idp_setting.data_encryption_algorithm,
+        );
         let relay_state = options.relay_state.unwrap_or_else(|| {
             request.map_or_else(RelayStateParam::absent, |request| {
                 request.relay_state().clone()
             })
         });
         relay_state.validate()?;
-        let raw_sp = raw_sp_descriptor(sp)?;
+        let mut raw_sp = raw_sp_descriptor(sp)?;
+        raw_sp.setting.want_message_signed = sign_response;
         let (binding, explicit_acs) = match request {
             Some(request) => response_target(&raw_sp, request.message(), options.binding)?,
             None => (options.binding, None),

@@ -262,6 +262,18 @@ current feature support:
   actual destination whenever it is present. Configuration may control
   outbound emission, but it may not disable a mandatory inbound comparison
   once its condition applies.
+- **Signed HTTP binding destination:** The HTTP-Redirect and HTTP-POST
+  bindings, and the supported HTTP-POST-SimpleSign CD04 binding, require a
+  signed message to contain `Destination` and require the receiver to verify
+  it against the actual endpoint. A typed receiver therefore rejects a missing
+  or mismatched value after authenticating the binding-level message; an
+  Assertion-only signature does not activate this Response-level condition.
+- **CBC-encrypted assertions:** Approved Errata 05 E93 recommends integrity
+  protection before a relying party processes CBC-encrypted SAML data and
+  specifically recommends signing a Response that contains a CBC
+  `EncryptedAssertion`. Typed defaults follow this producer and relying-party
+  recommendation; accepting an unsigned CBC-encrypted Response requires an
+  explicit compatibility policy.
 
 ## Change And Review Checklist
 

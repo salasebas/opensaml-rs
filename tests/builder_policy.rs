@@ -5,9 +5,10 @@ use saml_rs::{
     AudienceValidationPolicy, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
     CertificatePem, Credentials, DataEncryptionAlgorithm, DigestAlgorithm, EntityId, EntitySetting,
     IdpConfig, IdpMetadataConfig, IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy,
-    LogoutSignaturePolicy, MessageSignaturePolicy, NameIdCreationPolicy, Passphrase, PrivateKeyPem,
-    SamlError, SignatureAlgorithm, SloEndpoint, SpConfig, SpMetadataConfig, SpValidationPolicy,
-    SsoEndpoint, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy, XmlPolicy,
+    LogoutSignaturePolicy, NameIdCreationPolicy, Passphrase, PrivateKeyPem,
+    ResponseSignaturePolicy, SamlError, SignatureAlgorithm, SloEndpoint, SpConfig,
+    SpMetadataConfig, SpValidationPolicy, SsoEndpoint, TemplatePolicy, TransformAlgorithm,
+    XmlEncryptionPolicy, XmlPolicy,
 };
 
 fn signing_credentials() -> Credentials {
@@ -125,8 +126,8 @@ fn builders_default_to_strict_validation() -> Result<(), Box<dyn std::error::Err
         AssertionSignaturePolicy::RequireSigned
     );
     assert_eq!(
-        sp.validation.messages,
-        MessageSignaturePolicy::RequireSigned
+        sp.validation.responses,
+        ResponseSignaturePolicy::RequireForEncryptedCbc
     );
     assert_eq!(
         sp.validation.authn_requests,
@@ -151,8 +152,8 @@ fn compatibility_policy_names_unsigned_choices_explicitly() {
         AssertionSignaturePolicy::AllowUnsignedForCompatibility
     );
     assert_eq!(
-        sp.messages,
-        MessageSignaturePolicy::AllowUnsignedForCompatibility
+        sp.responses,
+        ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility
     );
     assert_eq!(
         sp.authn_requests,
@@ -172,6 +173,7 @@ fn compatibility_policy_names_unsigned_choices_explicitly() {
 
 #[test]
 fn public_validation_defaults_remain_compatibility() {
+    assert!(!EntitySetting::default().want_message_signed);
     assert_eq!(
         SpValidationPolicy::default(),
         SpValidationPolicy::compatibility()
@@ -185,8 +187,8 @@ fn public_validation_defaults_remain_compatibility() {
         AssertionSignaturePolicy::AllowUnsignedForCompatibility
     );
     assert_eq!(
-        MessageSignaturePolicy::default(),
-        MessageSignaturePolicy::AllowUnsignedForCompatibility
+        ResponseSignaturePolicy::default(),
+        ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility
     );
     assert_eq!(
         AuthnRequestSigningPolicy::default(),

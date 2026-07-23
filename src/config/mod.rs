@@ -18,6 +18,6 @@ pub use metadata_trust::MetadataTrustPolicy;
 pub use policies::{
     AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
     AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, IdpValidationPolicy, LogoutPolicy,
-    LogoutSignaturePolicy, MessageSignaturePolicy, NameIdCreationPolicy, SpValidationPolicy,
+    LogoutSignaturePolicy, NameIdCreationPolicy, ResponseSignaturePolicy, SpValidationPolicy,
     TemplatePolicy, XmlEncryptionPolicy, XmlPolicy,
 };

@@ -48,6 +48,8 @@ pub struct EntitySetting {
     pub validate_audience: bool,
     /// SP: requires signed messages.
     pub want_message_signed: bool,
+    /// Typed SP: requires outer integrity for CBC-encrypted Assertions.
+    pub(crate) want_encrypted_cbc_response_signed: bool,
     /// IdP: requires signed AuthnRequests.
     pub want_authn_requests_signed: bool,
     /// Requires signed LogoutRequest (default `true`).
@@ -132,6 +134,10 @@ impl fmt::Debug for EntitySetting {
             .field("want_assertions_signed", &self.want_assertions_signed)
             .field("validate_audience", &self.validate_audience)
             .field("want_message_signed", &self.want_message_signed)
+            .field(
+                "want_encrypted_cbc_response_signed",
+                &self.want_encrypted_cbc_response_signed,
+            )
             .field(
                 "want_authn_requests_signed",
                 &self.want_authn_requests_signed,
@@ -232,6 +238,7 @@ impl Default for EntitySetting {
             want_assertions_signed: false,
             validate_audience: true,
             want_message_signed: false,
+            want_encrypted_cbc_response_signed: false,
             want_authn_requests_signed: false,
             want_logout_request_signed: true,
             want_logout_response_signed: true,
