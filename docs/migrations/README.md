@@ -8,6 +8,7 @@ release.
 ## Available guides
 
 - [`0.2` to `0.3`](0.2-to-0.3.md)
+- [`0.3` to `0.4`](0.3-to-0.4.md)
 
 ## Adding a guide
 
