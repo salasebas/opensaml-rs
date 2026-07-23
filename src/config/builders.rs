@@ -7,9 +7,10 @@ use super::credentials::Credentials;
 use super::descriptors::{validate_entity_id, EntityId, IdpMetadataConfig, SpMetadataConfig};
 use super::policies::{
     assertion_signature_required, audience_validation_enabled, authn_request_signature_required,
-    authn_request_signing_enabled, logout_signature_required, name_id_creation_allowed,
-    response_signature_required, AlgorithmPolicy, AssertionEncryptionPolicy,
-    AuthnRequestSigningPolicy, IdpValidationPolicy, SpValidationPolicy, TemplatePolicy, XmlPolicy,
+    authn_request_signing_enabled, encrypted_cbc_response_signature_required,
+    logout_signature_required, name_id_creation_allowed, response_signature_required,
+    AlgorithmPolicy, AssertionEncryptionPolicy, AuthnRequestSigningPolicy, IdpValidationPolicy,
+    SpValidationPolicy, TemplatePolicy, XmlPolicy,
 };
 #[cfg(not(feature = "crypto-bergshamra"))]
 use super::policies::{
@@ -466,7 +467,7 @@ fn sp_config_requires_crypto(config: &SpConfig) -> bool {
         AssertionSignaturePolicy::RequireSigned
     ) || matches!(
         config.validation.responses,
-        ResponseSignaturePolicy::RequireSigned
+        ResponseSignaturePolicy::RequireSigned | ResponseSignaturePolicy::RequireForEncryptedCbc
     ) || matches!(
         config.validation.authn_requests,
         AuthnRequestSigningPolicy::Sign
@@ -583,6 +584,8 @@ impl TryFrom<&SpConfig> for EntitySetting {
         setting.want_assertions_signed = assertion_signature_required(config.validation.assertions);
         setting.validate_audience = audience_validation_enabled(config.validation.audience);
         setting.want_message_signed = response_signature_required(config.validation.responses);
+        setting.want_encrypted_cbc_response_signed =
+            encrypted_cbc_response_signature_required(config.validation.responses);
         setting.want_logout_request_signed =
             logout_signature_required(config.validation.logout.requests)?;
         setting.want_logout_response_signed =

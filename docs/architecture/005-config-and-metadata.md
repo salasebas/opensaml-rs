@@ -178,7 +178,8 @@ pub enum AssertionSignaturePolicy {
 }
 
 pub enum ResponseSignaturePolicy {
-    Optional,
+    AllowUnsignedEncryptedCbcForCompatibility,
+    RequireForEncryptedCbc,
     RequireSigned,
 }
 
@@ -212,14 +213,22 @@ pub struct IdpValidationPolicy {
 }
 ```
 
-`SpValidationPolicy::strict()` requires a signed Assertion but leaves the
-top-level Response signature optional. `SpValidationPolicy::compatibility()`
-also uses `ResponseSignaturePolicy::Optional`. A Response-root signature is
-extra hardening beyond the Web Browser SSO profile's signed-Assertion
-requirement, and standard SP metadata has no flag that negotiates it. Callers
-that require both set `responses` to `ResponseSignaturePolicy::RequireSigned`;
-typed IdPs can satisfy that policy for HTTP-POST with
-`RespondSso::post().sign_response()`.
+SAML V2.0 Approved Errata 05 E26/E93 clarifies that Web Browser SSO over
+HTTP-POST requires each Assertion to be protected by signing either the
+Assertion itself or the enclosing Response. `SpValidationPolicy::strict()`
+deliberately requires direct Assertion coverage as library hardening; this is
+stricter than the profile baseline and aligns with the separate
+`WantAssertionsSigned` metadata requirement.
+
+The top-level Response remains optional for plaintext Assertions, but Errata 05
+E93 recommends outer integrity protection before processing an
+`EncryptedAssertion` that uses CBC. Strict policy therefore uses
+`ResponseSignaturePolicy::RequireForEncryptedCbc`; compatibility policy exposes
+the relaxation explicitly as
+`AllowUnsignedEncryptedCbcForCompatibility`. Typed IdPs sign CBC-encrypted
+Responses by default. Callers can require Response authentication for every
+response with `ResponseSignaturePolicy::RequireSigned` and force producer-side
+HTTP-POST signing with `RespondSso::post().sign_response()`.
 
 Avoid bare boolean names for signature requirements and avoid names like
 `insecure(true)`. Compatibility exceptions should be visible in enum variants.

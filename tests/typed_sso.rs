@@ -14,7 +14,8 @@ use saml_rs::{
     NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
     RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, ResponseSignaturePolicy,
     Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
-    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject,
+    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject, XmlEncryptionPolicy,
+    XmlPolicy,
 };
 use url::Url;
 
@@ -75,6 +76,22 @@ fn credentials() -> Credentials {
     }
 }
 
+fn encryption_credentials() -> Credentials {
+    Credentials {
+        encryption_certificate: Some(CertificatePem::new(CERT)),
+        decryption_key: Some(PrivateKeyPem::new(PRIVKEY)),
+        ..credentials()
+    }
+}
+
+fn encrypted_xml_policy() -> XmlPolicy {
+    XmlPolicy {
+        encryption: XmlEncryptionPolicy::encrypt_assertions()
+            .with_insecure_software_rsa_key_transport_decryption_allowed(),
+        ..XmlPolicy::default()
+    }
+}
+
 fn sp_config() -> Result<SpConfig, SamlError> {
     SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
         .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
@@ -104,6 +121,24 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
         .sso_endpoint(SsoEndpoint::simple_sign(IDP_SSO_SIMPLESIGN)?)
         .credentials(credentials())
         .validation(IdpValidationPolicy::strict())
+        .build()
+}
+
+fn encrypted_sp_config() -> Result<SpConfig, SamlError> {
+    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
+        .credentials(encryption_credentials())
+        .validation(SpValidationPolicy::strict())
+        .xml(encrypted_xml_policy())
+        .build()
+}
+
+fn encrypted_idp_config() -> Result<IdpConfig, SamlError> {
+    IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+        .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+        .credentials(credentials())
+        .validation(IdpValidationPolicy::strict())
+        .xml(encrypted_xml_policy())
         .build()
 }
 
@@ -756,6 +791,64 @@ fn typed_sign_response_satisfies_required_response_signature(
 
     assert_eq!(session.name_id().value(), "alice@example.com");
     Ok(())
+}
+
+#[test]
+fn typed_encrypted_cbc_response_is_signed_by_default() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(encrypted_sp_config()?)?;
+    let idp = Saml::idp(encrypted_idp_config()?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    )?;
+    let response = idp.respond_sso(&sp_descriptor, &received, subject(), RespondSso::post())?;
+    let fields = post_fields(&response)?;
+    let xml = response_xml_from_fields(&fields)?;
+    if !xml.contains("<ds:Signature") {
+        return Err("expected CBC-encrypted Response to carry an outer signature".into());
+    }
+
+    let session = sp.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::post(fields),
+        validation(),
+    )?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    Ok(())
+}
+
+#[test]
+fn typed_strict_sp_rejects_explicit_unsigned_encrypted_cbc_compatibility(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(encrypted_sp_config()?)?;
+    let idp = Saml::idp(encrypted_idp_config()?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    )?;
+    let response = idp.respond_sso(
+        &sp_descriptor,
+        &received,
+        subject(),
+        RespondSso::post().allow_unsigned_encrypted_cbc_for_compatibility(),
+    )?;
+
+    match sp.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::post(post_fields(&response)?),
+        validation(),
+    ) {
+        Err(SamlError::SignatureMissing) => Ok(()),
+        other => Err(format!("expected SignatureMissing, got {other:?}").into()),
+    }
 }
 
 #[test]

@@ -850,6 +850,97 @@ fn flow_conformance_send_signed_message_simplesign() -> Result<(), Box<dyn std::
     send_signed_message(Binding::SimpleSign)
 }
 
+fn signed_response_without_destination_is_rejected(
+    binding: Binding,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut setting = signing();
+    setting.login_response_template = Some(LoginResponseTemplate {
+        context: Some(saml_rs::template::LOGIN_RESPONSE_TEMPLATE.into()),
+        attributes: Vec::new(),
+    });
+    let idp = IdentityProvider::from_config(&idp_config(false), setting)?;
+    let sp = sp(false, false);
+    let callback = |template: &str| {
+        fill_response(
+            &template.replacen(" Destination=\"{Destination}\"", "", 1),
+            "https://idp.example.com/metadata",
+            "missing-destination@example.com",
+        )
+    };
+    let context = idp.create_login_response(
+        &sp,
+        binding,
+        &User::new("missing-destination@example.com"),
+        &LoginResponseOptions {
+            in_response_to: Some("_r"),
+            custom: Some(&callback as &dyn Fn(&str) -> (String, String)),
+            ..Default::default()
+        },
+    )?;
+
+    match parse_response_with_request_id(&sp, &idp, binding, &context, "_req") {
+        Err(SamlError::DestinationMismatch {
+            expected,
+            actual: None,
+        }) if expected == "https://sp/acs" => Ok(()),
+        other => Err(format!("expected missing Destination error, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn flow_conformance_signed_post_response_requires_destination(
+) -> Result<(), Box<dyn std::error::Error>> {
+    signed_response_without_destination_is_rejected(Binding::Post)
+}
+
+#[test]
+fn flow_conformance_signed_redirect_response_requires_destination(
+) -> Result<(), Box<dyn std::error::Error>> {
+    signed_response_without_destination_is_rejected(Binding::Redirect)
+}
+
+#[test]
+fn flow_conformance_signed_simplesign_response_requires_destination(
+) -> Result<(), Box<dyn std::error::Error>> {
+    signed_response_without_destination_is_rejected(Binding::SimpleSign)
+}
+
+#[test]
+fn flow_conformance_assertion_only_signed_post_allows_omitted_response_destination(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut setting = signing();
+    setting.login_response_template = Some(LoginResponseTemplate {
+        context: Some(saml_rs::template::LOGIN_RESPONSE_TEMPLATE.into()),
+        attributes: Vec::new(),
+    });
+    let idp = IdentityProvider::from_config(&idp_config(false), setting)?;
+    let sp = sp(true, false);
+    let callback = |template: &str| {
+        fill_response(
+            &template.replacen(" Destination=\"{Destination}\"", "", 1),
+            "https://idp.example.com/metadata",
+            "assertion-only@example.com",
+        )
+    };
+    let context = idp.create_login_response(
+        &sp,
+        Binding::Post,
+        &User::new("assertion-only@example.com"),
+        &LoginResponseOptions {
+            in_response_to: Some("_r"),
+            custom: Some(&callback as &dyn Fn(&str) -> (String, String)),
+            ..Default::default()
+        },
+    )?;
+    let parsed = parse_response_with_request_id(&sp, &idp, Binding::Post, &context, "_req")?;
+
+    assert_eq!(
+        parsed.extract.get_str("nameID"),
+        Some("assertion-only@example.com")
+    );
+    Ok(())
+}
+
 fn required_response_signature_accepts_detached_without_embedded_signature(
     binding: Binding,
 ) -> Result<(), Box<dyn std::error::Error>> {

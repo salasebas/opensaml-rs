@@ -48,16 +48,20 @@ Entries before the rebrand use the package names that were current at the time.
 
 - *(api)* expose every `AuthnStatement` session tuple in XML order
 - *(api)* add `RespondSso::sign_response()` for explicit top-level HTTP-POST Response signing
+- *(api)* add an explicit compatibility opt-out for unsigned CBC-encrypted Responses
 
 ### Changed
 
 - *(api)* rename the SP message-signature policy and field to `ResponseSignaturePolicy`/`responses`
-- *(sp)* keep top-level Response signatures optional in `SpValidationPolicy::strict()`
+- *(sp)* require Response authentication for CBC-encrypted Assertions in strict typed flows
+- *(idp)* sign CBC-encrypted Responses by default in typed flows
 
 ### Fixed
 
 - *(sp)* honor the earliest `SessionNotOnOrAfter` across repeated `AuthnStatement` values
 - *(security)* enforce explicit required Response signatures against verified root coverage
+- *(bindings)* reject authenticated Responses whose required `Destination` is missing
+- *(docs)* apply Approved Errata 05 E26/E93 to Web SSO signature guidance
 
 ## [0.2.0](https://github.com/salasebas/opensaml-rs/compare/v0.1.4...v0.2.0) - 2026-07-14
 

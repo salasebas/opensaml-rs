@@ -666,6 +666,8 @@ impl ServiceProvider {
             },
             if self.setting.want_message_signed {
                 ResponseSignatureRequirement::Required
+            } else if self.setting.want_encrypted_cbc_response_signed {
+                ResponseSignatureRequirement::RequiredForEncryptedCbc
             } else {
                 ResponseSignatureRequirement::Optional
             },

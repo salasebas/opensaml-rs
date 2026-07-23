@@ -125,7 +125,10 @@ fn builders_default_to_strict_validation() -> Result<(), Box<dyn std::error::Err
         sp.validation.assertions,
         AssertionSignaturePolicy::RequireSigned
     );
-    assert_eq!(sp.validation.responses, ResponseSignaturePolicy::Optional);
+    assert_eq!(
+        sp.validation.responses,
+        ResponseSignaturePolicy::RequireForEncryptedCbc
+    );
     assert_eq!(
         sp.validation.authn_requests,
         AuthnRequestSigningPolicy::Sign
@@ -148,7 +151,10 @@ fn compatibility_policy_names_unsigned_choices_explicitly() {
         sp.assertions,
         AssertionSignaturePolicy::AllowUnsignedForCompatibility
     );
-    assert_eq!(sp.responses, ResponseSignaturePolicy::Optional);
+    assert_eq!(
+        sp.responses,
+        ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility
+    );
     assert_eq!(
         sp.authn_requests,
         AuthnRequestSigningPolicy::DoNotSignForCompatibility
@@ -182,7 +188,7 @@ fn public_validation_defaults_remain_compatibility() {
     );
     assert_eq!(
         ResponseSignaturePolicy::default(),
-        ResponseSignaturePolicy::Optional
+        ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility
     );
     assert_eq!(
         AuthnRequestSigningPolicy::default(),

@@ -85,7 +85,14 @@ impl StartSso {
 pub struct RespondSso {
     pub(super) binding: SsoResponseBinding,
     pub(super) relay_state: Option<RelayStateParam>,
-    pub(super) sign_response: bool,
+    response_signing: ResponseSigning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResponseSigning {
+    FollowEncryptedCbcRecommendation,
+    Always,
+    AllowUnsignedEncryptedCbcForCompatibility,
 }
 
 impl RespondSso {
@@ -103,16 +110,26 @@ impl RespondSso {
         Self {
             binding,
             relay_state: None,
-            sign_response: false,
+            response_signing: ResponseSigning::FollowEncryptedCbcRecommendation,
         }
     }
 
-    /// Sign the top-level SAML Response.
+    /// Always authenticate the top-level SAML Response.
     ///
     /// HTTP-POST embeds an XML signature covering the Response. HTTP-POST-
     /// SimpleSign continues to use its binding-defined detached signature.
     pub fn sign_response(mut self) -> Self {
-        self.sign_response = true;
+        self.response_signing = ResponseSigning::Always;
+        self
+    }
+
+    /// Allow an unsigned Response around a CBC-encrypted Assertion.
+    ///
+    /// This explicitly relaxes SAML V2.0 Approved Errata 05 E93, which
+    /// recommends signing the Response so the ciphertext is integrity
+    /// protected. By default, typed IdPs sign such Responses automatically.
+    pub fn allow_unsigned_encrypted_cbc_for_compatibility(mut self) -> Self {
+        self.response_signing = ResponseSigning::AllowUnsignedEncryptedCbcForCompatibility;
         self
     }
 
@@ -123,6 +140,21 @@ impl RespondSso {
     pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
         self.relay_state = Some(relay_state);
         self
+    }
+
+    pub(super) fn should_sign_response(
+        &self,
+        assertion_encrypted: bool,
+        data_encryption_algorithm: &str,
+    ) -> bool {
+        match self.response_signing {
+            ResponseSigning::FollowEncryptedCbcRecommendation => {
+                assertion_encrypted
+                    && crate::constants::is_xml_encryption_cbc_algorithm(data_encryption_algorithm)
+            }
+            ResponseSigning::Always => true,
+            ResponseSigning::AllowUnsignedEncryptedCbcForCompatibility => false,
+        }
     }
 }
 
