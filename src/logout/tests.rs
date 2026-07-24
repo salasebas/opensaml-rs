@@ -183,8 +183,7 @@ fn parse_unsigned_logout_request_at(
         &sender.metadata,
         Binding::Post,
         &logout_request_request(issue_instant, not_on_or_after),
-        now,
-        clock_drifts,
+        LogoutFlowValidation::typed("https://idp/slo", now, clock_drifts),
     )
 }
 
@@ -337,6 +336,37 @@ fn unsigned_logout_request_rejects_unexpected_issuer_when_explicitly_allowed(
     let result = parse_logout_request(&idp.setting, &expected_sp.metadata, Binding::Post, &request);
 
     assert!(matches!(result, Err(SamlError::IssuerMismatch { .. })));
+    Ok(())
+}
+
+#[test]
+fn raw_logout_request_parser_does_not_infer_actual_recipient(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sender = sp()?;
+    let mut receiver = idp()?;
+    receiver.setting.want_logout_request_signed = false;
+    let context = create_logout_request(
+        &sender.setting,
+        &sender.metadata,
+        &receiver.metadata,
+        Binding::Post,
+        &User::new("victim@example.com"),
+        None,
+        false,
+    )?;
+    let xml = String::from_utf8(base64_decode(&context.context)?)?.replace(
+        r#"Destination="https://idp/slo""#,
+        r#"Destination="https://different.example/slo""#,
+    );
+    let request = HttpRequest::post(vec![("SAMLRequest".into(), base64_encode(xml.as_bytes()))]);
+
+    let result =
+        parse_logout_request(&receiver.setting, &sender.metadata, Binding::Post, &request)?;
+
+    assert_eq!(
+        result.extract.get_str("request.destination"),
+        Some("https://different.example/slo")
+    );
     Ok(())
 }
 
