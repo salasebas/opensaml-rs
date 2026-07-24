@@ -9,6 +9,25 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.4.0](https://github.com/salasebas/opensaml-rs/compare/v0.3.0...v0.4.0) - 2026-07-24
+
+### Added
+
+- *(api)* [**breaking**] enforce standards-aware Response signature policy ([#81](https://github.com/salasebas/opensaml-rs/pull/81))
+
+### Fixed
+
+- *(slo)* [**breaking**] validate LogoutRequest time bounds ([#73](https://github.com/salasebas/opensaml-rs/pull/73))
+- *(slo)* [**breaking**] reject non-conformant custom LogoutResponse templates ([#91](https://github.com/salasebas/opensaml-rs/pull/91))
+- *(sso)* [**breaking**] enforce UTC IssueInstant on responses and assertions ([#90](https://github.com/salasebas/opensaml-rs/pull/90))
+- *(slo)* [**breaking**] validate logout response issue instant ([#80](https://github.com/salasebas/opensaml-rs/pull/80))
+- *(protocol)* [**breaking**] validate AuthnRequest IssueInstant ([#74](https://github.com/salasebas/opensaml-rs/pull/74))
+
+### Other
+
+- *(migrations)* start 0.3 to 0.4 guide ([#84](https://github.com/salasebas/opensaml-rs/pull/84))
+- *(deps)* bump uuid in the cargo-maintenance group ([#93](https://github.com/salasebas/opensaml-rs/pull/93))
+
 ### Fixed
 
 - *(slo)* [**breaking**] require UTC LogoutRequest `IssueInstant`, validate
