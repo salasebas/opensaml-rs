@@ -17,6 +17,7 @@ work in the repo, not restate the README.
 
 ## Working Rules
 
+- Use English for all repository content and collaboration.
 - Read the nearby code and tests before changing behavior. Prefer existing
   module boundaries and error styles.
 - Keep diffs focused. Do not mix documentation cleanup, behavior changes, and
