@@ -1,9 +1,41 @@
 use crate::constants::{Binding, CertUse, ParserType};
 use crate::entity::EntitySetting;
 use crate::error::SamlError;
-use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
+use crate::flow::{
+    flow, flow_with_expected_recipient, AssertionSignatureRequirement, FlowOptions, FlowResult,
+    HttpRequest, ResponseSignatureRequirement,
+};
 use crate::metadata::Metadata;
 use std::time::SystemTime;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LogoutFlowValidation<'a> {
+    expected_recipient: Option<&'a str>,
+    now: Option<SystemTime>,
+    clock_drifts: (i64, i64),
+}
+
+impl<'a> LogoutFlowValidation<'a> {
+    pub(crate) fn typed(
+        expected_recipient: &'a str,
+        now: SystemTime,
+        clock_drifts: (i64, i64),
+    ) -> Self {
+        Self {
+            expected_recipient: Some(expected_recipient),
+            now: Some(now),
+            clock_drifts,
+        }
+    }
+
+    fn raw(clock_drifts: (i64, i64)) -> Self {
+        Self {
+            expected_recipient: None,
+            now: None,
+            clock_drifts,
+        }
+    }
+}
 
 /// Parse a `<LogoutRequest>` from `from`.
 ///
@@ -24,6 +56,11 @@ use std::time::SystemTime;
 /// signed requests. Signature failures include missing signatures, untrusted
 /// signing certificates, invalid detached signatures, RelayState/signed-octet
 /// correlation failures, and XML signature validation errors.
+///
+/// This raw compatibility parser has no actual receiving endpoint and
+/// therefore does not compare `Destination`. Callers that operate an endpoint
+/// directly own that check. Prefer [`crate::Saml`] for a binding-aware typed
+/// SLO receiver.
 pub fn parse_logout_request(
     self_setting: &EntitySetting,
     from_meta: &Metadata,
@@ -35,8 +72,7 @@ pub fn parse_logout_request(
         from_meta,
         binding,
         request,
-        None,
-        self_setting.clock_drifts,
+        LogoutFlowValidation::raw(self_setting.clock_drifts),
     )
 }
 
@@ -45,17 +81,9 @@ pub(crate) fn parse_logout_request_at(
     from_meta: &Metadata,
     binding: Binding,
     request: &HttpRequest,
-    now: SystemTime,
-    clock_drifts: (i64, i64),
+    validation: LogoutFlowValidation<'_>,
 ) -> Result<FlowResult, SamlError> {
-    parse_logout_request_inner(
-        self_setting,
-        from_meta,
-        binding,
-        request,
-        Some(now),
-        clock_drifts,
-    )
+    parse_logout_request_inner(self_setting, from_meta, binding, request, validation)
 }
 
 fn parse_logout_request_inner(
@@ -63,11 +91,10 @@ fn parse_logout_request_inner(
     from_meta: &Metadata,
     binding: Binding,
     request: &HttpRequest,
-    now: Option<SystemTime>,
-    clock_drifts: (i64, i64),
+    validation: LogoutFlowValidation<'_>,
 ) -> Result<FlowResult, SamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
-    flow(
+    run_logout_flow(
         &FlowOptions {
             binding: Some(binding),
             parser_type: Some(ParserType::LogoutRequest),
@@ -77,14 +104,15 @@ fn parse_logout_request_inner(
             decrypt_key: None,
             decrypt_key_pass: None,
             allow_insecure_software_rsa_key_transport_decryption: false,
-            clock_drifts,
-            now,
+            clock_drifts: validation.clock_drifts,
+            now: validation.now,
             redirect_inflate_max_bytes: self_setting.redirect_inflate_max_bytes,
             xml_limits: self_setting.xml_limits,
             expected_audience: None,
             expected_in_response_to: None,
         },
         request,
+        validation.expected_recipient,
     )
 }
 
@@ -94,11 +122,10 @@ fn parse_logout_response_inner(
     binding: Binding,
     request: &HttpRequest,
     expected_in_response_to: Option<&str>,
-    now: Option<SystemTime>,
-    clock_drifts: (i64, i64),
+    validation: LogoutFlowValidation<'_>,
 ) -> Result<FlowResult, SamlError> {
     let signing_certs = from_meta.x509_certificates(CertUse::Signing);
-    flow(
+    run_logout_flow(
         &FlowOptions {
             binding: Some(binding),
             parser_type: Some(ParserType::LogoutResponse),
@@ -108,14 +135,15 @@ fn parse_logout_response_inner(
             decrypt_key: None,
             decrypt_key_pass: None,
             allow_insecure_software_rsa_key_transport_decryption: false,
-            clock_drifts,
-            now,
+            clock_drifts: validation.clock_drifts,
+            now: validation.now,
             redirect_inflate_max_bytes: self_setting.redirect_inflate_max_bytes,
             xml_limits: self_setting.xml_limits,
             expected_audience: None,
             expected_in_response_to,
         },
         request,
+        validation.expected_recipient,
     )
 }
 
@@ -144,6 +172,11 @@ fn parse_logout_response_inner(
 /// Signature failures include missing signatures, untrusted signing
 /// certificates, invalid detached signatures, RelayState/signed-octet
 /// correlation failures, and XML signature validation errors.
+///
+/// This raw compatibility parser has no actual receiving endpoint and
+/// therefore does not compare `Destination`. Callers that operate an endpoint
+/// directly own that check. Prefer [`crate::Saml`] for a binding-aware typed
+/// SLO receiver.
 pub fn parse_logout_response(
     self_setting: &EntitySetting,
     from_meta: &Metadata,
@@ -160,8 +193,7 @@ pub fn parse_logout_response(
         binding,
         request,
         Some(request_id),
-        None,
-        self_setting.clock_drifts,
+        LogoutFlowValidation::raw(self_setting.clock_drifts),
     )
 }
 
@@ -171,8 +203,7 @@ pub(crate) fn parse_logout_response_at(
     binding: Binding,
     request: &HttpRequest,
     request_id: &str,
-    now: SystemTime,
-    clock_drifts: (i64, i64),
+    validation: LogoutFlowValidation<'_>,
 ) -> Result<FlowResult, SamlError> {
     if request_id.is_empty() {
         return Err(SamlError::InvalidInResponseTo);
@@ -183,8 +214,7 @@ pub(crate) fn parse_logout_response_at(
         binding,
         request,
         Some(request_id),
-        Some(now),
-        clock_drifts,
+        validation,
     )
 }
 
@@ -195,7 +225,8 @@ pub(crate) fn parse_logout_response_at(
 /// outside this crate.
 ///
 /// Callers using this raw function own request correlation, replay protection,
-/// and any optional message-freshness policy.
+/// comparison of `Destination` with the actual receiving endpoint, and any
+/// optional message-freshness policy.
 ///
 /// # Errors
 ///
@@ -220,7 +251,23 @@ pub fn parse_logout_response_without_request_id(
         binding,
         request,
         None,
-        None,
-        self_setting.clock_drifts,
+        LogoutFlowValidation::raw(self_setting.clock_drifts),
     )
+}
+
+fn run_logout_flow(
+    options: &FlowOptions<'_>,
+    request: &HttpRequest,
+    expected_recipient: Option<&str>,
+) -> Result<FlowResult, SamlError> {
+    match expected_recipient {
+        Some(expected_recipient) => flow_with_expected_recipient(
+            options,
+            request,
+            expected_recipient,
+            AssertionSignatureRequirement::Compatible,
+            ResponseSignatureRequirement::Optional,
+        ),
+        None => flow(options, request),
+    }
 }

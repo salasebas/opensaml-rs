@@ -6,7 +6,7 @@ use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
 use crate::logout::{
     create_logout_request_with_session_indexes, create_logout_response, parse_logout_request_at,
-    parse_logout_response_at, LogoutRequestSessionIndexes,
+    parse_logout_response_at, LogoutFlowValidation, LogoutRequestSessionIndexes,
 };
 use crate::metadata::Metadata;
 use crate::model::{
@@ -411,14 +411,18 @@ fn receive_slo_impl(
 ) -> Result<Received<LogoutRequest>, SamlError> {
     let relay_state = relay_state_from_input(&input)?;
     let binding = LogoutBinding::try_from(input_binding(&input))?;
+    let expected_recipient = logout_recipient_endpoint(local_metadata, binding)?;
     let request = HttpRequest::try_from(input)?;
     let flow = parse_logout_request_at(
         local_setting,
         peer_metadata,
         binding.as_binding(),
         &request,
-        validation.now(),
-        validation.clock_skew().as_millis(),
+        LogoutFlowValidation::typed(
+            &expected_recipient,
+            validation.now(),
+            validation.clock_skew().as_millis(),
+        ),
     )?;
     let replay_deadline = crate::validator::logout_request_not_on_or_after_deadline(
         &flow.extract,
@@ -426,7 +430,6 @@ fn receive_slo_impl(
         validation.clock_skew().not_on_or_after_millis(),
     )?;
     let logout = LogoutRequest::try_from(flow)?;
-    ensure_logout_destination(local_metadata, binding, logout.destination())?;
     validation.check_and_store_message_replay_until(
         ReplayKey::LogoutRequestId(logout.id().clone()),
         replay_deadline,
@@ -471,6 +474,7 @@ fn finish_slo_impl(
     ensure_entity_id(pending.peer_entity_id(), peer_entity_id)?;
     ensure_logout_response_binding(input_binding(&input), pending.response_binding())?;
     ensure_relay_state(pending.relay_state(), &relay_state_from_input(&input)?)?;
+    let expected_recipient = logout_recipient_endpoint(local_metadata, pending.response_binding())?;
     let request = HttpRequest::try_from(input)?;
     let flow = parse_logout_response_at(
         local_setting,
@@ -478,15 +482,13 @@ fn finish_slo_impl(
         pending.response_binding().as_binding(),
         &request,
         pending.id().as_str(),
-        validation.now(),
-        validation.clock_skew().as_millis(),
+        LogoutFlowValidation::typed(
+            &expected_recipient,
+            validation.now(),
+            validation.clock_skew().as_millis(),
+        ),
     )?;
     let response = LogoutResponse::try_from(flow)?;
-    ensure_logout_destination(
-        local_metadata,
-        pending.response_binding(),
-        response.destination(),
-    )?;
     validation
         .check_and_store_message_replay(ReplayKey::LogoutResponseId(response.id().clone()))?;
     Ok(LogoutCompleted::from_response(
@@ -513,24 +515,13 @@ fn ensure_logout_response_binding(
     Err(Error::UnsupportedBinding { binding: actual })
 }
 
-fn ensure_logout_destination(
+fn logout_recipient_endpoint(
     local_metadata: &Metadata,
     binding: LogoutBinding,
-    actual: Option<&crate::model::EndpointUrl>,
-) -> Result<(), SamlError> {
-    let Some(actual) = actual else {
-        return Ok(());
-    };
-    let expected = local_metadata
+) -> Result<String, SamlError> {
+    local_metadata
         .get_single_logout_service(binding.as_binding())
-        .ok_or_else(|| Error::MissingMetadata("SingleLogoutService".into()))?;
-    if actual.as_str() == expected {
-        return Ok(());
-    }
-    Err(Error::destination_mismatch(
-        &expected,
-        Some(actual.as_str()),
-    ))
+        .ok_or_else(|| Error::MissingMetadata("SingleLogoutService".into()))
 }
 
 fn typed_logout_subject(subject: LogoutSubject) -> TypedLogoutSubject {
