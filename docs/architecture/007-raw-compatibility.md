@@ -105,6 +105,9 @@ Rules:
 - Raw accessors are named with `raw_`.
 - Typed docs should not teach `FlowResult.extract` as the normal path.
 - Raw compatibility must not weaken typed validation rules.
+- Raw logout parsers do not receive the actual local endpoint. Their
+  `FlowResult` therefore does not claim that `Destination` was compared with
+  the receiving endpoint; direct raw callers own that check.
 - Raw `HttpRequest` compatibility may keep manual detached-octet inputs for
   SimpleSign interop; typed `BrowserInput` should derive those octets itself
   from raw browser form input.
