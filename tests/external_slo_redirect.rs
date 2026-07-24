@@ -15,12 +15,11 @@ use time::OffsetDateTime;
 
 const SP_ENTITY_ID: &str = "https://sp.example.test/metadata";
 const SP_ACS_POST: &str = "https://sp.example.test/acs/post";
-const SP_SLO_REDIRECT: &str = "https://sp.example.test/slo/redirect";
-const SHIBBOLETH_IDP_ENTITY_ID: &str = "https://idp.example.test/idp/shibboleth";
-const SHIBBOLETH_REQUEST_ID: &str = "_shibboleth-idp5-redirect-logout-request";
-const SHIBBOLETH_ISSUE_INSTANT: &str = "2026-07-24T06:00:00.000Z";
-const SHIBBOLETH_NAME_ID: &str = "alice@example.test";
-const SHIBBOLETH_SESSION_INDEX: &str = "_shibboleth-session-20260724";
+const SP_SLO_REDIRECT: &str = "https://localhost:24720/sp/SAML2/Redirect/SLO";
+const SHIBBOLETH_IDP_ENTITY_ID: &str = "https://idp.example.org";
+const SHIBBOLETH_REQUEST_ID: &str = "_bf782bbc9316aebfd833c4ba368a9ee2";
+const SHIBBOLETH_ISSUE_INSTANT: &str = "2026-07-24T07:38:43.086Z";
+const SHIBBOLETH_SESSION_INDEX: &str = "_6bf9971c68fae97ec8a850ee6e99b3ca";
 const IDP_ENTITY_ID: &str = "https://idp.example.test/metadata";
 const IDP_SSO_REDIRECT: &str = "https://idp.example.test/sso/redirect";
 const IDP_SLO_REDIRECT: &str = "https://idp.example.test/slo/redirect";
@@ -63,13 +62,18 @@ fn fixture_query(contents: &str) -> &str {
     contents.strip_suffix('\n').unwrap_or(contents)
 }
 
-fn assert_redirect_wire(query: &str, relay_state: &str) {
+fn assert_redirect_wire(query: &str, relay_state: Option<&str>) {
     let names = query
         .split('&')
         .filter_map(|segment| segment.split_once('=').map(|(name, _)| name))
         .collect::<Vec<_>>();
-    assert_eq!(names, ["SAMLRequest", "RelayState", "SigAlg", "Signature"]);
-    assert!(query.contains(&format!("&RelayState={relay_state}&")));
+    match relay_state {
+        Some(value) => {
+            assert_eq!(names, ["SAMLRequest", "RelayState", "SigAlg", "Signature"]);
+            assert!(query.contains(&format!("&RelayState={value}&")));
+        }
+        None => assert_eq!(names, ["SAMLRequest", "SigAlg", "Signature"]),
+    }
     assert!(query.contains(
         "&SigAlg=http%3A%2F%2Fwww.w3.org%2F2001%2F04%2Fxmldsig-more%23rsa-sha256&Signature="
     ));
@@ -163,6 +167,21 @@ fn tamper_redirect_message(
     Ok(segments.join("&"))
 }
 
+fn redirect_message_xml(raw_query: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let saml_request = raw_query
+        .trim()
+        .split('&')
+        .find(|segment| segment.starts_with("SAMLRequest="))
+        .ok_or("missing SAMLRequest query parameter")?;
+    let decoded = url::form_urlencoded::parse(saml_request.as_bytes())
+        .next()
+        .ok_or("missing SAMLRequest value")?
+        .1;
+    Ok(String::from_utf8(deflate_raw_decode(&base64_decode(
+        decoded.as_ref(),
+    )?)?)?)
+}
+
 #[test]
 fn shibboleth_idp5_redirect_logout_request_is_consumed_by_sp(
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -184,10 +203,10 @@ fn shibboleth_idp5_redirect_logout_request_is_consumed_by_sp(
     );
     assert_eq!(message.id().as_str(), SHIBBOLETH_REQUEST_ID);
     assert_eq!(message.issue_instant().as_str(), SHIBBOLETH_ISSUE_INSTANT);
-    assert_eq!(
-        message.name_id().map(|name_id| name_id.value()),
-        Some(SHIBBOLETH_NAME_ID)
-    );
+    assert!(message.name_id().is_none());
+    let wire_xml = redirect_message_xml(fixture_query(SHIBBOLETH_QUERY))?;
+    assert!(wire_xml.contains("<saml2:EncryptedID"));
+    assert!(!wire_xml.contains("<saml2:NameID"));
     assert_eq!(
         message
             .session_indexes()
@@ -197,21 +216,18 @@ fn shibboleth_idp5_redirect_logout_request_is_consumed_by_sp(
         [SHIBBOLETH_SESSION_INDEX]
     );
     assert_eq!(message.raw_flow().sig_alg.as_deref(), Some(RSA_SHA256));
-    assert_eq!(
-        received.relay_state().as_deref(),
-        Some("shibboleth-idp5-state")
-    );
-    assert_redirect_wire(fixture_query(SHIBBOLETH_QUERY), "shibboleth-idp5-state");
+    assert_eq!(received.relay_state().as_deref(), None);
+    assert_redirect_wire(fixture_query(SHIBBOLETH_QUERY), None);
     assert_eq!(
         cache.writes.first().map(|(key, _)| key.as_str()),
-        Some("logout_request_id:_shibboleth-idp5-redirect-logout-request")
+        Some("logout_request_id:_bf782bbc9316aebfd833c4ba368a9ee2")
     );
     assert_eq!(cache.writes.len(), 1);
 
     let tampered_query = tamper_redirect_message(
         fixture_query(SHIBBOLETH_QUERY),
-        SHIBBOLETH_NAME_ID,
-        "mallory@example.test",
+        SHIBBOLETH_SESSION_INDEX,
+        "_tampered-shibboleth-session",
     )?;
     let mut tampered_cache = RecordingReplayCache::default();
     let result = sp.receive_slo(
@@ -271,7 +287,10 @@ fn simplesamlphp_sp_redirect_logout_request_is_consumed_by_idp(
         received.relay_state().as_deref(),
         Some("simplesamlphp-sp-state")
     );
-    assert_redirect_wire(fixture_query(SIMPLESAMLPHP_QUERY), "simplesamlphp-sp-state");
+    assert_redirect_wire(
+        fixture_query(SIMPLESAMLPHP_QUERY),
+        Some("simplesamlphp-sp-state"),
+    );
     assert_eq!(
         cache.writes.first().map(|(key, _)| key.as_str()),
         Some("logout_request_id:_simplesamlphp-sp-redirect-logout-request")

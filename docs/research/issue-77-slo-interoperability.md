@@ -74,12 +74,16 @@ firmados e inmutables:
 
 Las pruebas consumen el query wire-level conservado, usan política estricta
 para firmas de logout, reloj y replay explícitos, y verifican issuer,
-destination, ID, `IssueInstant`, NameID, todos los SessionIndex, RelayState,
-binding Redirect y algoritmo de firma. Para cada productor, una segunda
+destination, ID, `IssueInstant`, todos los SessionIndex, binding Redirect y
+algoritmo de firma. El vector SimpleSAMLphp también verifica NameID y
+RelayState. El flujo completo de Shibboleth emitió, de forma predeterminada,
+`EncryptedID` y no envió RelayState; la prueba afirma esa forma wire y
+documenta que el modelo tipado actual autentica y consume la request pero
+todavía no expone el identificador cifrado. Para cada productor, una segunda
 ejecución altera un campo dentro del mensaje firmado sin volver a firmar y
 comprueba que la verificación criptográfica falla antes de escribir en replay.
-La procedencia exacta, hashes y advertencia de claves públicas de prueba están
-en `tests/fixtures/PROVENANCE.md`.
+La procedencia exacta, hashes, receta reproducible y advertencia de claves
+públicas de prueba están en `tests/fixtures/PROVENANCE.md`.
 
 ## Fuentes normativas y estatus
 

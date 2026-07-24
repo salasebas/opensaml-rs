@@ -38,40 +38,50 @@ claims about a production deployment.
 | --- | --- |
 | Producer and role | Shibboleth Identity Provider, IdP-initiated `LogoutRequest` |
 | Product version | Shibboleth Identity Provider `5.2.3` |
-| Distribution | https://shibboleth.net/downloads/identity-provider/latest/shibboleth-identity-provider-5.2.3.tar.gz |
-| Distribution SHA-256 | `8d7a43e8e2698cf06dbefec20d98bba4eb15d27b4dd1af4e63f367e8597311ff` (matches the adjacent published `.sha256`) |
-| Runtime | Eclipse Temurin `17.0.19+10` |
-| Binding and encoder | HTTP-Redirect via the distribution's `org.opensaml.saml.saml2.binding.encoding.impl.HTTPRedirectDeflateEncoder` |
+| Distribution | Maven release artifact `net.shibboleth.idp:idp-distribution:5.2.3:zip` |
+| Distribution SHA-256 | `5ad3f26cfbb76c94137b79c0ccc35c068b19e209c5f8e32b9787bafb73446e96` |
+| Release source | `https://codeberg.org/Shibboleth/java-identity-provider`, tag `5.2.3`, commit `bbd2a2e17b39bbb950b9f67eb09bee48b4860452` |
+| Integration harness | `https://codeberg.org/Shibboleth/java-idp-integration-tests`, commit `948a900d78e58b41fbeedf6b2557e3ce17229d69` |
+| IdP testbed | Snapshot `5.2.3-20260617.132935-11`; WAR SHA-256 `7793a24d2ab04638ac0b305bc937144b7389a4e22724749fdf0ea7ff0f7857a5`; classes JAR SHA-256 `bb76db0ac097c36d2a03b7742c9691f65648db67c86159fe0b61e022bf48ffd3` |
+| Runtime | Eclipse Temurin `17.0.19+10`, Maven `3.9.16`, Jetty `12.1.10`, Chrome `150.0.7871.129`, Selenium `4.44.0` |
+| Binding and encoder | Full IdP product flow over HTTP-Redirect, captured from Chrome's network log |
 | Direction under test | `Saml<Sp>::receive_slo` |
-| Entity ID | `https://idp.example.test/idp/shibboleth` |
-| Destination | `https://sp.example.test/slo/redirect` |
+| Entity ID | `https://idp.example.org` |
+| Destination | `https://localhost:24720/sp/SAML2/Redirect/SLO` |
 | Signature | RSA-SHA256 detached Redirect signature |
-| RelayState | `shibboleth-idp5-state` |
+| Subject identifier | Default `<EncryptedID>` emitted by the configured IdP |
+| RelayState | Absent |
 | License/source note | Shibboleth IdP is distributed under Apache License 2.0; only emitted test data and locally generated test credentials are committed |
 
-Generation used the unmodified JARs in the published IdP distribution's
-`webapp/WEB-INF/lib/` directory. After OpenSAML
-`InitializationService.initialize()`, a SAML 2.0 `LogoutRequest` was populated
-with the committed ID, timestamp, issuer, destination, persistent NameID, and
-SessionIndex. A `BasicX509Credential` backed by the test key below and
-RSA-SHA256 `SignatureSigningParameters` were placed in the message context.
-The distribution's `HTTPRedirectDeflateEncoder` emitted the captured redirect
-URL; the part after `?` is committed unchanged as `logout-request.query`.
+The official integration harness installed the release IdP, started it in
+Jetty, completed SSO and consent against the official testbed SP, enabled
+tracked SP sessions, and then followed the IdP's global-logout propagation
+flow. Chrome captured the request that the running IdP sent to the testbed
+SP's Redirect SLO endpoint. The part after `?` is committed unchanged as
+`logout-request.query`.
 
-The generation-only Java source, downloaded distribution, and servlet API
-provided by the temporary runtime were deleted and are not repository inputs.
+The IdP installer generated the committed RSA-3072 test signing key and
+certificate for that run. `idp-metadata.xml` is a minimal receiver-side
+descriptor assembled from the captured certificate, query issuer, and
+runtime endpoints; it is not a verbatim product metadata export. The exact
+harness patch, Maven settings, commands, and extraction command are recorded
+in [the reproduction recipe](interop/REPRODUCING.md#shibboleth-idp-523).
+
+Shibboleth emitted `<EncryptedID>` in this default front-channel flow.
+`saml-rs` authenticates and parses the request and exposes its SessionIndex,
+but its typed logout model does not currently expose the encrypted
+identifier. The regression test asserts both facts explicitly. This is a
+scoped interoperability observation, not a SAML conformance claim.
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `shibboleth-idp-5.2.3/logout-request.query` | `382ff30a8f4b98ce4d53184b6f27839d074c6802b077351cf86c9194f4123c48` |
-| `shibboleth-idp-5.2.3/idp-metadata.xml` | `0c1914dd93653575f119845e2187f15f024b527c45198fa2fb34ee632a74079a` |
-| `shibboleth-idp-5.2.3/idp-signing-cert.pem` | `f5cdbeb656b8de4461c5d68b0a0a7ea09ea04521179e19c26550ab011824e80f` |
-| `shibboleth-idp-5.2.3/idp-signing-key.pem` | `8e77fad5bb74cc9caf781fdf9f7aee9ac0bb7f15f2f1cde55a1c0c006e4dee00` |
+| `shibboleth-idp-5.2.3/logout-request.query` | `b8e4d96aaa902c180d491f314fe4e47f6b2bfa18cd2900f243b9fa651770fffb` |
+| `shibboleth-idp-5.2.3/idp-metadata.xml` | `78a6c50559969f88ee82d141ceb01a1fc8cedb7314033647be82a8d33e29898f` |
+| `shibboleth-idp-5.2.3/idp-signing-cert.pem` | `a9103584081e85f02d146c7ccae7ce219cd88a167ed0df798c8b37f4ad00f435` |
+| `shibboleth-idp-5.2.3/idp-signing-key.pem` | `fd97cd3c7bb5386048d74cce24fe77a626f76c9bbcbc53025407f752f43c3d18` |
 
-The RSA-2048 key and self-signed certificate were generated with OpenSSL
-`3.6.2` using `genpkey` and `req -new -x509 -sha256 -days 3650`. The
-certificate SHA-256 fingerprint is
-`83:3D:0F:9A:1D:24:AE:3B:18:69:45:29:BD:AA:0D:2A:83:A5:D8:F0:DA:0E:32:FA:A3:12:34:97:CF:90:C5:63`.
+The certificate SHA-256 fingerprint is
+`8A:4B:D0:22:0E:54:DE:F3:38:C5:60:07:7C:BE:1B:93:E5:B9:18:0A:25:49:A4:8D:25:DC:E4:7E:2F:E0:09:92`.
 
 ### SimpleSAMLphp 2.5.2 SP → saml-rs IdP
 
@@ -103,7 +113,9 @@ and two SessionIndex values were then set before production
 committed unchanged as `logout-request.query`.
 
 The generation-only PHP script, downloaded release archive, and PHP container
-are not repository inputs.
+are not repository inputs. Its complete source, SHA-256, and exact container
+command are preserved in
+[the reproduction recipe](interop/REPRODUCING.md#simplesamlphp-252).
 
 | Artifact | SHA-256 |
 | --- | --- |
