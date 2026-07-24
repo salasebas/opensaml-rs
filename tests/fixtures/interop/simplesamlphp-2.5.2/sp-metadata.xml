@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<md:EntityDescriptor
+    xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
+    xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+    entityID="https://sp.example.test/saml2">
+  <md:SPSSODescriptor
+      AuthnRequestsSigned="true"
+      WantAssertionsSigned="true"
+      protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo>
+        <ds:X509Data>
+          <ds:X509Certificate>
+            MIIDYTCCAkmgAwIBAgIUCVzTyiLJtvHiyu54li5/3MT7daUwDQYJKoZIhvcNAQEL
+            BQAwQDEYMBYGA1UEAwwPc3AuZXhhbXBsZS50ZXN0MSQwIgYDVQQKDBtzYW1sLXJz
+            IHB1YmxpYyB0ZXN0IGZpeHR1cmUwHhcNMjYwNzI0MDY1NzMyWhcNMzYwNzIxMDY1
+            NzMyWjBAMRgwFgYDVQQDDA9zcC5leGFtcGxlLnRlc3QxJDAiBgNVBAoMG3NhbWwt
+            cnMgcHVibGljIHRlc3QgZml4dHVyZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCC
+            AQoCggEBAMleXGWhsmHA50u/jUz3fEFDcrHl7YtxjKrZ9EVMXv0e3EG1C5pLRVvW
+            ufD/lXH8bbWr1G+JpmCH1rLX4at9hkj3T0Pvku48W8/Zpj6IK0uoKvfQSrugXTRN
+            VmOwvTwt6YgDDK6/1ObhGK3BcI/RVnY1vYmGi+w50NUv1QKIO5tr11GGCZU1qmmt
+            b3U1/fQA4tW08rUO8SQ2nxVejECHlfDg+1TThMBofCuJ2xHFHHld73GJrwg55EjK
+            oe02n3loQJlCx5dyBsIHkiyAXjzg4u9PF4BT+IQ6IjOjUOG0RUfUuZU4q50Kp5NU
+            ctCzr7s8IhmU6p5HTbGvQxJgZ2gyn6ECAwEAAaNTMFEwHQYDVR0OBBYEFIDbsDCF
+            2dq8PESgRsBVuAQUN7tqMB8GA1UdIwQYMBaAFIDbsDCF2dq8PESgRsBVuAQUN7tq
+            MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBALGC2IcM9k8LR4T4
+            7Kpm4buGzRGwA7oNoE5eMvm2+hN0SRIFIK+Ka2CxthxGRamXGJ+uemFXSMuR6vpR
+            sB4HTe5DBAOyFl9a5tz8nTR4KQqg16aME7aZIsmId6vR9KllXP5bhY4KhBJJ1x96
+            Xj8an+75u5Z79RNUDAhJttGMOtCaHx9K4pQ4kRzpigBA3rMzNoeUDA5lh2yu7+S0
+            It0hXjn8OuO1m/GjlwyTTO4G2lhmy50Iz/xZ5fk3w6xMkSdnQEP8PC9AOBqDmasf
+            pnlxb47ieBk5wIvnz+54QvVwjJqC49Ao4+YdG+V9pMwyU15Y/0cg/QP40ZnYrd/4
+            qIg9w4E=
+          </ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+    <md:SingleLogoutService
+        Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        Location="https://sp.example.test/slo/redirect"/>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:persistent</md:NameIDFormat>
+    <md:AssertionConsumerService
+        Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+        Location="https://sp.example.test/acs/post"
+        index="0"
+        isDefault="true"/>
+  </md:SPSSODescriptor>
+</md:EntityDescriptor>
