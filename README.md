@@ -123,6 +123,12 @@ browser response with `idp.respond_sso(...)`. The complete path is exercised in
 [Identity Provider flows](https://docs.rs/saml-rs/latest/saml_rs/#identity-provider-flows)
 crate-root section.
 
+`IdpConfig::builder(...).issuance_lifetime(Duration)` controls the shared
+issuance window for typed IdP output. One captured UTC `IssueInstant` derives both
+SSO `Conditions@NotOnOrAfter` and bearer
+`SubjectConfirmationData@NotOnOrAfter`. The default is exactly five minutes;
+that duration is saml-rs policy, not an OASIS requirement.
+
 ### Single Logout
 
 Typed Single Logout starts from `session.logout_subject()`, stores the
@@ -133,9 +139,19 @@ typed walkthrough and the [doctested SLO
 fragment](https://docs.rs/saml-rs/latest/saml_rs/#single-logout) for the compact
 shape.
 
+`Saml<Idp>::start_slo` models the local IdP as the SAML Session Authority and
+always emits a UTC `LogoutRequest@NotOnOrAfter` derived from the same
+`IdpConfig::issuance_lifetime` and captured `IssueInstant`. The exact values
+are persisted in `PendingLogoutRequest`. Custom typed IdP LogoutRequest
+templates must place `NotOnOrAfter="{NotOnOrAfter}"` as one unqualified root
+attribute so the library can validate and sign the final value. Typed
+`Saml<Sp>::start_slo` does not synthesize this role-specific attribute.
+
 Inbound `LogoutRequest` messages require a UTC `IssueInstant`; saml-rs does not
-invent a maximum age for it. `NotOnOrAfter` remains optional, but when present
-it must be UTC and saml-rs rejects the request at its effective exclusive
+invent a maximum age for it. Generic inbound `NotOnOrAfter` remains optional
+under the protocol schema and is not rejected merely because a
+Session-Authority producer rule would require it on a narrower outbound flow.
+When present it must be UTC, and saml-rs rejects the request at its effective exclusive
 deadline. That fail-closed rejection is a library policy permitted by SAML,
 not an OASIS receiver `MUST`. `ClockSkew` controls the `NotOnOrAfter` tolerance,
 and replay storage uses the same skew-adjusted deadline instead of generic
@@ -163,6 +179,9 @@ callers that need direct access to `ServiceProvider`, `IdentityProvider`,
 `HttpRequest`, `BindingContext`, or protocol helper functions. New browser
 SSO/SLO integrations should start with `Saml`, typed descriptors, and the
 builder-backed config types shown above.
+Public raw `create_logout_request*` helpers retain their compatibility output:
+they do not synthesize `NotOnOrAfter`, and the public
+`LOGOUT_REQUEST_TEMPLATE` remains unchanged.
 Use visible docs.rs modules, crate-root re-exports, and `saml_rs::raw` before
 reaching for hidden lower-level module paths.
 

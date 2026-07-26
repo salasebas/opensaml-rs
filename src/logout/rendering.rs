@@ -18,6 +18,11 @@ pub(super) struct LogoutRequestSubject<'a> {
     pub(super) session_indexes: Vec<&'a str>,
 }
 
+pub(super) struct LogoutRequestTimeAttributes<'a> {
+    pub(super) issue_instant: &'a str,
+    pub(super) not_on_or_after: Option<&'a str>,
+}
+
 impl<'a> LogoutRequestSubject<'a> {
     pub(super) fn from_user(user: &'a User) -> Self {
         Self {
@@ -72,7 +77,7 @@ pub(super) fn render_default_logout_request(
     setting: &EntitySetting,
     meta: &Metadata,
     id: &str,
-    issue_instant: &str,
+    timing: LogoutRequestTimeAttributes<'_>,
     destination: &str,
     subject: &LogoutRequestSubject<'_>,
     name_id_format: &str,
@@ -90,14 +95,20 @@ pub(super) fn render_default_logout_request(
     let xmlns_assertion = format!("xmlns:{assertion_prefix}");
     let issuer = issuer_of(setting, meta);
 
-    let attrs = [
+    let mut attrs = vec![
         (xmlns_protocol.as_str(), namespace::PROTOCOL),
         (xmlns_assertion.as_str(), namespace::ASSERTION),
         ("ID", id),
         ("Version", "2.0"),
-        ("IssueInstant", issue_instant),
+        ("IssueInstant", timing.issue_instant),
         ("Destination", destination),
     ];
+    if let Some(value) = timing.not_on_or_after {
+        // SAML Core 2.0 §3.7.3.2 requires this attribute when the
+        // LogoutRequest producer is acting as the Session Authority. The
+        // selected lifetime remains saml-rs policy.
+        attrs.push(("NotOnOrAfter", value));
+    }
 
     let mut writer = XmlWriter::new();
     writer.start(&root_name, &attrs);

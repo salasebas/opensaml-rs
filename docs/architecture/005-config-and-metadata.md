@@ -72,12 +72,18 @@ pub struct IdpConfig {
     pub entity_id: EntityId,
     pub metadata: IdpMetadataConfig,
     pub credentials: Credentials,
+    pub issuance_lifetime: std::time::Duration,
     pub validation: IdpValidationPolicy,
     pub algorithms: AlgorithmPolicy,
     pub xml: XmlPolicy,
     pub templates: TemplatePolicy,
 }
 ```
+
+`issuance_lifetime` defaults to five minutes and is shared by typed IdP SSO
+assertion bounds and typed Session Authority LogoutRequest expiration. The
+value is retained privately by `Saml<Idp>` rather than copied into raw
+`EntitySetting`, preserving raw compatibility behavior.
 
 Configs convert internally to today's raw `EntitySetting` when calling legacy
 implementation helpers.

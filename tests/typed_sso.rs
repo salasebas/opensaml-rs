@@ -8,15 +8,18 @@ use std::{
 use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode};
 use saml_rs::error::TimeWindowField;
 use saml_rs::raw::Binding;
+use saml_rs::template::{LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
+use saml_rs::xml::dom::parse;
 use saml_rs::{
     AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, ForceAuthn,
     FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId,
     NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
     RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, ResponseSignaturePolicy,
     Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
-    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject, XmlEncryptionPolicy,
-    XmlPolicy,
+    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject, TemplatePolicy,
+    XmlEncryptionPolicy, XmlPolicy,
 };
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use url::Url;
 
 const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
@@ -1372,5 +1375,114 @@ fn typed_facade_accept_unsolicited_sso_simplesign_rejects_non_utc_response_issue
             "expected Response IssueInstant ProtocolProfile from unsolicited SimpleSign, got {other:?}"
         )
         .into()),
+    }
+}
+
+#[test]
+fn typed_idp_issuance_lifetime_drives_both_sso_expirations_for_default_and_template_renderers(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let lifetime = Duration::from_secs(11 * 60);
+    for (template, binding) in [
+        (None, SsoResponseBinding::Post),
+        (
+            Some(LoginResponseTemplate {
+                context: Some(LOGIN_RESPONSE_TEMPLATE.to_string()),
+                attributes: Vec::new(),
+            }),
+            SsoResponseBinding::SimpleSign,
+        ),
+    ] {
+        let sp = Saml::sp(sp_config()?)?;
+        let idp = Saml::idp(
+            IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+                .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+                .sso_endpoint(SsoEndpoint::simple_sign(IDP_SSO_SIMPLESIGN)?)
+                .credentials(credentials())
+                .issuance_lifetime(lifetime)
+                .validation(IdpValidationPolicy::strict())
+                .templates(TemplatePolicy {
+                    login_response_template: template,
+                    ..TemplatePolicy::default()
+                })
+                .build()?,
+        )?;
+        let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+        let options = match binding {
+            SsoResponseBinding::Post => RespondSso::post(),
+            SsoResponseBinding::SimpleSign => RespondSso::simple_sign(),
+        };
+        let response = idp.initiate_sso(&sp_descriptor, subject(), options)?;
+        let fields = post_fields(&response)?;
+        let xml = response_xml_from_fields(&fields)?;
+        let document = parse(&xml)?;
+        let issue_instant = document
+            .root
+            .attr("IssueInstant")
+            .ok_or("missing Response IssueInstant")?;
+        let assertion = document
+            .root
+            .children
+            .iter()
+            .find(|node| node.local_name == "Assertion")
+            .ok_or("missing Assertion")?;
+        let conditions = assertion
+            .children
+            .iter()
+            .find(|node| node.local_name == "Conditions")
+            .and_then(|node| node.attr("NotOnOrAfter"))
+            .ok_or("missing Conditions NotOnOrAfter")?;
+        let subject = assertion
+            .children
+            .iter()
+            .find(|node| node.local_name == "Subject")
+            .ok_or("missing Subject")?;
+        let subject_confirmation = subject
+            .children
+            .iter()
+            .find(|node| node.local_name == "SubjectConfirmation")
+            .ok_or("missing SubjectConfirmation")?;
+        let bearer = subject_confirmation
+            .children
+            .iter()
+            .find(|node| node.local_name == "SubjectConfirmationData")
+            .and_then(|node| node.attr("NotOnOrAfter"))
+            .ok_or("missing SubjectConfirmationData NotOnOrAfter")?;
+        let issue_instant = OffsetDateTime::parse(issue_instant, &Rfc3339)?;
+        let expiration = OffsetDateTime::parse(conditions, &Rfc3339)?;
+        assert_eq!(conditions, bearer);
+        assert_eq!(expiration - issue_instant, time::Duration::minutes(11));
+
+        let input = match binding {
+            SsoResponseBinding::Post => BrowserInput::<SsoResponse>::post(fields),
+            SsoResponseBinding::SimpleSign => BrowserInput::<SsoResponse>::simple_sign(fields),
+        };
+        let session = sp.accept_unsolicited_sso(&idp_descriptor, input, validation())?;
+        assert_eq!(
+            session.not_on_or_after().map(|value| value.as_str()),
+            Some(conditions)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_idp_sso_reports_issuance_expiration_overflow() -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_config()?)?;
+    let idp = Saml::idp(
+        IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+            .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+            .credentials(credentials())
+            .issuance_lifetime(Duration::from_secs(i64::MAX as u64))
+            .validation(IdpValidationPolicy::strict())
+            .build()?,
+    )?;
+    let (sp_descriptor, _) = descriptors(&sp, &idp)?;
+
+    match idp.initiate_sso(&sp_descriptor, subject(), RespondSso::post()) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::IdpIssuanceExpiration);
+            Ok(())
+        }
+        other => Err(format!("expected IdpIssuanceExpiration error, got {other:?}").into()),
     }
 }

@@ -8,6 +8,7 @@ use crate::constants::{
     data_encryption_algorithm, key_encryption_algorithm, signature_algorithm, transform_algorithm,
     MessageSignatureOrder,
 };
+use crate::error::{SamlError, TimeWindowField};
 use crate::xml::XmlLimits;
 
 /// Runtime configuration for an entity (keys, algorithms, flags).
@@ -91,6 +92,10 @@ pub struct EntitySetting {
     /// SP: custom `<AuthnRequest>` template (`None` uses the default).
     pub login_request_template: Option<String>,
     /// Custom `<LogoutRequest>` template (`None` uses the default).
+    ///
+    /// Typed Session Authority generation requires a complete unqualified
+    /// `NotOnOrAfter="{NotOnOrAfter}"` root attribute. Raw compatibility
+    /// generation keeps that optional placeholder omitted.
     pub logout_request_template: Option<String>,
     /// Custom `<LogoutResponse>` template (`None` uses the default).
     ///
@@ -306,9 +311,48 @@ pub fn iso8601_offset(seconds: i64) -> String {
     format_saml_utc_date_time(t)
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct IdpIssuanceWindow {
+    pub(crate) issue_instant: String,
+    pub(crate) expiration: String,
+}
+
+pub(crate) fn capture_idp_issuance_window(
+    lifetime: time::Duration,
+) -> Result<IdpIssuanceWindow, SamlError> {
+    let issue_instant = time::OffsetDateTime::now_utc();
+    let expiration = issue_instant
+        .checked_add(lifetime)
+        .ok_or(SamlError::TimeWindowInvalid {
+            field: TimeWindowField::IdpIssuanceExpiration,
+        })?;
+    let preserve_subseconds = lifetime.subsec_nanoseconds() != 0;
+    Ok(IdpIssuanceWindow {
+        issue_instant: format_idp_issuance_instant(issue_instant, preserve_subseconds),
+        expiration: format_idp_issuance_instant(expiration, preserve_subseconds),
+    })
+}
+
+fn format_idp_issuance_instant(t: time::OffsetDateTime, preserve_subseconds: bool) -> String {
+    if preserve_subseconds {
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}Z",
+            t.year(),
+            u8::from(t.month()),
+            t.day(),
+            t.hour(),
+            t.minute(),
+            t.second(),
+            t.nanosecond(),
+        )
+    } else {
+        format_saml_utc_date_time(t)
+    }
+}
+
 // `OffsetDateTime` represents seconds in the range 0..=59, so this outbound
 // formatter cannot emit the leap-second value prohibited by SAML Core §1.3.3.
-fn format_saml_utc_date_time(t: time::OffsetDateTime) -> String {
+pub(crate) fn format_saml_utc_date_time(t: time::OffsetDateTime) -> String {
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         t.year(),

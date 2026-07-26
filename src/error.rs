@@ -93,6 +93,9 @@ impl fmt::Display for SubjectConfirmationReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TimeWindowField {
+    /// Expiration derived from the typed IdP issuance lifetime could not be
+    /// represented for the current issue instant.
+    IdpIssuanceExpiration,
     /// LogoutRequest `NotOnOrAfter`.
     LogoutRequestNotOnOrAfter,
     /// Assertion session `SessionNotOnOrAfter`.
@@ -106,6 +109,7 @@ pub enum TimeWindowField {
 impl fmt::Display for TimeWindowField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::IdpIssuanceExpiration => f.write_str("IdP issuance expiration"),
             Self::LogoutRequestNotOnOrAfter => f.write_str("LogoutRequest@NotOnOrAfter"),
             Self::SessionNotOnOrAfter => f.write_str("SessionNotOnOrAfter"),
             Self::Conditions => f.write_str("Conditions"),
