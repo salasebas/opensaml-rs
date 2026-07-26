@@ -69,9 +69,14 @@ in [the reproduction recipe](interop/REPRODUCING.md#shibboleth-idp-523).
 
 Shibboleth emitted `<EncryptedID>` in this default front-channel flow.
 `saml-rs` authenticates and parses the request and exposes its SessionIndex,
-but its typed logout model does not currently expose the encrypted
-identifier. The regression test asserts both facts explicitly. This is a
-scoped interoperability observation, not a SAML conformance claim.
+but its typed logout model does not currently expose the encrypted identifier.
+The encrypted key also targets the testbed entity `https://sp.example.org`,
+not the receiver configured in this regression test, which has no decryption
+key. The fixture therefore proves authenticated parsing only: it does not
+prove subject correlation, session invalidation, or complete Session
+Participant processing under SAML Core section 3.7.3.1. Encrypted identifier
+decryption and exposure remain outside this increment and are required before
+claiming typed subject-processing interoperability for this vector.
 
 | Artifact | SHA-256 |
 | --- | --- |

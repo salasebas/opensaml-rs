@@ -4,6 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode, deflate_raw_encode};
 use saml_rs::error::SignatureVerificationReason;
+use saml_rs::xml::{extract, ExtractorField};
 use saml_rs::{
     AcsEndpoint, BrowserInput, EntityId, IdpConfig, IdpDescriptor, IdpValidationPolicy,
     LogoutPolicy, LogoutRequest, MetadataTrustPolicy, ReplayCache, ReplayKey, ReplayPolicy, Saml,
@@ -31,6 +32,7 @@ const SIMPLESAMLPHP_SESSION_INDEXES: [&str; 2] = [
     "_simplesamlphp-session-20260724",
     "_simplesamlphp-session-secondary",
 ];
+const MISMATCHED_DESTINATION: &str = "https://untrusted.example.test/slo/redirect";
 const RSA_SHA256: &str = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
 
 const SHIBBOLETH_QUERY: &str =
@@ -183,7 +185,7 @@ fn redirect_message_xml(raw_query: &str) -> Result<String, Box<dyn std::error::E
 }
 
 #[test]
-fn shibboleth_idp5_redirect_logout_request_is_consumed_by_sp(
+fn shibboleth_idp5_redirect_logout_request_is_authenticated_and_parsed_by_sp(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sp = sp_receiver()?;
     let idp = shibboleth_idp_descriptor()?;
@@ -205,8 +207,15 @@ fn shibboleth_idp5_redirect_logout_request_is_consumed_by_sp(
     assert_eq!(message.issue_instant().as_str(), SHIBBOLETH_ISSUE_INSTANT);
     assert!(message.name_id().is_none());
     let wire_xml = redirect_message_xml(fixture_query(SHIBBOLETH_QUERY))?;
-    assert!(wire_xml.contains("<saml2:EncryptedID"));
-    assert!(!wire_xml.contains("<saml2:NameID"));
+    let subject = extract(
+        &wire_xml,
+        &[
+            ExtractorField::new("encryptedID", &["LogoutRequest", "EncryptedID"]).with_context(),
+            ExtractorField::new("nameID", &["LogoutRequest", "NameID"]).with_context(),
+        ],
+    )?;
+    assert!(subject.get_str("encryptedID").is_some());
+    assert!(subject.get_str("nameID").is_none());
     assert_eq!(
         message
             .session_indexes()
@@ -226,8 +235,8 @@ fn shibboleth_idp5_redirect_logout_request_is_consumed_by_sp(
 
     let tampered_query = tamper_redirect_message(
         fixture_query(SHIBBOLETH_QUERY),
-        SHIBBOLETH_SESSION_INDEX,
-        "_tampered-shibboleth-session",
+        SP_SLO_REDIRECT,
+        MISMATCHED_DESTINATION,
     )?;
     let mut tampered_cache = RecordingReplayCache::default();
     let result = sp.receive_slo(
@@ -299,8 +308,8 @@ fn simplesamlphp_sp_redirect_logout_request_is_consumed_by_idp(
 
     let tampered_query = tamper_redirect_message(
         fixture_query(SIMPLESAMLPHP_QUERY),
-        SIMPLESAMLPHP_NAME_ID,
-        "eve@example.test",
+        IDP_SLO_REDIRECT,
+        MISMATCHED_DESTINATION,
     )?;
     let mut tampered_cache = RecordingReplayCache::default();
     let result = idp.receive_slo(
