@@ -6,7 +6,7 @@ use crate::constants::{name_id_format, namespace};
 use crate::error::SamlError;
 use crate::xml::dom::{parse_with_limits, Document, XmlLimits};
 use crate::xml::parse_generated_saml_utc_date_time;
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::NsReader;
 
 #[derive(Debug, Clone, Copy)]
@@ -32,6 +32,8 @@ enum Element {
     Issuer,
     Signature,
     SignatureContent,
+    Extensions { child_seen: bool },
+    ExtensionContent,
     NameId,
     SessionIndex,
 }
@@ -42,6 +44,7 @@ enum RootStage {
     ExpectIssuer,
     AfterIssuer,
     AfterSignature,
+    AfterExtensions,
     AfterNameId,
     AfterSessionIndex,
 }
@@ -198,39 +201,72 @@ fn validate_name_id(
             b"SPNameQualifier",
             b"SPProvidedID",
         ],
-        &[b"Format"],
+        &[],
     )?;
-    let format = attribute_value(&attributes, b"Format").ok_or_else(|| {
-        profile_error("LogoutRequest NameID is missing required generated Format")
-    })?;
-    if format != expected_format {
-        return Err(profile_error(format!(
-            "LogoutRequest NameID Format mismatch: expected {expected_format}, got {format}",
-        )));
+    if [
+        b"NameQualifier".as_slice(),
+        b"SPNameQualifier",
+        b"SPProvidedID",
+    ]
+    .iter()
+    .any(|name| attribute_value(&attributes, name).is_some())
+    {
+        return Err(profile_error(
+            "typed LogoutRequest NameID must omit unmodeled NameQualifier, SPNameQualifier, and SPProvidedID attributes",
+        ));
     }
-    Ok(())
+    match attribute_value(&attributes, b"Format") {
+        Some(format) if format != expected_format => Err(profile_error(format!(
+            "LogoutRequest NameID Format mismatch: expected {expected_format}, got {format}",
+        ))),
+        None if !expected_format.is_empty() && expected_format != name_id_format::UNSPECIFIED => {
+            Err(profile_error(format!(
+                "LogoutRequest NameID is missing expected Format {expected_format}",
+            )))
+        }
+        Some(_) | None => Ok(()),
+    }
 }
 
 fn validate_start(
     reader: &NsReader<&[u8]>,
     element: &BytesStart<'_>,
     element_namespace: NamespaceKind,
-    stack: &[Element],
+    stack: &mut [Element],
     expectation: &OutboundLogoutRequestExpectation<'_>,
     validation: OutboundLogoutRequestValidation,
     state: &mut State,
 ) -> Result<Element, SamlError> {
-    let Some(parent) = stack.last() else {
+    let Some(parent) = stack.last_mut() else {
         validate_root(reader, element, element_namespace, expectation)?;
         return Ok(Element::Root);
     };
     if matches!(parent, Element::Signature | Element::SignatureContent) {
         return Ok(Element::SignatureContent);
     }
-    if !matches!(parent, Element::Root) {
-        return Err(profile_error(
-            "LogoutRequest Issuer, NameID, and SessionIndex must not contain child elements",
-        ));
+    match parent {
+        Element::Extensions { child_seen } => {
+            // Core 2.0 §3.2.2 narrows the protocol schema's ##other wildcard:
+            // direct extension elements must use a namespace not defined by SAML.
+            if !matches!(
+                element_namespace,
+                NamespaceKind::Dsig | NamespaceKind::XmlEncryption | NamespaceKind::Other
+            ) {
+                return Err(profile_error(
+                    "Extensions direct children must use a namespace not defined by SAML",
+                ));
+            }
+            *child_seen = true;
+            return Ok(Element::ExtensionContent);
+        }
+        Element::ExtensionContent => return Ok(Element::ExtensionContent),
+        Element::Root => {}
+        Element::Issuer | Element::NameId | Element::SessionIndex => {
+            return Err(profile_error(
+                "LogoutRequest Issuer, NameID, and SessionIndex must not contain child elements",
+            ));
+        }
+        Element::Signature | Element::SignatureContent => return Ok(Element::SignatureContent),
     }
 
     match (
@@ -254,9 +290,18 @@ fn validate_start(
             Ok(Element::Signature)
         }
         (
+            b"Extensions",
+            NamespaceKind::Protocol,
+            RootStage::AfterIssuer | RootStage::AfterSignature,
+        ) => {
+            validate_closed_unqualified_attributes(reader, element, &[], &[])?;
+            state.root_stage = RootStage::AfterExtensions;
+            Ok(Element::Extensions { child_seen: false })
+        }
+        (
             b"NameID",
             NamespaceKind::Assertion,
-            RootStage::AfterIssuer | RootStage::AfterSignature,
+            RootStage::AfterIssuer | RootStage::AfterSignature | RootStage::AfterExtensions,
         ) => {
             validate_name_id(
                 reader,
@@ -277,9 +322,54 @@ fn validate_start(
             Ok(Element::SessionIndex)
         }
         _ => Err(profile_error(
-            "LogoutRequest children must be Issuer, an optional library-owned Signature, NameID, and SessionIndex values in schema order",
+            "LogoutRequest children must be Issuer, optional library-owned Signature, optional Extensions, NameID, and SessionIndex values in schema order",
         )),
     }
+}
+
+fn finish_element(element: &Element) -> Result<(), SamlError> {
+    match element {
+        Element::Extensions { child_seen: false } => Err(profile_error(
+            "Extensions must contain at least one extension element",
+        )),
+        _ => Ok(()),
+    }
+}
+
+fn is_structural_element(parent: Option<&Element>) -> bool {
+    matches!(parent, Some(Element::Root | Element::Extensions { .. }))
+}
+
+fn validate_structural_text(parent: Option<&Element>, text: &[u8]) -> Result<(), SamlError> {
+    if is_structural_element(parent)
+        && !text
+            .iter()
+            .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+    {
+        return Err(profile_error(
+            "structural LogoutRequest elements may contain only whitespace text",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_structural_reference(
+    parent: Option<&Element>,
+    reference: &BytesRef<'_>,
+) -> Result<(), SamlError> {
+    if is_structural_element(parent)
+        && !matches!(
+            reference
+                .resolve_char_ref()
+                .map_err(|error| SamlError::Xml(error.to_string()))?,
+            Some(' ' | '\t' | '\r' | '\n')
+        )
+    {
+        return Err(profile_error(
+            "structural LogoutRequest elements may contain only whitespace text",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_stream(
@@ -301,7 +391,7 @@ fn validate_stream(
                     &reader,
                     &element,
                     element_namespace,
-                    &stack,
+                    &mut stack,
                     expectation,
                     validation,
                     &mut state,
@@ -309,46 +399,38 @@ fn validate_stream(
                 stack.push(current);
             }
             Event::Empty(element) => {
-                validate_start(
+                let current = validate_start(
                     &reader,
                     &element,
                     element_namespace,
-                    &stack,
+                    &mut stack,
                     expectation,
                     validation,
                     &mut state,
                 )?;
+                finish_element(&current)?;
             }
             Event::End(_) => {
-                stack
+                let current = stack
                     .pop()
                     .ok_or_else(|| SamlError::Xml("unexpected closing element".into()))?;
+                finish_element(&current)?;
             }
-            Event::Text(text) if matches!(stack.last(), Some(Element::Root)) => {
+            Event::Text(text) => {
                 let text = text
                     .decode()
                     .map_err(|error| SamlError::Xml(error.to_string()))?;
-                if !text.bytes().all(|byte| byte.is_ascii_whitespace()) {
-                    return Err(profile_error(
-                        "structural LogoutRequest elements may contain only whitespace text",
-                    ));
-                }
+                validate_structural_text(stack.last(), text.as_bytes())?;
             }
-            Event::CData(_) | Event::GeneralRef(_)
-                if matches!(stack.last(), Some(Element::Root)) =>
-            {
-                return Err(profile_error(
-                    "structural LogoutRequest elements may contain only whitespace text",
-                ));
+            Event::CData(text) => {
+                validate_structural_text(stack.last(), text.as_ref())?;
+            }
+            Event::GeneralRef(reference) => {
+                validate_structural_reference(stack.last(), &reference)?;
             }
             Event::DocType(_) => return Err(SamlError::Xml("DOCTYPE is not allowed".into())),
             Event::Eof => break,
-            Event::Decl(_)
-            | Event::Text(_)
-            | Event::CData(_)
-            | Event::Comment(_)
-            | Event::PI(_)
-            | Event::GeneralRef(_) => {}
+            Event::Decl(_) | Event::Comment(_) | Event::PI(_) => {}
         }
     }
     Ok(state)
@@ -393,6 +475,11 @@ pub(crate) fn validate_logout_request_outbound(
         .next()
         .ok_or_else(|| profile_error("LogoutRequest is missing NameID"))?;
     if child.local_name == "Signature" {
+        child = children
+            .next()
+            .ok_or_else(|| profile_error("LogoutRequest is missing NameID"))?;
+    }
+    if child.local_name == "Extensions" {
         child = children
             .next()
             .ok_or_else(|| profile_error("LogoutRequest is missing NameID"))?;

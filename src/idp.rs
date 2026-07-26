@@ -663,7 +663,7 @@ mod crypto_tests {
         }
     }
 
-    fn idp() -> Result<IdentityProvider, SamlError> {
+    fn idp_with_setting(setting: EntitySetting) -> Result<IdentityProvider, SamlError> {
         IdentityProvider::from_config(
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),
@@ -672,8 +672,12 @@ mod crypto_tests {
                 single_sign_on_service: vec![Endpoint::new(Binding::Post, "https://idp/sso")],
                 ..Default::default()
             },
-            signing_setting(),
+            setting,
         )
+    }
+
+    fn idp() -> Result<IdentityProvider, SamlError> {
+        idp_with_setting(signing_setting())
     }
 
     fn signed_sp(entity_id: &str) -> Result<ServiceProvider, SamlError> {
@@ -714,6 +718,87 @@ mod crypto_tests {
             result.extract.get_str("issuer"),
             Some("https://idp.example.com/metadata")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn raw_login_response_defaults_to_five_minute_issuance_window_for_standard_renderers(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::binding::base64_decode;
+        use crate::template::{LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
+        use crate::xml::dom::parse;
+        use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+        let mut custom_template = signing_setting();
+        custom_template.login_response_template = Some(LoginResponseTemplate {
+            context: Some(LOGIN_RESPONSE_TEMPLATE.into()),
+            attributes: Vec::new(),
+        });
+
+        for setting in [signing_setting(), custom_template] {
+            let idp = idp_with_setting(setting)?;
+            let sp = sp()?;
+            let ctx = idp.create_login_response(
+                &sp,
+                Binding::Post,
+                &User::new("user@example.com"),
+                &LoginResponseOptions {
+                    in_response_to: Some("_req123"),
+                    ..Default::default()
+                },
+            )?;
+            let xml = String::from_utf8(base64_decode(&ctx.context)?)?;
+            let document = parse(&xml)?;
+            let response_issue_instant = document
+                .root
+                .attr("IssueInstant")
+                .ok_or("missing Response IssueInstant")?;
+            let assertion = document
+                .root
+                .children
+                .iter()
+                .find(|node| node.local_name == "Assertion")
+                .ok_or("missing Assertion")?;
+            let assertion_issue_instant = assertion
+                .attr("IssueInstant")
+                .ok_or("missing Assertion IssueInstant")?;
+            let conditions = assertion
+                .children
+                .iter()
+                .find(|node| node.local_name == "Conditions")
+                .ok_or("missing Conditions")?;
+            let conditions_not_before = conditions
+                .attr("NotBefore")
+                .ok_or("missing Conditions NotBefore")?;
+            let conditions_expiration = conditions
+                .attr("NotOnOrAfter")
+                .ok_or("missing Conditions NotOnOrAfter")?;
+            let bearer_expiration = assertion
+                .children
+                .iter()
+                .find(|node| node.local_name == "Subject")
+                .and_then(|node| {
+                    node.children
+                        .iter()
+                        .find(|node| node.local_name == "SubjectConfirmation")
+                })
+                .and_then(|node| {
+                    node.children
+                        .iter()
+                        .find(|node| node.local_name == "SubjectConfirmationData")
+                })
+                .and_then(|node| node.attr("NotOnOrAfter"))
+                .ok_or("missing SubjectConfirmationData NotOnOrAfter")?;
+
+            assert_eq!(response_issue_instant, assertion_issue_instant);
+            assert_eq!(response_issue_instant, conditions_not_before);
+            assert_eq!(conditions_expiration, bearer_expiration);
+            assert_eq!(
+                OffsetDateTime::parse(conditions_expiration, &Rfc3339)?
+                    - OffsetDateTime::parse(response_issue_instant, &Rfc3339)?,
+                time::Duration::minutes(5)
+            );
+        }
         Ok(())
     }
 
