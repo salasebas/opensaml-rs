@@ -1,347 +1,350 @@
-# Issue #77: fixtures externos de interoperabilidad SLO
+# Issue #77: external SLO interoperability fixtures
 
-Fecha de investigación: 2026-07-23.
+Research date: 2026-07-23.
 
-## Pregunta y alcance
+## Question and scope
 
-El [issue #77](https://github.com/salasebas/opensaml-rs/issues/77) pide
-fixtures inmutables de `LogoutRequest` firmados por Shibboleth,
-SimpleSAMLphp y samlify para:
+[Issue #77](https://github.com/salasebas/opensaml-rs/issues/77) requests
+immutable `LogoutRequest` fixtures signed by Shibboleth, SimpleSAMLphp, and
+samlify for:
 
 - HTTP-Redirect;
-- HTTP-POST con XML Signature;
-- HTTP-POST-SimpleSign, cuando el productor lo soporte.
+- HTTP-POST with XML Signature;
+- HTTP-POST-SimpleSign, when supported by the producer.
 
-Esta nota contrasta esa petición con la política local de
-[conformidad](../standards-conformance.md), las especificaciones OASIS y el
-código oficial de los tres productores. El alcance es recepción de
-`LogoutRequest` en el perfil Single Logout (SLO), tanto SP → IdP como IdP →
-SP. No evalúa `LogoutResponse`, SOAP ni Artifact.
+This note evaluates that request against the local
+[conformance policy](../standards-conformance.md), the OASIS specifications,
+and the official code of the three producers. Its scope is receiving
+`LogoutRequest` messages in the Single Logout (SLO) profile in both the
+SP-to-IdP and IdP-to-SP directions. It does not evaluate `LogoutResponse`,
+SOAP, or Artifact.
 
-## Resultado factual
+## Factual result
 
-La autenticación e integridad de un `LogoutRequest` recibido dentro del perfil
-SLO sí tienen requisitos normativos. En particular, Profiles §4.4.3.1 dice
-explícitamente que un participante que envía el `LogoutRequest` al IdP por
-HTTP-Redirect o HTTP-POST debe firmarlo. Core y Profiles también obligan al
-receptor a autenticar el mensaje o al emisor, según su rol.
+Authentication and integrity of a `LogoutRequest` received within the SLO
+profile are subject to normative requirements. In particular, Profiles
+section 4.4.3.1 explicitly requires a participant that sends a
+`LogoutRequest` to the IdP over HTTP-Redirect or HTTP-POST to sign it. Core and
+Profiles also require the receiver to authenticate the message or issuer,
+depending on its role.
 
-OASIS no exige que una implementación conserve fixtures producidos por
-terceros, que use esos tres productos ni que tenga una matriz de pruebas con
-mensajes congelados. Los fixtures externos y las pruebas de alteración son
-evidencia de interoperabilidad y controles de regresión del proyecto. La
-política local exige pruebas enfocadas para los límites normativos, pero no
-prescribe que deban provenir de implementaciones externas.
+OASIS does not require an implementation to retain fixtures produced by third
+parties, use these three products, or maintain a test matrix of frozen
+messages. External fixtures and tampering tests are interoperability evidence
+and project regression controls. The local policy requires focused tests at
+normative boundaries, but does not prescribe that those tests come from
+external implementations.
 
-El repositorio ya implementa recepción firmada para los tres bindings y ambos
-roles, pero sus pruebas firmadas de SLO generan y consumen los mensajes con
-`saml-rs`. No existe actualmente una prueba de `receive_slo` que consuma un
-`LogoutRequest` firmado y congelado de un productor externo.
+The repository already implements signed reception for all three bindings and
+both roles, but its signed SLO tests generate and consume messages with
+`saml-rs`. Before this change, no `receive_slo` test consumed a frozen, signed
+`LogoutRequest` from an external producer.
 
-## Decisión resultante
+## Resulting decision
 
-La brecha se tratará como evidencia adicional de interoperabilidad, no como un
-defecto de conformidad ni como un gate de release. El primer incremento queda
-delimitado al feature SLO `LogoutRequest` por HTTP-Redirect en las dos
-direcciones de recepción tipada:
+The gap is treated as additional interoperability evidence, not as a
+conformance defect or release gate. The first increment is limited to the SLO
+`LogoutRequest` feature over HTTP-Redirect in both typed reception directions:
 
-- Shibboleth IdP 5 → `Saml<Sp>::receive_slo`;
-- SimpleSAMLphp SP → `Saml<Idp>::receive_slo`.
+- Shibboleth IdP 5 to `Saml<Sp>::receive_slo`;
+- SimpleSAMLphp SP to `Saml<Idp>::receive_slo`.
 
-Cada dirección tendrá un fixture wire-level externo e inmutable, una prueba
-positiva con reloj y replay deterministas, validación de los campos consumidos
-y una prueba negativa que altere un campo firmado y falle en la frontera
-criptográfica. La procedencia debe registrar productor, rol, versión o commit,
-configuración o comando de generación, binding, certificado y clave de prueba,
-y licencia o fuente. No se incorporarán clones, árboles vendor ni generadores
-externos.
+Each direction has an immutable external wire-level fixture, a positive test
+with deterministic clock and replay behavior, validation of the consumed
+fields, and a negative test that alters a signed field and fails at the
+cryptographic boundary. Provenance must record the producer, role, version or
+commit, generation configuration or command, binding, test certificate and
+key, and license or source. No clones, vendor trees, or external generators
+are committed.
 
-HTTP-POST queda fuera de este primer incremento. HTTP-POST-SimpleSign requiere
-un tratamiento posterior separado que declare explícitamente su estatus CD04.
-Samlify tampoco será el productor inicial porque parte del comportamiento y de
-la suite histórica de `saml-rs` fue portado desde ese proyecto, lo que reduce
-su valor como implementación independiente para esta prueba.
+HTTP-POST is outside this first increment. HTTP-POST-SimpleSign requires a
+separate follow-up that explicitly declares its CD04 status. Samlify is not an
+initial producer because some historical `saml-rs` behavior and tests were
+ported from that project, reducing its value as an independent implementation
+for this test.
 
-## Resultado de implementación
+## Implementation result
 
-El incremento acordado quedó implementado con dos fixtures HTTP-Redirect
-firmados e inmutables:
+The agreed increment is implemented with two immutable, signed HTTP-Redirect
+fixtures:
 
-- Shibboleth Identity Provider 5.2.3 como IdP hacia
+- Shibboleth Identity Provider 5.2.3 acting as an IdP toward
   `Saml<Sp>::receive_slo`;
-- SimpleSAMLphp 2.5.2 configurado como SP hacia
+- SimpleSAMLphp 2.5.2 configured as an SP toward
   `Saml<Idp>::receive_slo`.
 
-Las pruebas consumen el query wire-level conservado, usan política estricta
-para firmas de logout, reloj y replay explícitos, y verifican issuer,
-destination, ID, `IssueInstant`, todos los SessionIndex, binding Redirect y
-algoritmo de firma. El vector SimpleSAMLphp también verifica NameID y
-RelayState. El flujo completo de Shibboleth emitió, de forma predeterminada,
-`EncryptedID` y no envió RelayState; la prueba afirma esa forma wire y
-documenta que el modelo tipado actual autentica y consume la request pero
-todavía no expone el identificador cifrado. Para cada productor, una segunda
-ejecución altera un campo dentro del mensaje firmado sin volver a firmar y
-comprueba que la verificación criptográfica falla antes de escribir en replay.
-La procedencia exacta, hashes, receta reproducible y advertencia de claves
-públicas de prueba están en `tests/fixtures/PROVENANCE.md`.
+The tests consume the preserved wire-level query, use a strict logout
+signature policy with explicit clock and replay behavior, and verify issuer,
+destination, ID, `IssueInstant`, every `SessionIndex`, Redirect binding, and
+signature algorithm. The SimpleSAMLphp vector also verifies NameID and
+RelayState. The full Shibboleth flow emitted `EncryptedID` by default and did
+not send RelayState; the test asserts that wire shape and documents that the
+current typed model authenticates and consumes the request but does not yet
+expose the encrypted identifier. For each producer, a second execution alters
+a field inside the signed message without re-signing and confirms that
+cryptographic verification fails before any replay write. Exact provenance,
+hashes, a reproduction recipe, and the public-test-key warning are recorded in
+`tests/fixtures/PROVENANCE.md`.
 
-## Fuentes normativas y estatus
+## Normative sources and status
 
-- [SAML Core 2.0, OASIS Standard, 15-03-2005](https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf):
-  §§3.2.1, 3.7.1, 3.7.3.1, 3.7.3.2 y 5.2.
-- [SAML Profiles 2.0, OASIS Standard, 15-03-2005](https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf):
-  §§4.4.3.1, 4.4.3.3 y 4.4.4.1.
-- [SAML Bindings 2.0, OASIS Standard, 15-03-2005](https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf):
-  §§3.4.4.1, 3.4.5.2 y 3.5.5.2.
-- [SAML Conformance Requirements 2.0, OASIS Standard, 15-03-2005](https://docs.oasis-open.org/security/saml/v2.0/saml-conformance-2.0-os.pdf):
-  §§1.1, 2 y 3.2.
-- [SAML HTTP POST-SimpleSign 1.0, Committee Draft 04, 01-12-2008](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-binding-simplesign-cd-04.html):
-  §§1.4 y 2.4–2.7.2. La
-  [versión ODT](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-binding-simplesign-cd-04.odt)
-  se declara autoritativa.
+- [SAML Core 2.0, OASIS Standard, 15 March 2005](https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf):
+  sections 3.2.1, 3.7.1, 3.7.3.1, 3.7.3.2, and 5.2.
+- [SAML Profiles 2.0, OASIS Standard, 15 March 2005](https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf):
+  sections 4.4.3.1, 4.4.3.3, and 4.4.4.1.
+- [SAML Bindings 2.0, OASIS Standard, 15 March 2005](https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf):
+  sections 3.4.4.1, 3.4.5.2, and 3.5.5.2.
+- [SAML Conformance Requirements 2.0, OASIS Standard, 15 March 2005](https://docs.oasis-open.org/security/saml/v2.0/saml-conformance-2.0-os.pdf):
+  sections 1.1, 2, and 3.2.
+- [SAML HTTP POST-SimpleSign 1.0, Committee Draft 04, 1 December 2008](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-binding-simplesign-cd-04.html):
+  sections 1.4 and 2.4-2.7.2. The
+  [ODT version](https://docs.oasis-open.org/security/saml/Post2.0/sstc-saml-binding-simplesign-cd-04.odt)
+  is declared authoritative.
 
-POST-SimpleSign CD04 es posterior al conjunto base SAML V2.0 y no es un OASIS
-Standard final. Conformance §1.1 enumera los documentos del estándar base y
-POST-SimpleSign no aparece. La tabla de implementaciones posibles de
-Conformance §2 enumera Redirect, POST, Artifact y SOAP para SLO; la matriz de
-§3.2 exige HTTP-Redirect para SLO iniciado por IdP y por SP en los modos IdP y
-SP. Por ello, SimpleSign es una capacidad adicional y debe declararse con su
-estatus de Committee Draft; no amplía por sí sola una afirmación general de
-conformidad SAML V2.0.
+POST-SimpleSign CD04 postdates the base SAML V2.0 document set and is not a
+final OASIS Standard. Conformance section 1.1 lists the base standard
+documents, and POST-SimpleSign is not among them. The table of possible
+implementations in Conformance section 2 lists Redirect, POST, Artifact, and
+SOAP for SLO; the matrix in section 3.2 requires HTTP-Redirect for IdP- and
+SP-initiated SLO in the IdP and SP modes. SimpleSign is therefore an
+additional capability and must be described with its Committee Draft status;
+it does not independently broaden a general SAML V2.0 conformance claim.
 
-## Requisitos por actor, dirección y binding
+## Requirements by actor, direction, and binding
 
-### Reglas transversales de Core y del perfil
+### Cross-cutting Core and profile rules
 
-| Actor y dirección | Regla | Resultado exigido |
+| Actor and direction | Rule | Required outcome |
 | --- | --- | --- |
-| Productor de cualquier `LogoutRequest` | Core §3.7.1 | Debería firmar el mensaje o autenticarlo y proteger su integridad mediante el binding. Es un `SHOULD` del productor. |
-| Participante receptor, normalmente SP en IdP → SP | Core §3.7.3.1 | Debe autenticar el mensaje. |
-| Autoridad de sesión receptora, normalmente IdP en SP → IdP | Core §3.7.3.2 | Debe autenticar al emisor. |
-| Requester en cualquier intercambio del perfil SLO | Profiles §4.4.4.1 | Debe autenticarse ante el responder y asegurar la integridad, firmando o usando un mecanismo específico del binding. |
-| Participante productor en SP → IdP por HTTP-Redirect o HTTP-POST | Profiles §4.4.3.1 | El `LogoutRequest` debe estar firmado. |
-| IdP productor en IdP → participante | Profiles §4.4.3.3 | No contiene la frase específica “`LogoutRequest` MUST be signed” de §4.4.3.1; siguen aplicando la autenticación/integridad general de §4.4.4.1 y el `MUST` del receptor en Core §3.7.3.1. |
+| Producer of any `LogoutRequest` | Core section 3.7.1 | Should sign the message, or authenticate it and protect its integrity through the binding. This is a producer `SHOULD`. |
+| Receiving participant, normally the SP in IdP-to-SP | Core section 3.7.3.1 | Must authenticate the message. |
+| Receiving session authority, normally the IdP in SP-to-IdP | Core section 3.7.3.2 | Must authenticate the issuer. |
+| Requester in any SLO profile exchange | Profiles section 4.4.4.1 | Must authenticate to the responder and ensure integrity by signing or using a binding-specific mechanism. |
+| Participant producing SP-to-IdP over HTTP-Redirect or HTTP-POST | Profiles section 4.4.3.1 | The `LogoutRequest` must be signed. |
+| IdP producing IdP-to-participant | Profiles section 4.4.3.3 | Does not contain the specific “`LogoutRequest` MUST be signed” wording from section 4.4.3.1; the general authentication and integrity rule in section 4.4.4.1 and the receiver `MUST` in Core section 3.7.3.1 still apply. |
 
-Esto no crea una regla correcta del tipo “todo `LogoutRequest` sin firma es
-inválido en cualquier parser”. El alcance normativo es el flujo SLO, el rol,
-la dirección y el mecanismo de autenticación. Sí impide que un flujo tipado
-declare recepción SLO autenticada cuando no dispone de un mecanismo válido.
+These rules do not imply that every unsigned `LogoutRequest` is invalid in
+every parser. The normative scope is the SLO flow, role, direction, and
+authentication mechanism. They do prevent a typed flow from claiming
+authenticated SLO reception when no valid mechanism is available.
 
 ### HTTP-Redirect
 
-Bindings §3.4.4.1 define la firma en los parámetros de la URL, no como una
-`ds:Signature` dentro del XML. Antes de comprimir se elimina una firma XML
-embebida; cuando se firma el mensaje transmitido, `Signature` cubre la cadena
-ordenada `SAMLRequest`, `RelayState` si existe y `SigAlg`. El verificador debe
-usar los valores URL-encoded originales recibidos y el orden normativo.
+Bindings section 3.4.4.1 defines the signature in URL parameters, not as a
+`ds:Signature` inside the XML. An embedded XML signature is removed before
+compression; when the transmitted message is signed, `Signature` covers the
+ordered `SAMLRequest`, optional `RelayState`, and `SigAlg` string. The verifier
+must use the original URL-encoded values and normative order.
 
-El binding aislado permite firmar (`MAY`); la obligatoriedad para SP → IdP
-proviene de Profiles §4.4.3.1, y la obligación del receptor de autenticar
-proviene de Core §§3.7.3.1/3.7.3.2 y Profiles §4.4.4.1.
+The isolated binding permits signing (`MAY`). The SP-to-IdP requirement comes
+from Profiles section 4.4.3.1, while the receiver authentication requirement
+comes from Core sections 3.7.3.1 and 3.7.3.2 and Profiles section 4.4.4.1.
 
-Si el mensaje está firmado, Bindings §3.4.5.2 obliga al productor a incluir
-`Destination` y al receptor a comprobar que coincide con la ubicación real.
-Además, Core §3.2.1 obliga a comparar cualquier `Destination` presente en una
-request y descartar la request cuando no coincide.
+When a message is signed, Bindings section 3.4.5.2 requires the producer to
+include `Destination` and the receiver to verify it against the actual
+location. Core section 3.2.1 additionally requires comparing any
+`Destination` present in a request and discarding the request on mismatch.
 
-### HTTP-POST con XML Signature
+### HTTP-POST with XML Signature
 
-HTTP-POST transporta el XML en base64. Bindings §3.5.5.2 permite que el
-mensaje esté firmado mediante XML Signature y, cuando lo está, exige
-`Destination` y su comparación con la ubicación de recepción.
+HTTP-POST transports the XML as base64. Bindings section 3.5.5.2 permits the
+message to be signed with XML Signature and, when signed, requires
+`Destination` and comparison against the receiving location.
 
-Core §3.2.1 obliga al responder a verificar una `ds:Signature` presente. Si no
-es válida, no puede confiar en el contenido y debería responder con error; si
-es válida, debería evaluar la identidad y la idoneidad del firmante. La
-ausencia de `ds:Signature` no viola por sí sola el schema o el binding
-genérico, pero en SP → IdP por POST incumple el requisito del productor de
-Profiles §4.4.3.1 y deja sin satisfacer la autenticación requerida del flujo
-si no existe otro mecanismo aplicable.
+Core section 3.2.1 requires a responder to verify a present `ds:Signature`.
+When it is invalid, the responder cannot rely on the content and should return
+an error; when it is valid, the responder should evaluate the signer's
+identity and suitability. Absence of `ds:Signature` does not by itself violate
+the schema or generic binding, but for SP-to-IdP over POST it violates the
+producer requirement in Profiles section 4.4.3.1 and leaves the flow's
+authentication requirement unsatisfied when no other applicable mechanism
+exists.
 
 ### HTTP-POST-SimpleSign CD04
 
-SimpleSign CD04 §2.4 permite XML Signature y también la firma SimpleSign
-separada. Con SimpleSign, `Signature` y `SigAlg` son controles del formulario;
-`RelayState`, cuando existe, forma parte del contenido firmado. El productor
-firma el XML crudo, no su representación base64, concatenado en el orden de
-§2.5.
+SimpleSign CD04 section 2.4 permits XML Signature as well as a separate
+SimpleSign signature. With SimpleSign, `Signature` and `SigAlg` are form
+controls; `RelayState`, when present, is included in the signed content. The
+producer signs the raw XML rather than its base64 representation, concatenated
+in the order defined by section 2.5.
 
-Según §2.6, el receptor de un mensaje SimpleSign debe extraer los controles,
-reconstruir la cadena y comprobar `Signature` con `SigAlg`. La respuesta
-concreta a una firma que no verifica queda como dependiente de la
-implementación. Si el mensaje lleva XML Signature embebida, aplica en cambio
-Core §3.2.1, incluido el requisito de no confiar en contenido con una firma
-inválida.
+Under section 2.6, a receiver of a SimpleSign message must extract the
+controls, reconstruct the string, and verify `Signature` using `SigAlg`. The
+specific response to a signature that does not verify is implementation
+dependent. When the message instead carries an embedded XML Signature, Core
+section 3.2.1 applies, including the rule not to rely on content with an
+invalid signature.
 
-Si se usa SimpleSign, §2.4 exige `Destination` y obliga al receptor a comparar
-la ubicación. CD04 §2.7.2 declara opcional la seguridad criptográfica al nivel
-del binding. Esa opcionalidad no elimina los requisitos de autenticación e
-integridad cuando el binding se compone con el perfil SLO. Como Profiles
-§4.4.3.1 nombra únicamente Redirect y POST —POST-SimpleSign todavía no
-existía— no debe atribuirse a esa sección un `MUST` literal de firma
-SimpleSign; la obligación aplicable proviene de la regla general de Profiles
-§4.4.4.1 y Core.
+When SimpleSign is used, section 2.4 requires `Destination` and requires the
+receiver to compare the location. CD04 section 2.7.2 makes cryptographic
+security optional at the binding level. That optionality does not remove the
+authentication and integrity requirements when the binding is composed with
+the SLO profile. Profiles section 4.4.3.1 names only Redirect and POST because
+POST-SimpleSign did not yet exist, so that section must not be cited as a
+literal SimpleSign-signature `MUST`; the applicable obligation comes from the
+general rule in Profiles section 4.4.4.1 and Core.
 
-## Naturaleza de los fixtures solicitados
+## Nature of the requested fixtures
 
-| Elemento del issue | Clasificación |
+| Issue element | Classification |
 | --- | --- |
-| Autenticar un `LogoutRequest` recibido en un flujo SLO tipado | Requisito normativo, acotado por rol, dirección y binding. |
-| Verificar una XML Signature presente y no confiar en ella si es inválida | Requisito normativo de Core §3.2.1. |
-| Reconstruir y comprobar una firma Redirect o SimpleSign conforme a su binding | Requisito del mecanismo cuando existe/ha sido seleccionado; el requisito de usar autenticación en SLO proviene además de Core/Profiles. |
-| Fixture congelado de Shibboleth, SimpleSAMLphp o samlify | No requerido por OASIS; evidencia de interoperabilidad. |
-| Matriz de tres productores por tres bindings | Convención de QA del proyecto, no matriz de conformidad OASIS. |
-| Alterar timestamp/campo y comprobar que la firma falla antes de la semántica | Prueba de regresión de orden fail-closed; no artefacto de prueba prescrito por OASIS. |
-| Registrar versión, comando, clave, licencia y procedencia | Requisito de reproducibilidad/provenance del proyecto, no requisito del protocolo. |
-| Cubrir timestamps fraccionarios emitidos por terceros | Evidencia de interoperabilidad léxica. XML Schema admite fracciones; no exige que un fixture externo concreto las contenga. |
+| Authenticate a `LogoutRequest` received in a typed SLO flow | Normative requirement scoped by role, direction, and binding. |
+| Verify a present XML Signature and do not rely on it when invalid | Normative requirement from Core section 3.2.1. |
+| Reconstruct and verify a Redirect or SimpleSign signature according to its binding | Requirement of the mechanism when present or selected; the requirement to use authentication in SLO also comes from Core and Profiles. |
+| Frozen Shibboleth, SimpleSAMLphp, or samlify fixture | Not required by OASIS; interoperability evidence. |
+| Three-producer by three-binding matrix | Project QA convention, not an OASIS conformance matrix. |
+| Alter a timestamp or field and confirm that signature verification precedes semantics | Fail-closed ordering regression test; not an OASIS-prescribed test artifact. |
+| Record version, command, key, license, and provenance | Project reproducibility and provenance requirement, not a protocol requirement. |
+| Cover fractional timestamps emitted by third parties | Lexical interoperability evidence. XML Schema permits fractions but does not require a specific external fixture to contain them. |
 
-La política local de `docs/standards-conformance.md` sí pide pruebas positivas
-y negativas enfocadas para requisitos obligatorios. Esa es una obligación de
-desarrollo del repositorio. No especifica que las pruebas deban usar fixtures
-externos ni esos productores.
+The local `docs/standards-conformance.md` policy does require focused positive
+and negative tests for mandatory requirements. That is a repository
+development obligation. It does not require those tests to use external
+fixtures or these specific producers.
 
-## Soporte real y viabilidad de productores
+## Actual producer support and feasibility
 
 ### Shibboleth
 
-La documentación oficial de
+The official documentation for
 [Shibboleth IdP 5](https://shibboleth.atlassian.net/wiki/spaces/IDP5/pages/3199511587/ProtocolsAndInterfaces)
-y de
+and
 [Shibboleth SP 3](https://shibboleth.atlassian.net/wiki/spaces/SP3/pages/2067400007/ProtocolsAndInterfaces)
-enumera interfaces SLO para HTTP-Redirect, HTTP-POST,
-HTTP-POST-SimpleSign y SOAP. La documentación específica del
-[SingleLogoutService de SP 3](https://shibboleth.atlassian.net/wiki/spaces/SP3/pages/2065334844)
-también enumera esos bindings y señala que el mensaje entrante puede ser un
-`LogoutRequest` o `LogoutResponse`.
+lists SLO interfaces for HTTP-Redirect, HTTP-POST, HTTP-POST-SimpleSign, and
+SOAP. The specific
+[SP 3 SingleLogoutService documentation](https://shibboleth.atlassian.net/wiki/spaces/SP3/pages/2065334844)
+also lists these bindings and notes that the incoming message can be a
+`LogoutRequest` or `LogoutResponse`.
 
-| Binding objetivo | Soporte oficial observado | Viabilidad factual del fixture |
+| Target binding | Observed official support | Factual fixture feasibility |
 | --- | --- | --- |
-| Redirect firmado | Sí | Una instalación de prueba IdP 5 o SP 3 puede participar en el flujo SLO y producir tráfico capturable. |
-| POST con XML Signature | Sí | La interfaz SLO POST está documentada; una instalación con credenciales de firma puede producir el formulario y XML capturables. |
-| POST-SimpleSign | Sí | IdP 5 y SP 3 publican endpoint SLO POST-SimpleSign. Es viable capturar el formulario, aunque la instalación completa es más pesada que un generador de biblioteca. |
+| Signed Redirect | Yes | A test IdP 5 or SP 3 installation can participate in SLO and produce capturable traffic. |
+| POST with XML Signature | Yes | The POST SLO interface is documented; an installation with signing credentials can produce a capturable form and XML. |
+| POST-SimpleSign | Yes | IdP 5 and SP 3 publish POST-SimpleSign SLO endpoints. Capturing the form is feasible, though a full installation is heavier than a library generator. |
 
-Las páginas citadas documentan el soporte de la interfaz y sus endpoints, no
-un comando autónomo para generar fixtures sin desplegar el producto. Un
-fixture atribuido a “Shibboleth” tendría que identificar además si el
-productor fue IdP o SP y la versión concreta.
+The cited pages document interface support and endpoints, not a standalone
+fixture-generation command that avoids deploying the product. A fixture
+attributed to Shibboleth must additionally identify whether the producer was
+the IdP or SP and record the exact version.
 
 ### SimpleSAMLphp
 
-La documentación estable declara HTTP-Redirect como binding SLO por defecto y
-documenta `sign.logout` para firmar mensajes de logout:
+The stable documentation identifies HTTP-Redirect as the default SLO binding
+and documents `sign.logout` for signing logout messages:
 
 - [Metadata endpoints](https://simplesamlphp.org/docs/stable/simplesamlphp-metadata-endpoints.html);
-- [`sign.logout` y SingleLogoutService](https://simplesamlphp.org/docs/stable/simplesamlphp-reference-idp-remote.html).
+- [`sign.logout` and SingleLogoutService](https://simplesamlphp.org/docs/stable/simplesamlphp-reference-idp-remote.html).
 
-El código oficial de SimpleSAMLphp en el commit
+The official SimpleSAMLphp code at commit
 [`7e0e645`](https://github.com/simplesamlphp/simplesamlphp/tree/7e0e6454fe5eb46e2bdd429a6bb60ad9214b15ad)
-selecciona exclusivamente Redirect y POST para `LogoutRequest` salientes:
+selects only Redirect and POST for outbound `LogoutRequest` messages:
 
 - [SP `startSLO2`](https://github.com/simplesamlphp/simplesamlphp/blob/7e0e6454fe5eb46e2bdd429a6bb60ad9214b15ad/modules/saml/src/Auth/Source/SP.php#L1073-L1123);
 - [IdP `sendLogoutRequest`](https://github.com/simplesamlphp/simplesamlphp/blob/7e0e6454fe5eb46e2bdd429a6bb60ad9214b15ad/modules/saml/src/IdP/SAML2.php#L542-L568);
-- [`Message::buildLogoutRequest` y `sign.logout`](https://github.com/simplesamlphp/simplesamlphp/blob/7e0e6454fe5eb46e2bdd429a6bb60ad9214b15ad/modules/saml/src/Message.php#L99-L128).
+- [`Message::buildLogoutRequest` and `sign.logout`](https://github.com/simplesamlphp/simplesamlphp/blob/7e0e6454fe5eb46e2bdd429a6bb60ad9214b15ad/modules/saml/src/Message.php#L99-L128).
 
-La biblioteca oficial de bajo nivel `simplesamlphp/saml2` en el commit
+The official lower-level `simplesamlphp/saml2` library at commit
 [`f4bb3d1`](https://github.com/simplesamlphp/saml2/tree/f4bb3d15db55ec9a32ea08996c1fb24d6e37d01c)
-incluye:
+includes:
 
 - [`HTTPRedirect`](https://github.com/simplesamlphp/saml2/blob/f4bb3d15db55ec9a32ea08996c1fb24d6e37d01c/src/Binding/HTTPRedirect.php);
 - [`HTTPPost`](https://github.com/simplesamlphp/saml2/blob/f4bb3d15db55ec9a32ea08996c1fb24d6e37d01c/src/Binding/HTTPPost.php);
-- un
-  [constructor ejecutable de `LogoutRequest`](https://github.com/simplesamlphp/saml2/blob/f4bb3d15db55ec9a32ea08996c1fb24d6e37d01c/tests/bin/logoutrequest.php).
+- an
+  [executable `LogoutRequest` constructor](https://github.com/simplesamlphp/saml2/blob/f4bb3d15db55ec9a32ea08996c1fb24d6e37d01c/tests/bin/logoutrequest.php).
 
-| Binding objetivo | Soporte oficial observado | Viabilidad factual del fixture |
+| Target binding | Observed official support | Factual fixture feasibility |
 | --- | --- | --- |
-| Redirect firmado | Sí | `sign.logout` y el binding Redirect permiten producir la request en un despliegue de prueba. |
-| POST con XML Signature | Sí | La selección saliente incluye POST y `HTTPPost` serializa la firma XML del mensaje. |
-| POST-SimpleSign | No observado | Ni la selección de SLO del producto ni las clases de binding citadas incluyen SimpleSign. La matriz puede documentar esta ausencia sin sintetizar un mensaje. |
+| Signed Redirect | Yes | `sign.logout` and the Redirect binding can produce the request in a test deployment. |
+| POST with XML Signature | Yes | Outbound selection includes POST, and `HTTPPost` serializes the message's XML Signature. |
+| POST-SimpleSign | Not observed | Neither the product's SLO selection nor the cited binding classes include SimpleSign. The matrix can record this absence without synthesizing a message. |
 
 ### samlify
 
-El tag oficial `v2.13.1` apunta al commit
+The official `v2.13.1` tag points to commit
 [`b1ff880`](https://github.com/tngan/samlify/tree/b1ff880ab40a4b4768b3afb53ef8b88c3437079b).
-En ese commit:
+At that commit:
 
 - [`Entity::createLogoutRequest`](https://github.com/tngan/samlify/blob/b1ff880ab40a4b4768b3afb53ef8b88c3437079b/src/entity.ts#L168-L211)
-  enruta explícitamente Redirect, POST y SimpleSign;
+  explicitly routes Redirect, POST, and SimpleSign;
 - [`binding-post.ts`](https://github.com/tngan/samlify/blob/b1ff880ab40a4b4768b3afb53ef8b88c3437079b/src/binding-post.ts#L281-L360)
-  crea `LogoutRequest` POST y añade XML Signature cuando el receptor la
-  exige;
+  creates a POST `LogoutRequest` and adds XML Signature when required by the
+  receiver;
 - [`binding-simplesign.ts`](https://github.com/tngan/samlify/blob/b1ff880ab40a4b4768b3afb53ef8b88c3437079b/src/binding-simplesign.ts#L245-L356)
-  crea la request SimpleSign y calcula la firma separada;
+  creates the SimpleSign request and calculates the separate signature;
 - [`binding-redirect.ts`](https://github.com/tngan/samlify/blob/b1ff880ab40a4b4768b3afb53ef8b88c3437079b/src/binding-redirect.ts#L312-L382)
-  crea la request Redirect y firma la cadena de query cuando procede;
-- los
-  [tests oficiales](https://github.com/tngan/samlify/blob/b1ff880ab40a4b4768b3afb53ef8b88c3437079b/test/units.ts#L482-L627)
-  ejercitan los tres generadores, incluida la firma de LogoutRequest
-  SimpleSign.
+  creates the Redirect request and signs the query string when applicable;
+- the
+  [official tests](https://github.com/tngan/samlify/blob/b1ff880ab40a4b4768b3afb53ef8b88c3437079b/test/units.ts#L482-L627)
+  exercise all three generators, including a signed SimpleSign
+  `LogoutRequest`.
 
-La guía pública de
-[Signed SAML Request](https://samlify.js.org/signed-saml-request.html)
-describe de forma explícita las firmas Redirect y POST, pero no documenta allí
-SimpleSign. El código y sus tests son la evidencia primaria más específica
-para esa tercera capacidad.
+The public
+[Signed SAML Request guide](https://samlify.js.org/signed-saml-request.html)
+explicitly describes Redirect and POST signatures, but does not document
+SimpleSign on that page. The code and tests are the most specific primary
+evidence for that third capability.
 
-| Binding objetivo | Soporte oficial observado | Viabilidad factual del fixture |
+| Target binding | Observed official support | Factual fixture feasibility |
 | --- | --- | --- |
-| Redirect firmado | Sí | API directa, sin desplegar un producto completo. |
-| POST con XML Signature | Sí | API directa y test oficial de request firmada. |
-| POST-SimpleSign | Sí | API directa; devuelve XML en base64, `Signature` y `SigAlg`. |
+| Signed Redirect | Yes | Direct API, with no full product deployment. |
+| POST with XML Signature | Yes | Direct API and an official signed-request test. |
+| POST-SimpleSign | Yes | Direct API; returns base64 XML, `Signature`, and `SigAlg`. |
 
-Para los tres bindings, el fixture puede congelar la salida de una llamada
-controlada a `createLogoutRequest`, junto con el tag/commit, inputs, clave de
-prueba y metadata. La atribución correcta es a la biblioteca samlify, no a una
-instalación IdP/SP independiente.
+For all three bindings, a fixture can freeze the output from a controlled
+`createLogoutRequest` call together with the tag or commit, inputs, test key,
+and metadata. The correct attribution is to the samlify library, not to an
+independent IdP or SP installation.
 
-## Brecha exacta del repositorio
+## Exact repository gap
 
-1. **Superficie implementada.** `Saml<Sp>::receive_slo` recibe IdP → SP y
-   `Saml<Idp>::receive_slo` recibe SP → IdP en
-   [`src/api/slo.rs`](../../src/api/slo.rs). Ambos llegan a
-   `receive_slo_impl`, que determina el `LogoutBinding`, llama a
-   `parse_logout_request_at`, materializa el tipo, valida `Destination` contra
-   metadata local y aplica replay.
+1. **Implemented surface.** `Saml<Sp>::receive_slo` receives IdP-to-SP and
+   `Saml<Idp>::receive_slo` receives SP-to-IdP in
+   [`src/api/slo.rs`](../../src/api/slo.rs). Both reach `receive_slo_impl`,
+   which determines `LogoutBinding`, calls `parse_logout_request_at`,
+   materializes the typed value, validates `Destination` against local
+   metadata, and applies replay protection.
 
-2. **Política de firma.** La configuración estricta de SP e IdP usa
-   `LogoutSignaturePolicy::RequireSigned`; la compatibilidad usa la excepción
-   explícita `AllowUnsignedForCompatibility` en
-   [`src/config/policies.rs`](../../src/config/policies.rs). Esa política se
-   convierte en `want_logout_request_signed` en
+2. **Signature policy.** Strict SP and IdP configuration uses
+   `LogoutSignaturePolicy::RequireSigned`; compatibility uses the explicit
+   `AllowUnsignedForCompatibility` exception in
+   [`src/config/policies.rs`](../../src/config/policies.rs). That policy is
+   converted into `want_logout_request_signed` in
    [`src/config/builders.rs`](../../src/config/builders.rs).
 
-3. **Mecanismos por binding.**
-   [`src/logout/parsing.rs`](../../src/logout/parsing.rs) pasa la exigencia de
-   firma y los certificados del peer al flujo común.
-   [`src/flow.rs`](../../src/flow.rs) verifica firma separada en Redirect y
-   SimpleSign, comprueba que el octet string corresponde exactamente con los
-   campos consumidos, y verifica XML Signature para POST. El resultado firmado
-   se autentica antes de construir el modelo tipado.
+3. **Mechanisms by binding.**
+   [`src/logout/parsing.rs`](../../src/logout/parsing.rs) passes the signature
+   requirement and peer certificates into the shared flow.
+   [`src/flow.rs`](../../src/flow.rs) verifies detached signatures for Redirect
+   and SimpleSign, confirms that the octet string corresponds exactly to the
+   consumed fields, and verifies XML Signature for POST. The signed result is
+   authenticated before the typed model is built.
 
-4. **Pruebas firmadas existentes, pero simétricas.**
-   [`tests/flow_conformance.rs`](../../tests/flow_conformance.rs) tiene
-   round-trips firmados de LogoutRequest Redirect y POST, más aceptación,
-   RelayState y alteración de SimpleSign. Todos se crean en runtime mediante
-   `create_logout_request` de este mismo crate y se reciben con
+4. **Existing signed but symmetric tests.**
+   [`tests/flow_conformance.rs`](../../tests/flow_conformance.rs) contains
+   signed Redirect and POST `LogoutRequest` round trips, plus SimpleSign
+   acceptance, RelayState, and tampering coverage. Every request is generated
+   at runtime by this crate's `create_logout_request` and received with
    `parse_logout_request`. [`tests/typed_slo.rs`](../../tests/typed_slo.rs)
-   usa la fachada `receive_slo`, relojes/políticas de replay y los tres
-   bindings, pero también produce las requests con `saml-rs`.
+   uses the `receive_slo` facade with clocks, replay policies, and all three
+   bindings, but also produces requests with `saml-rs`.
 
-5. **Fixture externo actual.**
+5. **Existing external fixture.**
    [`tests/fixtures/misc/logout_request.xml`](../../tests/fixtures/misc/logout_request.xml)
-   es un `LogoutRequest` histórico sin `ds:Signature`; no contiene el
-   envelope Redirect, los controles POST ni una firma SimpleSign. No existe
-   una referencia `include_str!`/`include_bytes!` a ese archivo en las pruebas
-   actuales. [`tests/fixtures/PROVENANCE.md`](../../tests/fixtures/PROVENANCE.md)
-   atribuye el grupo histórico a samlify 2.13.1, pero no convierte ese XML en
-   una prueba wire-level firmada.
+   is a historical `LogoutRequest` without `ds:Signature`; it does not contain
+   the Redirect envelope, POST controls, or a SimpleSign signature. No current
+   test references that file with `include_str!` or `include_bytes!`.
+   [`tests/fixtures/PROVENANCE.md`](../../tests/fixtures/PROVENANCE.md)
+   attributes the historical group to samlify 2.13.1, but that does not make
+   the XML a signed wire-level test.
 
-6. **Ausencias concretas.** No hay fixtures inmutables de `LogoutRequest`
-   firmados externamente, no hay certificado/metadata externa asociada a ellos,
-   no hay test exitoso de la fachada tipada `receive_slo` contra una salida
-   externa, y no hay alteración de esos fixtures externos que pruebe la
-   precedencia criptográfica sobre la validación semántica. Tampoco existe una
-   matriz de procedencia por productor, rol/dirección y binding.
+6. **Concrete absences before this change.** There were no immutable,
+   externally signed `LogoutRequest` fixtures; no external certificate or
+   metadata associated with such fixtures; no successful typed `receive_slo`
+   test against external output; and no mutation of those external fixtures
+   demonstrating that cryptographic verification precedes semantic
+   validation. There was also no provenance matrix by producer,
+   role/direction, and binding.
 
-La brecha observada es, por tanto, de evidencia externa y reproducibilidad.
-No se observó en este análisis una ausencia del mecanismo básico de recepción
-firmada para Redirect, POST XML Signature o POST-SimpleSign.
+The observed gap was therefore one of external evidence and reproducibility.
+This analysis did not find an absence of the basic signed reception mechanism
+for Redirect, POST XML Signature, or POST-SimpleSign.
