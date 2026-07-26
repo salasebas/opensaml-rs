@@ -11,10 +11,6 @@ Entries before the rebrand use the package names that were current at the time.
 
 ### Fixed
 
-- *(slo)* [**breaking**] emit and validate typed Session Authority
-  `LogoutRequest@NotOnOrAfter` from the configurable IdP issuance lifetime
-- *(idp)* derive typed SSO Conditions and bearer confirmation expiration from
-  one captured issuance window
 - *(slo)* [**breaking**] require UTC LogoutRequest `IssueInstant`, validate
   optional `NotOnOrAfter`, and derive replay expiry from its skew-adjusted
   deadline
