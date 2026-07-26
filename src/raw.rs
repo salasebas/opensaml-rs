@@ -14,8 +14,11 @@
 //! Raw APIs expose compatibility types such as [`FlowResult`],
 //! [`BindingContext`], [`HttpRequest`], and [`EntitySetting`]. Because those
 //! types sit closer to protocol messages, callers may need to enforce
-//! correlation, replay protection, RelayState checks, and validation policy that
-//! typed flows model directly.
+//! correlation, replay protection, RelayState checks, comparison of a message
+//! `Destination` with the actual receiving endpoint, and validation policy
+//! that typed flows model directly. In particular, a successful raw logout
+//! parse is not a claim that `Destination` was checked: the raw parser receives
+//! no local endpoint context.
 //!
 //! ```no_run
 //! use saml_rs::raw::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};

@@ -101,7 +101,10 @@ impl LogoutRequest {
         self.destination.as_ref()
     }
 
-    /// Raw validated flow result.
+    /// Underlying raw compatibility flow result.
+    ///
+    /// When this model is built directly with [`TryFrom<FlowResult>`], no typed
+    /// receiver endpoint validation is implied.
     pub fn raw_flow(&self) -> &FlowResult {
         &self.raw_flow
     }
@@ -209,7 +212,10 @@ impl LogoutResponse {
         self.destination.as_ref()
     }
 
-    /// Raw validated flow result.
+    /// Underlying raw compatibility flow result.
+    ///
+    /// When this model is built directly with [`TryFrom<FlowResult>`], no typed
+    /// receiver endpoint validation is implied.
     pub fn raw_flow(&self) -> &FlowResult {
         &self.raw_flow
     }
@@ -297,7 +303,7 @@ impl LogoutCompleted {
         self.response.as_ref().map(|_| status_code::SUCCESS)
     }
 
-    /// Raw validated flow result for the LogoutResponse.
+    /// Underlying raw compatibility flow result for the LogoutResponse.
     pub fn raw_flow(&self) -> Option<&FlowResult> {
         self.response.as_ref().map(LogoutResponse::raw_flow)
     }

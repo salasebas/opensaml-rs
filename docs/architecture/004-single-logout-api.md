@@ -118,6 +118,13 @@ impl Saml<Idp> {
 `receive_slo` uses `SamlValidationContext` for inbound signed, timed, or
 replay-sensitive logout request validation.
 
+The typed receiver resolves its actual local SingleLogoutService endpoint from
+metadata using the inbound binding. A present `Destination` must equal that
+endpoint. Once the HTTP binding or root XML signature authenticates the
+message, `Destination` is also required. These checks run before replay state
+is written. Raw logout parsers cannot perform the same endpoint comparison
+because they are not given the local receiving endpoint.
+
 Inbound LogoutRequest profile checks require an unqualified UTC
 `IssueInstant`. They deliberately do not infer a maximum age from it.
 `NotOnOrAfter` is optional, but when present it must be unqualified UTC and
@@ -198,6 +205,8 @@ Rules:
   RelayState, fail unless an explicit compatibility policy permits it.
 - Use `SamlValidationContext` for inbound signed, timed, or replay-sensitive
   logout response validation.
+- Apply the same binding-aware local `Destination` validation as
+  `receive_slo`, before replay state is written.
 - Keep request-ID-less logout response parsing raw/compat only.
 
 ## Result

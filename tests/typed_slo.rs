@@ -5,17 +5,24 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode};
+use saml_rs::binding::{
+    append_signature, base64_decode, base64_encode, build_redirect_octet, deflate_raw_decode,
+};
+use saml_rs::constants::{signature_algorithm::RSA_SHA256, ParserType};
+use saml_rs::crypto::{
+    construct_message_signature, construct_saml_signature, keys::load_private_key,
+};
 use saml_rs::error::TimeWindowField;
 use saml_rs::raw::{Binding, FlowResult};
 use saml_rs::util::Value;
 use saml_rs::{
     AcsEndpoint, BrowserInput, CertificatePem, ClockSkew, Credentials, EntityId, FormField,
-    IdpConfig, IdpDescriptor, IdpValidationPolicy, LogoutBinding, LogoutRequest, LogoutResponse,
-    LogoutSigning, LogoutSubject, MetadataTrustPolicy, NameId, Outbound, PendingLogoutRequest,
-    PendingSnapshot, PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey,
-    ReplayPolicy, RespondSlo, Saml, SamlError, SamlValidationContext, SessionIndex, SloEndpoint,
-    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoSession, StartSlo, TemplatePolicy,
+    IdpConfig, IdpDescriptor, IdpValidationPolicy, LogoutBinding, LogoutCompleted, LogoutRequest,
+    LogoutResponse, LogoutSigning, LogoutSubject, MetadataTrustPolicy, NameId, Outbound,
+    PendingLogoutRequest, PendingSnapshot, PrivateKeyPem, Received, RelayStateParam, ReplayCache,
+    ReplayKey, ReplayPolicy, RespondSlo, Saml, SamlError, SamlValidationContext, SessionIndex,
+    SloEndpoint, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoSession, StartSlo,
+    TemplatePolicy,
 };
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -32,8 +39,58 @@ const IDP_SLO_POST: &str = "https://idp.example.com/slo/post";
 const IDP_SLO_REDIRECT: &str = "https://idp.example.com/slo/redirect";
 const IDP_SLO_SIMPLESIGN: &str = "https://idp.example.com/slo/simple-sign";
 
+const ALL_LOGOUT_BINDINGS: [LogoutBinding; 3] = [
+    LogoutBinding::Post,
+    LogoutBinding::Redirect,
+    LogoutBinding::SimpleSign,
+];
+const UNSIGNED_COMPATIBILITY_BINDINGS: [LogoutBinding; 2] =
+    [LogoutBinding::Post, LogoutBinding::Redirect];
+
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
+
+#[derive(Debug, Clone, Copy)]
+enum LocalSloRole {
+    Sp,
+    Idp,
+}
+
+const LOCAL_SLO_ROLES: [LocalSloRole; 2] = [LocalSloRole::Sp, LocalSloRole::Idp];
+
+struct SloEndpointSet {
+    post: &'static str,
+    redirect: &'static str,
+    simple_sign: &'static str,
+}
+
+impl SloEndpointSet {
+    fn for_binding(&self, binding: LogoutBinding) -> &'static str {
+        match binding {
+            LogoutBinding::Post => self.post,
+            LogoutBinding::Redirect => self.redirect,
+            LogoutBinding::SimpleSign => self.simple_sign,
+        }
+    }
+}
+
+impl LocalSloRole {
+    fn endpoint(self, binding: LogoutBinding) -> &'static str {
+        let endpoints = match self {
+            Self::Sp => SloEndpointSet {
+                post: SP_SLO_POST,
+                redirect: SP_SLO_REDIRECT,
+                simple_sign: SP_SLO_SIMPLESIGN,
+            },
+            Self::Idp => SloEndpointSet {
+                post: IDP_SLO_POST,
+                redirect: IDP_SLO_REDIRECT,
+                simple_sign: IDP_SLO_SIMPLESIGN,
+            },
+        };
+        endpoints.for_binding(binding)
+    }
+}
 
 const BAD_LOGOUT_RESPONSE_TEMPLATE: &str = r#"
 <samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
@@ -118,29 +175,36 @@ impl ReplayCache for ExpiringReplayCache {
 }
 
 fn sp_config() -> Result<SpConfig, SamlError> {
+    sp_config_with_validation_and_logout_request_template(SpValidationPolicy::strict(), None)
+}
+
+fn sp_config_with_validation(validation: SpValidationPolicy) -> Result<SpConfig, SamlError> {
+    sp_config_with_validation_and_logout_request_template(validation, None)
+}
+
+fn sp_config_with_validation_and_logout_request_template(
+    validation: SpValidationPolicy,
+    template: Option<&str>,
+) -> Result<SpConfig, SamlError> {
     SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
         .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
         .slo_endpoint(SloEndpoint::post(SP_SLO_POST)?)
         .slo_endpoint(SloEndpoint::redirect(SP_SLO_REDIRECT)?)
         .slo_endpoint(SloEndpoint::simple_sign(SP_SLO_SIMPLESIGN)?)
         .credentials(credentials())
-        .validation(SpValidationPolicy::strict())
+        .validation(validation)
+        .templates(TemplatePolicy {
+            logout_request_template: template.map(str::to_string),
+            ..TemplatePolicy::default()
+        })
         .build()
 }
 
 fn sp_config_with_logout_request_template(template: &str) -> Result<SpConfig, SamlError> {
-    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
-        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
-        .slo_endpoint(SloEndpoint::post(SP_SLO_POST)?)
-        .slo_endpoint(SloEndpoint::redirect(SP_SLO_REDIRECT)?)
-        .slo_endpoint(SloEndpoint::simple_sign(SP_SLO_SIMPLESIGN)?)
-        .credentials(credentials())
-        .validation(SpValidationPolicy::strict())
-        .templates(TemplatePolicy {
-            logout_request_template: Some(template.to_string()),
-            ..TemplatePolicy::default()
-        })
-        .build()
+    sp_config_with_validation_and_logout_request_template(
+        SpValidationPolicy::strict(),
+        Some(template),
+    )
 }
 
 fn idp_config() -> Result<IdpConfig, SamlError> {
@@ -148,6 +212,13 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
 }
 
 fn idp_config_with_validation(validation: IdpValidationPolicy) -> Result<IdpConfig, SamlError> {
+    idp_config_with_validation_and_logout_request_template(validation, None)
+}
+
+fn idp_config_with_validation_and_logout_request_template(
+    validation: IdpValidationPolicy,
+    template: Option<&str>,
+) -> Result<IdpConfig, SamlError> {
     IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
         .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
         .slo_endpoint(SloEndpoint::post(IDP_SLO_POST)?)
@@ -155,6 +226,10 @@ fn idp_config_with_validation(validation: IdpValidationPolicy) -> Result<IdpConf
         .slo_endpoint(SloEndpoint::simple_sign(IDP_SLO_SIMPLESIGN)?)
         .credentials(credentials())
         .validation(validation)
+        .templates(TemplatePolicy {
+            logout_request_template: template.map(str::to_string),
+            ..TemplatePolicy::default()
+        })
         .build()
 }
 
@@ -255,20 +330,213 @@ fn start_slo_for_binding(binding: LogoutBinding) -> StartSlo {
     }
 }
 
+fn start_unsigned_slo_for_binding(binding: LogoutBinding) -> StartSlo {
+    start_slo_for_binding(binding).signing(LogoutSigning::DoNotSignForCompatibility)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RequestProtection {
+    Signed,
+    UnsignedCompatibility,
+}
+
 fn receive_custom_logout_request(
     template: &str,
     binding: LogoutBinding,
+    receiver_role: LocalSloRole,
+    protection: RequestProtection,
     validation: SamlValidationContext<'_>,
 ) -> Result<Received<LogoutRequest>, SamlError> {
-    let sp = Saml::sp(sp_config_with_logout_request_template(template)?)?;
-    let idp = Saml::idp(idp_config()?)?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_slo(&idp_descriptor, subject()?, start_slo_for_binding(binding))?;
-    idp.receive_slo(
-        &sp_descriptor,
-        logout_request_input(&started.outbound, binding)?,
-        validation,
+    let start_options = match protection {
+        RequestProtection::Signed => start_slo_for_binding(binding),
+        RequestProtection::UnsignedCompatibility => start_unsigned_slo_for_binding(binding),
+    };
+    match receiver_role {
+        LocalSloRole::Idp => {
+            let sp = Saml::sp(sp_config_with_logout_request_template(template)?)?;
+            let idp = Saml::idp(match protection {
+                RequestProtection::Signed => idp_config()?,
+                RequestProtection::UnsignedCompatibility => {
+                    idp_config_with_validation(IdpValidationPolicy::compatibility())?
+                }
+            })?;
+            let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+            let started = sp.start_slo(&idp_descriptor, subject()?, start_options)?;
+            idp.receive_slo(
+                &sp_descriptor,
+                logout_request_input(&started.outbound, binding)?,
+                validation,
+            )
+        }
+        LocalSloRole::Sp => {
+            let sp = Saml::sp(match protection {
+                RequestProtection::Signed => sp_config()?,
+                RequestProtection::UnsignedCompatibility => {
+                    sp_config_with_validation(SpValidationPolicy::compatibility())?
+                }
+            })?;
+            let idp = Saml::idp(idp_config_with_validation_and_logout_request_template(
+                IdpValidationPolicy::strict(),
+                Some(template),
+            )?)?;
+            let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+            let started = idp.start_slo(&sp_descriptor, subject()?, start_options)?;
+            sp.receive_slo(
+                &idp_descriptor,
+                logout_request_input(&started.outbound, binding)?,
+                validation,
+            )
+        }
+    }
+}
+
+fn logout_response_xml(
+    id: &str,
+    issuer: &str,
+    in_response_to: &str,
+    destination: Option<&str>,
+) -> String {
+    let destination = destination
+        .map(|destination| format!(r#" Destination="{destination}""#))
+        .unwrap_or_default();
+    format!(
+        r#"<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+    ID="{id}" Version="2.0" IssueInstant="2000-01-01T00:00:00Z"
+    InResponseTo="{in_response_to}"{destination}>
+    <saml:Issuer>{issuer}</saml:Issuer>
+    <samlp:Status>
+        <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+    </samlp:Status>
+</samlp:LogoutResponse>"#
     )
+}
+
+fn signed_logout_response_input(
+    xml: &str,
+    binding: LogoutBinding,
+) -> Result<BrowserInput<LogoutResponse>, SamlError> {
+    let key = load_private_key(PRIVKEY, None)?;
+    match binding {
+        LogoutBinding::Post => {
+            let signed = construct_saml_signature(xml, true, &key, CERT, RSA_SHA256, &[], None)?;
+            Ok(BrowserInput::<LogoutResponse>::post(vec![FormField::new(
+                "SAMLResponse",
+                base64_encode(signed.as_bytes()),
+            )]))
+        }
+        LogoutBinding::Redirect => {
+            let octet = build_redirect_octet(ParserType::LogoutResponse, xml, None, RSA_SHA256)?;
+            let signature = construct_message_signature(&octet, &key, RSA_SHA256)?;
+            let url = append_signature("https://receiver.example.com/slo", &octet, &signature);
+            let (_, query) = url
+                .split_once('?')
+                .ok_or_else(|| SamlError::Invalid("redirect URL is missing a query".into()))?;
+            Ok(BrowserInput::<LogoutResponse>::redirect(query))
+        }
+        LogoutBinding::SimpleSign => {
+            let octet = format!("SAMLResponse={xml}&SigAlg={RSA_SHA256}");
+            let signature = construct_message_signature(&octet, &key, RSA_SHA256)?;
+            Ok(BrowserInput::<LogoutResponse>::simple_sign(vec![
+                FormField::new("SAMLResponse", base64_encode(xml.as_bytes())),
+                FormField::new("SigAlg", RSA_SHA256),
+                FormField::new("Signature", signature),
+            ]))
+        }
+    }
+}
+
+fn unsigned_logout_response_input(
+    xml: &str,
+    binding: LogoutBinding,
+) -> Result<BrowserInput<LogoutResponse>, SamlError> {
+    match binding {
+        LogoutBinding::Post => Ok(BrowserInput::<LogoutResponse>::post(vec![FormField::new(
+            "SAMLResponse",
+            base64_encode(xml.as_bytes()),
+        )])),
+        LogoutBinding::Redirect => {
+            let url = saml_rs::binding::build_redirect_url(
+                "https://receiver.example.com/slo",
+                ParserType::LogoutResponse,
+                xml,
+                None,
+            )?;
+            let (_, query) = url
+                .split_once('?')
+                .ok_or_else(|| SamlError::Invalid("redirect URL is missing a query".into()))?;
+            Ok(BrowserInput::<LogoutResponse>::redirect(query))
+        }
+        LogoutBinding::SimpleSign => Err(SamlError::Invalid(
+            "SimpleSign input requires its binding-level signature".into(),
+        )),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ResponseProtection {
+    Signed,
+    UnsignedCompatibility,
+}
+
+fn finish_custom_logout_response(
+    receiver_role: LocalSloRole,
+    binding: LogoutBinding,
+    destination: Option<&str>,
+    protection: ResponseProtection,
+    validation: SamlValidationContext<'_>,
+) -> Result<LogoutCompleted, SamlError> {
+    let sp = Saml::sp(match protection {
+        ResponseProtection::Signed => sp_config()?,
+        ResponseProtection::UnsignedCompatibility => {
+            sp_config_with_validation(SpValidationPolicy::compatibility())?
+        }
+    })?;
+    let idp = Saml::idp(match protection {
+        ResponseProtection::Signed => idp_config()?,
+        ResponseProtection::UnsignedCompatibility => {
+            idp_config_with_validation(IdpValidationPolicy::compatibility())?
+        }
+    })?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let response_id = format!("_{receiver_role:?}_{binding:?}_{protection:?}_response");
+
+    match receiver_role {
+        LocalSloRole::Sp => {
+            let started =
+                sp.start_slo(&idp_descriptor, subject()?, start_slo_for_binding(binding))?;
+            let xml = logout_response_xml(
+                &response_id,
+                IDP_ENTITY_ID,
+                started.pending.id().as_str(),
+                destination,
+            );
+            let input = match protection {
+                ResponseProtection::Signed => signed_logout_response_input(&xml, binding)?,
+                ResponseProtection::UnsignedCompatibility => {
+                    unsigned_logout_response_input(&xml, binding)?
+                }
+            };
+            sp.finish_slo(&idp_descriptor, &started.pending, input, validation)
+        }
+        LocalSloRole::Idp => {
+            let started =
+                idp.start_slo(&sp_descriptor, subject()?, start_slo_for_binding(binding))?;
+            let xml = logout_response_xml(
+                &response_id,
+                SP_ENTITY_ID,
+                started.pending.id().as_str(),
+                destination,
+            );
+            let input = match protection {
+                ResponseProtection::Signed => signed_logout_response_input(&xml, binding)?,
+                ResponseProtection::UnsignedCompatibility => {
+                    unsigned_logout_response_input(&xml, binding)?
+                }
+            };
+            idp.finish_slo(&sp_descriptor, &started.pending, input, validation)
+        }
+    }
 }
 
 fn system_time(value: &str) -> Result<SystemTime, Box<dyn std::error::Error>> {
@@ -691,7 +959,13 @@ fn typed_facade_rejects_expired_signed_logout_request_before_replay_for_all_bind
             system_time("2026-07-15T12:00:00Z")?,
             ReplayPolicy::RequireCache(&mut cache),
         );
-        match receive_custom_logout_request(&template, binding, validation) {
+        match receive_custom_logout_request(
+            &template,
+            binding,
+            LocalSloRole::Idp,
+            RequestProtection::Signed,
+            validation,
+        ) {
             Err(SamlError::TimeWindowInvalid { field }) => {
                 assert_eq!(field, TimeWindowField::LogoutRequestNotOnOrAfter);
                 assert!(cache.seen.is_empty());
@@ -708,6 +982,149 @@ fn typed_facade_rejects_expired_signed_logout_request_before_replay_for_all_bind
 }
 
 #[test]
+fn typed_facade_rejects_signed_logout_request_without_destination_before_replay(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", None).replacen(
+        "\n    Destination=\"{Destination}\"",
+        "",
+        1,
+    );
+    for binding in ALL_LOGOUT_BINDINGS {
+        for receiver_role in LOCAL_SLO_ROLES {
+            let mut cache = MemoryReplayCache::default();
+            match receive_custom_logout_request(
+                &template,
+                binding,
+                receiver_role,
+                RequestProtection::Signed,
+                validation_with_cache(&mut cache),
+            ) {
+                Err(SamlError::DestinationMismatch { expected, actual }) => {
+                    assert_eq!(expected, receiver_role.endpoint(binding));
+                    assert_eq!(actual, None);
+                    assert!(cache.seen.is_empty());
+                }
+                other => {
+                    return Err(format!(
+                        "expected {receiver_role:?} missing Destination rejection for {binding:?}, got {other:?}"
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_facades_use_binding_specific_destination_for_both_roles(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", None);
+    for binding in ALL_LOGOUT_BINDINGS {
+        for receiver_role in LOCAL_SLO_ROLES {
+            let received = receive_custom_logout_request(
+                &template,
+                binding,
+                receiver_role,
+                RequestProtection::Signed,
+                validation(),
+            )?;
+            assert_eq!(
+                received.message().destination().map(|url| url.as_str()),
+                Some(receiver_role.endpoint(binding))
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_facades_reject_mismatched_logout_request_destination_before_replay(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", None).replace(
+        r#"Destination="{Destination}""#,
+        r#"Destination="https://wrong.example/slo""#,
+    );
+
+    for binding in ALL_LOGOUT_BINDINGS {
+        for receiver_role in LOCAL_SLO_ROLES {
+            let mut cache = MemoryReplayCache::default();
+            match receive_custom_logout_request(
+                &template,
+                binding,
+                receiver_role,
+                RequestProtection::Signed,
+                validation_with_cache(&mut cache),
+            ) {
+                Err(SamlError::DestinationMismatch { expected, actual }) => {
+                    assert_eq!(expected, receiver_role.endpoint(binding));
+                    assert_eq!(actual.as_deref(), Some("https://wrong.example/slo"));
+                    assert!(cache.seen.is_empty());
+                }
+                other => {
+                    return Err(format!(
+                        "expected {receiver_role:?} DestinationMismatch for {binding:?}, got {other:?}"
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_facades_allow_unsigned_missing_destination_only_under_compatibility_policy(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", None).replacen(
+        "\n    Destination=\"{Destination}\"",
+        "",
+        1,
+    );
+
+    for binding in UNSIGNED_COMPATIBILITY_BINDINGS {
+        for receiver_role in LOCAL_SLO_ROLES {
+            let received = receive_custom_logout_request(
+                &template,
+                binding,
+                receiver_role,
+                RequestProtection::UnsignedCompatibility,
+                validation(),
+            )?;
+            assert_eq!(received.message().destination(), None);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_facade_rejects_qualified_logout_request_destination(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", None).replace(
+        r#"Destination="{Destination}""#,
+        r#"samlp:Destination="{Destination}""#,
+    );
+
+    match receive_custom_logout_request(
+        &template,
+        LogoutBinding::Post,
+        LocalSloRole::Idp,
+        RequestProtection::Signed,
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("attribute Destination on LogoutRequest must be unqualified") =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "expected qualified Destination protocol-profile rejection, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
 fn typed_facade_receive_slo_uses_not_on_or_after_deadline_without_generic_retention(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let template = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T12:01:00Z"));
@@ -718,7 +1135,13 @@ fn typed_facade_receive_slo_uses_not_on_or_after_deadline_without_generic_retent
     )
     .with_clock_skew(ClockSkew::strict().with_not_on_or_after_millis(30_000));
 
-    let received = receive_custom_logout_request(&template, LogoutBinding::Post, validation)?;
+    let received = receive_custom_logout_request(
+        &template,
+        LogoutBinding::Post,
+        LocalSloRole::Idp,
+        RequestProtection::Signed,
+        validation,
+    )?;
     let replay_key = format!("logout_request_id:{}", received.message().id().as_str());
     assert_eq!(
         cache.seen.get(&replay_key),
@@ -840,6 +1263,144 @@ fn typed_facade_finish_slo_checks_logout_response_replay() -> Result<(), Box<dyn
         }
         other => Err(format!("expected LogoutResponse ReplayDetected, got {other:?}").into()),
     }
+}
+
+#[test]
+fn typed_facades_accept_matching_logout_response_destination_for_all_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for binding in ALL_LOGOUT_BINDINGS {
+        for receiver_role in LOCAL_SLO_ROLES {
+            let endpoint = receiver_role.endpoint(binding);
+            let completed = finish_custom_logout_response(
+                receiver_role,
+                binding,
+                Some(endpoint),
+                ResponseProtection::Signed,
+                validation(),
+            )?;
+            assert_eq!(
+                completed
+                    .response()
+                    .and_then(LogoutResponse::destination)
+                    .map(|url| url.as_str()),
+                Some(endpoint)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_facade_rejects_qualified_logout_response_destination(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let xml = logout_response_xml(
+        "_qualified_response_destination",
+        IDP_ENTITY_ID,
+        started.pending.id().as_str(),
+        Some(SP_SLO_POST),
+    )
+    .replace(" Destination=", " samlp:Destination=");
+
+    match sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        signed_logout_response_input(&xml, LogoutBinding::Post)?,
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("attribute Destination on LogoutResponse must be unqualified") =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "expected qualified LogoutResponse Destination rejection, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn typed_facades_reject_signed_logout_response_without_destination_before_replay(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for binding in ALL_LOGOUT_BINDINGS {
+        for receiver_role in LOCAL_SLO_ROLES {
+            let mut cache = MemoryReplayCache::default();
+            match finish_custom_logout_response(
+                receiver_role,
+                binding,
+                None,
+                ResponseProtection::Signed,
+                validation_with_cache(&mut cache),
+            ) {
+                Err(SamlError::DestinationMismatch { expected, actual }) => {
+                    assert_eq!(expected, receiver_role.endpoint(binding));
+                    assert_eq!(actual, None);
+                    assert!(cache.seen.is_empty());
+                }
+                other => {
+                    return Err(format!(
+                        "expected {receiver_role:?} missing response Destination rejection for {binding:?}, got {other:?}"
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_facades_reject_mismatched_logout_response_destination_before_replay(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for binding in ALL_LOGOUT_BINDINGS {
+        for receiver_role in LOCAL_SLO_ROLES {
+            let mut cache = MemoryReplayCache::default();
+            match finish_custom_logout_response(
+                receiver_role,
+                binding,
+                Some("https://wrong.example/slo"),
+                ResponseProtection::Signed,
+                validation_with_cache(&mut cache),
+            ) {
+                Err(SamlError::DestinationMismatch { expected, actual }) => {
+                    assert_eq!(expected, receiver_role.endpoint(binding));
+                    assert_eq!(actual.as_deref(), Some("https://wrong.example/slo"));
+                    assert!(cache.seen.is_empty());
+                }
+                other => {
+                    return Err(format!(
+                        "expected {receiver_role:?} response DestinationMismatch for {binding:?}, got {other:?}"
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_facades_allow_unsigned_logout_response_without_destination_in_compatibility_mode(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for binding in UNSIGNED_COMPATIBILITY_BINDINGS {
+        for receiver_role in LOCAL_SLO_ROLES {
+            let completed = finish_custom_logout_response(
+                receiver_role,
+                binding,
+                None,
+                ResponseProtection::UnsignedCompatibility,
+                validation(),
+            )?;
+            assert_eq!(
+                completed.response().and_then(LogoutResponse::destination),
+                None
+            );
+        }
+    }
+    Ok(())
 }
 
 #[test]
