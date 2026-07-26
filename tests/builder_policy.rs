@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
 use saml_rs::{
     AcsEndpoint, AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy,
@@ -83,6 +83,7 @@ fn idp_builder_and_struct_literal_reach_same_config() -> Result<(), Box<dyn std:
     let builder = IdpConfig::builder(entity_id.clone())
         .sso_endpoint(sso.clone())
         .slo_endpoint(slo.clone())
+        .issuance_lifetime(Duration::from_secs(900))
         .validation(validation.clone())
         .build()?;
     let literal = IdpConfig {
@@ -94,6 +95,7 @@ fn idp_builder_and_struct_literal_reach_same_config() -> Result<(), Box<dyn std:
             elements_order: None,
         },
         credentials: Credentials::default(),
+        issuance_lifetime: Duration::from_secs(900),
         validation,
         algorithms: AlgorithmPolicy::default(),
         xml: XmlPolicy::default(),
@@ -103,9 +105,64 @@ fn idp_builder_and_struct_literal_reach_same_config() -> Result<(), Box<dyn std:
 
     assert_eq!(builder.entity_id, literal.entity_id);
     assert_eq!(builder.metadata, literal.metadata);
+    assert_eq!(builder.issuance_lifetime, literal.issuance_lifetime);
     assert_eq!(builder.validation, literal.validation);
     assert_eq!(builder.algorithms, literal.algorithms);
     assert_eq!(builder.xml, literal.xml);
+    Ok(())
+}
+
+#[test]
+fn idp_config_defaults_issuance_lifetime_to_five_minutes() -> Result<(), Box<dyn std::error::Error>>
+{
+    let config = IdpConfig::new(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        IdpMetadataConfig::new(vec![SsoEndpoint::post("https://idp.example.com/sso")?]),
+    );
+
+    assert_eq!(config.issuance_lifetime, Duration::from_secs(300));
+    Ok(())
+}
+
+#[test]
+fn idp_builder_sets_issuance_lifetime() -> Result<(), Box<dyn std::error::Error>> {
+    let config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+        .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+        .issuance_lifetime(Duration::from_secs(600))
+        .build()?;
+
+    assert_eq!(config.issuance_lifetime, Duration::from_secs(600));
+    Ok(())
+}
+
+#[test]
+fn idp_config_rejects_zero_issuance_lifetime() -> Result<(), Box<dyn std::error::Error>> {
+    let result = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+        .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+        .issuance_lifetime(Duration::ZERO)
+        .build();
+
+    assert!(matches!(
+        result,
+        Err(SamlError::Invalid(message))
+            if message == "IdP issuance lifetime must be greater than zero"
+    ));
+    Ok(())
+}
+
+#[test]
+fn idp_config_rejects_unrepresentable_issuance_lifetime() -> Result<(), Box<dyn std::error::Error>>
+{
+    let result = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+        .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+        .issuance_lifetime(Duration::MAX)
+        .build();
+
+    assert!(matches!(
+        result,
+        Err(SamlError::Invalid(message))
+            if message == "IdP issuance lifetime must fit in time::Duration (at most i64::MAX seconds plus 999,999,999 nanoseconds)"
+    ));
     Ok(())
 }
 

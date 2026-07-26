@@ -1,17 +1,17 @@
 use crate::browser::{BrowserInput, LogoutBinding, Outbound, PendingLogoutRequest, Started};
 use crate::config::{EntityId, IdpDescriptor, SpDescriptor};
 use crate::constants::Binding;
-use crate::entity::EntitySetting;
+use crate::entity::{capture_idp_issuance_window, now_iso8601, EntitySetting};
 use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
 use crate::logout::{
     create_logout_request_with_session_indexes, create_logout_response, parse_logout_request_at,
-    parse_logout_response_at, LogoutRequestSessionIndexes,
+    parse_logout_response_at, LogoutRequestSessionIndexes, LogoutRequestValidation,
 };
 use crate::metadata::Metadata;
 use crate::model::{
     LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, Received, ReplayKey,
-    SamlValidationContext,
+    SamlInstant, SamlValidationContext,
 };
 
 use super::raw_mapping::{
@@ -59,6 +59,7 @@ impl Saml<Sp> {
             &raw_idp.metadata,
             subject,
             options,
+            StartSloRole::SessionParticipant,
         )
     }
 
@@ -173,13 +174,19 @@ impl Saml<Sp> {
 }
 
 impl Saml<Idp> {
-    /// Start IdP-initiated Single Logout.
+    /// Start Session Authority Single Logout.
+    ///
+    /// The generated `LogoutRequest` always carries a UTC `NotOnOrAfter`
+    /// derived from the configured [`crate::IdpConfig::issuance_lifetime`] and
+    /// the same captured `IssueInstant`.
     ///
     /// # Errors
     ///
     /// Returns [`SamlError`] when relay state is invalid, SP metadata cannot be
     /// parsed, a compatible logout endpoint or signing key is missing, the
-    /// selected binding is unsupported, or logout request creation fails.
+    /// selected binding is unsupported, logout request creation fails, or the
+    /// configured issuance lifetime cannot be added to the current issue
+    /// instant.
     ///
     /// # Examples
     ///
@@ -211,6 +218,9 @@ impl Saml<Idp> {
             &raw_sp.metadata,
             subject,
             options,
+            StartSloRole::SessionAuthority {
+                issuance_lifetime: self.0.issuance_lifetime,
+            },
         )
     }
 
@@ -372,6 +382,12 @@ struct TypedLogoutSubject {
     session_indexes: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum StartSloRole {
+    SessionParticipant,
+    SessionAuthority { issuance_lifetime: time::Duration },
+}
+
 fn start_slo_impl(
     local_setting: &EntitySetting,
     local_metadata: &Metadata,
@@ -379,10 +395,24 @@ fn start_slo_impl(
     peer_metadata: &Metadata,
     subject: LogoutSubject,
     options: StartSlo,
+    role: StartSloRole,
 ) -> Result<Started<LogoutRequest>, SamlError> {
     options.relay_state.validate()?;
     let subject = typed_logout_subject(subject);
-    let context = create_logout_request_with_session_indexes(LogoutRequestSessionIndexes {
+    let (issue_instant, not_on_or_after, request_validation) = match role {
+        StartSloRole::SessionParticipant => {
+            (now_iso8601(), None, LogoutRequestValidation::Compatibility)
+        }
+        StartSloRole::SessionAuthority { issuance_lifetime } => {
+            let window = capture_idp_issuance_window(issuance_lifetime)?;
+            (
+                window.issue_instant,
+                Some(window.expiration),
+                LogoutRequestValidation::SessionAuthority,
+            )
+        }
+    };
+    let created = create_logout_request_with_session_indexes(LogoutRequestSessionIndexes {
         init_setting: local_setting,
         init_meta: local_metadata,
         target_meta: peer_metadata,
@@ -391,14 +421,26 @@ fn start_slo_impl(
         session_indexes: &subject.session_indexes,
         relay_state: options.relay_state.as_deref(),
         want_signed: logout_request_signing(local_setting, options.signing),
+        issue_instant: &issue_instant,
+        not_on_or_after: not_on_or_after.as_deref(),
+        validation: request_validation,
     })?;
-    let outbound = Outbound::<LogoutRequest>::try_from(context)?;
-    let pending = PendingLogoutRequest::try_new(
+    let outbound = Outbound::<LogoutRequest>::try_from(created.context)?;
+    let mut pending = PendingLogoutRequest::try_new(
         outbound.id().clone(),
         options.relay_state,
         options.binding,
         peer_entity_id.clone(),
     )?;
+    if matches!(role, StartSloRole::SessionAuthority { .. }) {
+        pending = pending.with_issue_instant(SamlInstant::try_new(created.issue_instant)?);
+        let expiration = created.not_on_or_after.ok_or_else(|| {
+            SamlError::Invalid(
+                "Session Authority LogoutRequest is missing its generated expiration".into(),
+            )
+        })?;
+        pending = pending.with_expiration(SamlInstant::try_new(expiration)?);
+    }
     Ok(Started { pending, outbound })
 }
 

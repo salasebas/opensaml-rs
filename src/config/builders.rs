@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::browser::{AcsEndpoint, SloEndpoint, SsoEndpoint};
 use crate::entity::EntitySetting;
 use crate::error::SamlError;
@@ -211,9 +213,11 @@ impl SpConfigBuilder {
 ///
 /// ```
 /// use saml_rs::{EntityId, IdpConfig, IdpValidationPolicy, SsoEndpoint};
+/// use std::time::Duration;
 ///
 /// let config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
 ///     .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+///     .issuance_lifetime(Duration::from_secs(10 * 60))
 ///     .validation(IdpValidationPolicy::compatibility())
 ///     .build()?;
 ///
@@ -228,6 +232,12 @@ pub struct IdpConfig {
     pub metadata: IdpMetadataConfig,
     /// Local credentials.
     pub credentials: Credentials,
+    /// Lifetime applied to assertions issued by this IdP and to
+    /// Session Authority LogoutRequests.
+    ///
+    /// The default is exactly five minutes. That value is saml-rs policy, not
+    /// an OASIS-mandated duration.
+    pub issuance_lifetime: Duration,
     /// Validation policy.
     pub validation: IdpValidationPolicy,
     /// Algorithm policy.
@@ -242,13 +252,15 @@ impl IdpConfig {
     /// Create IdP configuration with required identity and metadata inputs.
     ///
     /// This convenience constructor accepts already-validated typed inputs but
-    /// does not validate the final config. Use [`Self::try_new`] or
-    /// [`Self::builder`] for caller-provided setup.
+    /// does not validate the final config. The issuance lifetime defaults to
+    /// exactly five minutes. Use [`Self::try_new`] or [`Self::builder`] for
+    /// caller-provided setup.
     pub fn new(entity_id: EntityId, metadata: IdpMetadataConfig) -> Self {
         Self {
             entity_id,
             metadata,
             credentials: Credentials::default(),
+            issuance_lifetime: Duration::from_secs(300),
             validation: IdpValidationPolicy::default(),
             algorithms: AlgorithmPolicy::default(),
             xml: XmlPolicy::default(),
@@ -260,15 +272,17 @@ impl IdpConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError`] when the entity ID is empty or required IdP
-    /// metadata endpoints are missing.
+    /// Returns [`SamlError`] when the entity ID is empty, required IdP
+    /// metadata endpoints are missing, or the issuance lifetime is zero or
+    /// outside the range supported by the internal time representation.
     pub fn try_new(entity_id: EntityId, metadata: IdpMetadataConfig) -> Result<Self, SamlError> {
         let config = Self::new(entity_id, metadata);
         config.validate()?;
         Ok(config)
     }
 
-    /// Start a dependency-free IdP config builder with strict typed defaults.
+    /// Start a dependency-free IdP config builder with strict typed defaults
+    /// and a five-minute issuance lifetime.
     pub fn builder(entity_id: EntityId) -> IdpConfigBuilder {
         IdpConfigBuilder::new(entity_id)
     }
@@ -277,8 +291,9 @@ impl IdpConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError`] when the entity ID is empty or required IdP
-    /// metadata endpoints are missing.
+    /// Returns [`SamlError`] when the entity ID is empty, required IdP
+    /// metadata endpoints are missing, or the issuance lifetime is zero or
+    /// outside the range supported by the internal time representation.
     pub fn validate(&self) -> Result<(), SamlError> {
         validate_entity_id(&self.entity_id)?;
         self.metadata.validate()?;
@@ -292,6 +307,7 @@ pub struct IdpConfigBuilder {
     entity_id: EntityId,
     metadata: IdpMetadataConfig,
     credentials: Credentials,
+    issuance_lifetime: Duration,
     validation: IdpValidationPolicy,
     algorithms: AlgorithmPolicy,
     xml: XmlPolicy,
@@ -304,6 +320,7 @@ impl IdpConfigBuilder {
             entity_id,
             metadata: IdpMetadataConfig::new(Vec::new()),
             credentials: Credentials::default(),
+            issuance_lifetime: Duration::from_secs(300),
             validation: IdpValidationPolicy::strict(),
             algorithms: AlgorithmPolicy::default(),
             xml: XmlPolicy::default(),
@@ -341,6 +358,15 @@ impl IdpConfigBuilder {
         self
     }
 
+    /// Set the lifetime for issued assertions and Session Authority
+    /// LogoutRequests.
+    ///
+    /// The value is validated by [`Self::build`].
+    pub fn issuance_lifetime(mut self, issuance_lifetime: Duration) -> Self {
+        self.issuance_lifetime = issuance_lifetime;
+        self
+    }
+
     /// Set IdP validation policy.
     pub fn validation(mut self, validation: IdpValidationPolicy) -> Self {
         self.validation = validation;
@@ -369,13 +395,15 @@ impl IdpConfigBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError`] when required fields are missing or selected
+    /// Returns [`SamlError`] when required fields are missing, the issuance
+    /// lifetime is zero or outside the internal supported range, or selected
     /// policy requires crypto in a no-default-features build.
     pub fn build(self) -> Result<IdpConfig, SamlError> {
         let config = IdpConfig {
             entity_id: self.entity_id,
             metadata: self.metadata,
             credentials: self.credentials,
+            issuance_lifetime: self.issuance_lifetime,
             validation: self.validation,
             algorithms: self.algorithms,
             xml: self.xml,
@@ -416,8 +444,24 @@ fn validate_sp_policy(config: &SpConfig) -> Result<(), SamlError> {
 }
 
 fn validate_idp_policy(config: &IdpConfig) -> Result<(), SamlError> {
+    validated_idp_issuance_lifetime(config.issuance_lifetime)?;
     validate_idp_crypto_support(config)?;
     validate_common_credentials(&config.credentials)
+}
+
+pub(crate) fn validated_idp_issuance_lifetime(
+    issuance_lifetime: Duration,
+) -> Result<time::Duration, SamlError> {
+    if issuance_lifetime.is_zero() {
+        return Err(SamlError::Invalid(
+            "IdP issuance lifetime must be greater than zero".into(),
+        ));
+    }
+    time::Duration::try_from(issuance_lifetime).map_err(|_| {
+        SamlError::Invalid(
+            "IdP issuance lifetime must fit in time::Duration (at most i64::MAX seconds plus 999,999,999 nanoseconds)".into(),
+        )
+    })
 }
 
 fn validate_signing_credentials(credentials: &Credentials) -> Result<(), SamlError> {

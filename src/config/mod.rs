@@ -11,6 +11,7 @@ pub use algorithms::{
     DataEncryptionAlgorithm, DigestAlgorithm, KeyEncryptionAlgorithm, NameIdFormat,
     SignatureAlgorithm, TransformAlgorithm,
 };
+pub(crate) use builders::validated_idp_issuance_lifetime;
 pub use builders::{IdpConfig, IdpConfigBuilder, SpConfig, SpConfigBuilder};
 pub use credentials::{CertificatePem, Credentials, Passphrase, PrivateKeyPem};
 pub use descriptors::{EntityId, IdpDescriptor, IdpMetadataConfig, SpDescriptor, SpMetadataConfig};

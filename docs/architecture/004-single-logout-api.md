@@ -73,8 +73,8 @@ impl Saml<Idp> {
 - RelayState as exact tri-state: absent, present empty, or present value;
 - peer entity ID;
 - selected logout binding;
-- issue instant;
-- expiration if configured.
+- the exact generated issue instant and expiration for Session Authority
+  requests; Session Participant defaults leave both unset.
 
 `PendingLogoutRequest` exposes accessors and a
 `PendingSnapshot<LogoutRequest>` persistence shape. Reconstruct with
@@ -128,9 +128,18 @@ the rejection is saml-rs' default fail-closed policy rather than a receiver
 Without `NotOnOrAfter`, required replay storage retains the existing explicit
 `replay_retention` fallback.
 
-This inbound decision does not add outbound session-authority deadline
-selection. Satisfying the producer requirement for IdP-created LogoutRequest
-messages needs separate outbound API design.
+Outbound roles remain distinct. `Saml<Idp>::start_slo` models a Session
+Authority and always emits an unqualified UTC `NotOnOrAfter` exactly one
+configured `IdpConfig::issuance_lifetime` after the same captured
+`IssueInstant`. `Saml<Sp>::start_slo` models a Session Participant and does not
+synthesize the attribute. Five minutes is the typed IdP default and library
+policy, not an OASIS-mandated duration. Public raw request creation remains
+unchanged.
+
+Custom typed Session Authority templates use the complete root attribute
+`NotOnOrAfter="{NotOnOrAfter}"`. Final XML is validated before signing for the
+exact generated identity, timing, issuer, destination, subject, and session
+indexes, and a template-owned root signature is rejected.
 
 ## Responding to LogoutRequest
 

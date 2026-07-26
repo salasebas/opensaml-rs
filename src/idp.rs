@@ -2,7 +2,7 @@
 
 use crate::constants::{status_code, Binding, ParserType};
 use crate::entity::{
-    generate_id, iso8601_offset, now_iso8601, BindingContext, CustomTagReplacement, EntitySetting,
+    capture_idp_issuance_window, generate_id, BindingContext, CustomTagReplacement, EntitySetting,
     User,
 };
 use crate::error::SamlError;
@@ -39,6 +39,14 @@ pub struct LoginResponseOptions<'a> {
 pub(crate) struct LoginResponseOverrides<'a> {
     pub(crate) acs: Option<&'a str>,
     pub(crate) name_id_format: Option<&'a str>,
+    pub(crate) issuance_lifetime: Option<time::Duration>,
+}
+
+#[derive(Clone, Copy)]
+struct LoginResponseRendering<'a> {
+    name_id_format: Option<&'a str>,
+    custom: Option<CustomTagReplacement<'a>>,
+    issuance_lifetime: time::Duration,
 }
 
 /// A SAML 2.0 Identity Provider: runtime [`EntitySetting`] plus parsed [`IdpMetadata`].
@@ -115,24 +123,24 @@ impl IdentityProvider {
         in_response_to: Option<&str>,
         user: &User,
         acs: &str,
-        name_id_format: Option<&str>,
-        custom: Option<CustomTagReplacement<'_>>,
+        rendering: LoginResponseRendering<'_>,
     ) -> Result<(String, String), SamlError> {
         validate_tag_prefix("protocol", &self.setting.tag_prefix_protocol)?;
         validate_tag_prefix("assertion", &self.setting.tag_prefix_assertion)?;
         let tmpl = self.setting.login_response_template.as_ref();
         let attributes = tmpl.map(|t| t.attributes.as_slice()).unwrap_or(&[]);
         let has_custom_context = tmpl.and_then(|t| t.context.as_ref()).is_some();
-        if custom.is_none() && !has_custom_context {
-            let now = now_iso8601();
-            let later = iso8601_offset(300);
+        if rendering.custom.is_none() && !has_custom_context {
+            let window = capture_idp_issuance_window(rendering.issuance_lifetime)?;
             let default_name_id_format = self
                 .setting
                 .name_id_format
                 .first()
                 .cloned()
                 .unwrap_or_default();
-            let name_id_format = name_id_format.unwrap_or(default_name_id_format.as_str());
+            let name_id_format = rendering
+                .name_id_format
+                .unwrap_or(default_name_id_format.as_str());
             let id = generate_id();
             let assertion_id = generate_id();
             let audience = sp.metadata.get_entity_id().unwrap_or_default().to_string();
@@ -143,14 +151,14 @@ impl IdentityProvider {
                 assertion_prefix: &self.setting.tag_prefix_assertion,
                 response_id: &id,
                 assertion_id: &assertion_id,
-                issue_instant: &now,
+                issue_instant: &window.issue_instant,
                 destination: acs,
                 subject_recipient: acs,
                 issuer: &issuer,
                 status_code: status_code::SUCCESS,
-                subject_confirmation_not_on_or_after: &later,
-                conditions_not_before: &now,
-                conditions_not_on_or_after: &later,
+                subject_confirmation_not_on_or_after: &window.expiration,
+                conditions_not_before: &window.issue_instant,
+                conditions_not_on_or_after: &window.expiration,
                 audience: &audience,
                 name_id_format,
                 name_id: &user.name_id,
@@ -179,18 +187,19 @@ impl IdentityProvider {
             &self.setting.tag_prefix_protocol,
             &self.setting.tag_prefix_assertion,
         );
-        if let Some(f) = custom {
+        if let Some(f) = rendering.custom {
             return Ok(f(&prepared));
         }
-        let now = now_iso8601();
-        let later = iso8601_offset(300);
+        let window = capture_idp_issuance_window(rendering.issuance_lifetime)?;
         let default_name_id_format = self
             .setting
             .name_id_format
             .first()
             .cloned()
             .unwrap_or_default();
-        let name_id_format = name_id_format.unwrap_or(default_name_id_format.as_str());
+        let name_id_format = rendering
+            .name_id_format
+            .unwrap_or(default_name_id_format.as_str());
         let id = generate_id();
         let mut tags: Vec<(&str, String)> = vec![
             ("ID", id.clone()),
@@ -203,11 +212,11 @@ impl IdentityProvider {
                 sp.metadata.get_entity_id().unwrap_or_default().to_string(),
             ),
             ("Issuer", self.entity_id()),
-            ("IssueInstant", now.clone()),
+            ("IssueInstant", window.issue_instant.clone()),
             ("StatusCode", status_code::SUCCESS.to_string()),
-            ("ConditionsNotBefore", now),
-            ("ConditionsNotOnOrAfter", later.clone()),
-            ("SubjectConfirmationDataNotOnOrAfter", later),
+            ("ConditionsNotBefore", window.issue_instant),
+            ("ConditionsNotOnOrAfter", window.expiration.clone()),
+            ("SubjectConfirmationDataNotOnOrAfter", window.expiration),
             ("NameIDFormat", name_id_format.to_string()),
             ("NameID", user.name_id.clone()),
             (
@@ -297,8 +306,13 @@ impl IdentityProvider {
             options.in_response_to,
             user,
             &acs,
-            overrides.name_id_format,
-            options.custom,
+            LoginResponseRendering {
+                name_id_format: overrides.name_id_format,
+                custom: options.custom,
+                issuance_lifetime: overrides
+                    .issuance_lifetime
+                    .unwrap_or(time::Duration::seconds(300)),
+            },
         )?;
         let signed = self.finalize_login_response(sp, binding, &raw, options.encrypt_then_sign)?;
         let relay = options.relay_state.map(str::to_string);
@@ -649,7 +663,7 @@ mod crypto_tests {
         }
     }
 
-    fn idp() -> Result<IdentityProvider, SamlError> {
+    fn idp_with_setting(setting: EntitySetting) -> Result<IdentityProvider, SamlError> {
         IdentityProvider::from_config(
             &IdpMetadataConfig {
                 entity_id: "https://idp.example.com/metadata".into(),
@@ -658,8 +672,12 @@ mod crypto_tests {
                 single_sign_on_service: vec![Endpoint::new(Binding::Post, "https://idp/sso")],
                 ..Default::default()
             },
-            signing_setting(),
+            setting,
         )
+    }
+
+    fn idp() -> Result<IdentityProvider, SamlError> {
+        idp_with_setting(signing_setting())
     }
 
     fn signed_sp(entity_id: &str) -> Result<ServiceProvider, SamlError> {
@@ -700,6 +718,87 @@ mod crypto_tests {
             result.extract.get_str("issuer"),
             Some("https://idp.example.com/metadata")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn raw_login_response_defaults_to_five_minute_issuance_window_for_standard_renderers(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::binding::base64_decode;
+        use crate::template::{LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
+        use crate::xml::dom::parse;
+        use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+        let mut custom_template = signing_setting();
+        custom_template.login_response_template = Some(LoginResponseTemplate {
+            context: Some(LOGIN_RESPONSE_TEMPLATE.into()),
+            attributes: Vec::new(),
+        });
+
+        for setting in [signing_setting(), custom_template] {
+            let idp = idp_with_setting(setting)?;
+            let sp = sp()?;
+            let ctx = idp.create_login_response(
+                &sp,
+                Binding::Post,
+                &User::new("user@example.com"),
+                &LoginResponseOptions {
+                    in_response_to: Some("_req123"),
+                    ..Default::default()
+                },
+            )?;
+            let xml = String::from_utf8(base64_decode(&ctx.context)?)?;
+            let document = parse(&xml)?;
+            let response_issue_instant = document
+                .root
+                .attr("IssueInstant")
+                .ok_or("missing Response IssueInstant")?;
+            let assertion = document
+                .root
+                .children
+                .iter()
+                .find(|node| node.local_name == "Assertion")
+                .ok_or("missing Assertion")?;
+            let assertion_issue_instant = assertion
+                .attr("IssueInstant")
+                .ok_or("missing Assertion IssueInstant")?;
+            let conditions = assertion
+                .children
+                .iter()
+                .find(|node| node.local_name == "Conditions")
+                .ok_or("missing Conditions")?;
+            let conditions_not_before = conditions
+                .attr("NotBefore")
+                .ok_or("missing Conditions NotBefore")?;
+            let conditions_expiration = conditions
+                .attr("NotOnOrAfter")
+                .ok_or("missing Conditions NotOnOrAfter")?;
+            let bearer_expiration = assertion
+                .children
+                .iter()
+                .find(|node| node.local_name == "Subject")
+                .and_then(|node| {
+                    node.children
+                        .iter()
+                        .find(|node| node.local_name == "SubjectConfirmation")
+                })
+                .and_then(|node| {
+                    node.children
+                        .iter()
+                        .find(|node| node.local_name == "SubjectConfirmationData")
+                })
+                .and_then(|node| node.attr("NotOnOrAfter"))
+                .ok_or("missing SubjectConfirmationData NotOnOrAfter")?;
+
+            assert_eq!(response_issue_instant, assertion_issue_instant);
+            assert_eq!(response_issue_instant, conditions_not_before);
+            assert_eq!(conditions_expiration, bearer_expiration);
+            assert_eq!(
+                OffsetDateTime::parse(conditions_expiration, &Rfc3339)?
+                    - OffsetDateTime::parse(response_issue_instant, &Rfc3339)?,
+                time::Duration::minutes(5)
+            );
+        }
         Ok(())
     }
 

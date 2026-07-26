@@ -1,8 +1,12 @@
 use saml_rs::binding::{base64_decode, deflate_raw_decode};
 use saml_rs::constants::Binding;
 use saml_rs::entity::{EntitySetting, User};
-use saml_rs::logout::{create_logout_request, create_logout_response};
+use saml_rs::logout::{
+    create_logout_request, create_logout_request_with_id, create_logout_response,
+};
 use saml_rs::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
+use saml_rs::template::LOGOUT_REQUEST_TEMPLATE;
+use saml_rs::xml::dom::parse;
 use saml_rs::{IdentityProvider, SamlError, ServiceProvider};
 
 fn idp() -> Result<IdentityProvider, SamlError> {
@@ -139,6 +143,58 @@ fn logout_request_simplesign_includes_session_index_when_present(
 fn logout_request_omits_session_index_when_absent() -> Result<(), Box<dyn std::error::Error>> {
     let xml = logout_request_xml(Binding::Post, None)?;
     assert!(!xml.contains("<samlp:SessionIndex>"));
+    Ok(())
+}
+
+#[test]
+fn public_raw_logout_request_generation_keeps_expiration_omitted_for_supported_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for binding in [Binding::Redirect, Binding::Post, Binding::SimpleSign] {
+        let xml = logout_request_xml(binding, Some("_session-123"))?;
+        assert!(!xml.contains("NotOnOrAfter="));
+
+        let sp = sp()?;
+        let idp = idp()?;
+        let context = create_logout_request_with_id(
+            &sp.setting,
+            &sp.metadata,
+            &idp.metadata,
+            binding,
+            &user(Some("_session-123")),
+            None,
+            false,
+            Some("_raw-request"),
+        )?;
+        let xml = decode_logout_request(binding, &context.context)?;
+        assert!(!xml.contains("NotOnOrAfter="));
+    }
+    Ok(())
+}
+
+#[test]
+fn public_raw_logout_request_preserves_unrecognized_expiration_placeholder(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sp = sp()?;
+    sp.setting.logout_request_template = Some(LOGOUT_REQUEST_TEMPLATE.replace(
+        r#" Destination="{Destination}""#,
+        r#" NotOnOrAfter="{NotOnOrAfter}" Destination="{Destination}""#,
+    ));
+    let idp = idp()?;
+    let context = create_logout_request(
+        &sp.setting,
+        &sp.metadata,
+        &idp.metadata,
+        Binding::Post,
+        &user(Some("_session-123")),
+        None,
+        false,
+    )?;
+    let xml = decode_logout_request(Binding::Post, &context.context)?;
+
+    assert_eq!(
+        parse(&xml)?.root.attr("NotOnOrAfter"),
+        Some("{NotOnOrAfter}")
+    );
     Ok(())
 }
 

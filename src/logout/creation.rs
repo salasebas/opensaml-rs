@@ -5,11 +5,15 @@ use crate::metadata::Metadata;
 use crate::template::{
     apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
 };
-use crate::xml::{validate_logout_response_outbound, OutboundLogoutValidation};
+use crate::xml::{
+    validate_logout_request_outbound, validate_logout_response_outbound,
+    OutboundLogoutRequestExpectation, OutboundLogoutRequestValidation, OutboundLogoutValidation,
+};
 
 use super::bindings::unsigned_context;
 use super::rendering::{
     issuer_of, render_default_logout_request, render_default_logout_response, LogoutRequestSubject,
+    LogoutRequestTimeAttributes,
 };
 use super::signing::sign_logout;
 
@@ -71,7 +75,7 @@ pub fn create_logout_request_with_id(
         .unwrap_or_default();
     let issue_instant = now_iso8601();
     let subject = LogoutRequestSubject::from_user(user);
-    create_logout_request_for_subject_inner(LogoutRequestInput {
+    Ok(create_logout_request_for_subject_inner(LogoutRequestInput {
         init_setting,
         init_meta,
         target_meta,
@@ -82,7 +86,16 @@ pub fn create_logout_request_with_id(
         message_id,
         name_id_format: &name_id_format,
         issue_instant: &issue_instant,
-    })
+        not_on_or_after: None,
+        validation: LogoutRequestValidation::Compatibility,
+    })?
+    .context)
+}
+
+pub(crate) struct CreatedLogoutRequest {
+    pub(crate) context: BindingContext,
+    pub(crate) issue_instant: String,
+    pub(crate) not_on_or_after: Option<String>,
 }
 
 pub(crate) struct LogoutRequestSessionIndexes<'a> {
@@ -94,11 +107,20 @@ pub(crate) struct LogoutRequestSessionIndexes<'a> {
     pub(crate) session_indexes: &'a [String],
     pub(crate) relay_state: Option<&'a str>,
     pub(crate) want_signed: bool,
+    pub(crate) issue_instant: &'a str,
+    pub(crate) not_on_or_after: Option<&'a str>,
+    pub(crate) validation: LogoutRequestValidation,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LogoutRequestValidation {
+    Compatibility,
+    SessionAuthority,
 }
 
 pub(crate) fn create_logout_request_with_session_indexes(
     input: LogoutRequestSessionIndexes<'_>,
-) -> Result<BindingContext, SamlError> {
+) -> Result<CreatedLogoutRequest, SamlError> {
     let LogoutRequestSessionIndexes {
         init_setting,
         init_meta,
@@ -108,6 +130,9 @@ pub(crate) fn create_logout_request_with_session_indexes(
         session_indexes,
         relay_state,
         want_signed,
+        issue_instant,
+        not_on_or_after,
+        validation,
     } = input;
 
     let name_id_format = init_setting
@@ -115,7 +140,6 @@ pub(crate) fn create_logout_request_with_session_indexes(
         .first()
         .cloned()
         .unwrap_or_default();
-    let issue_instant = now_iso8601();
     let subject = LogoutRequestSubject {
         name_id,
         session_indexes: session_indexes.iter().map(String::as_str).collect(),
@@ -130,7 +154,9 @@ pub(crate) fn create_logout_request_with_session_indexes(
         want_signed,
         message_id: None,
         name_id_format: &name_id_format,
-        issue_instant: &issue_instant,
+        issue_instant,
+        not_on_or_after,
+        validation,
     })
 }
 
@@ -145,11 +171,13 @@ struct LogoutRequestInput<'a> {
     message_id: Option<&'a str>,
     name_id_format: &'a str,
     issue_instant: &'a str,
+    not_on_or_after: Option<&'a str>,
+    validation: LogoutRequestValidation,
 }
 
 fn create_logout_request_for_subject_inner(
     input: LogoutRequestInput<'_>,
-) -> Result<BindingContext, SamlError> {
+) -> Result<CreatedLogoutRequest, SamlError> {
     let LogoutRequestInput {
         init_setting,
         init_meta,
@@ -161,6 +189,8 @@ fn create_logout_request_for_subject_inner(
         message_id,
         name_id_format,
         issue_instant,
+        not_on_or_after,
+        validation,
     } = input;
 
     let destination = target_meta
@@ -170,6 +200,7 @@ fn create_logout_request_for_subject_inner(
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(generate_id);
+    let issuer = issuer_of(init_setting, init_meta);
     let xml = if let Some(template) = init_setting.logout_request_template.as_deref() {
         if subject.session_indexes.len() > 1 {
             return Err(SamlError::Unsupported(
@@ -183,35 +214,67 @@ fn create_logout_request_for_subject_inner(
             &init_setting.tag_prefix_protocol,
             &init_setting.tag_prefix_assertion,
         );
-        replace_tags_by_optional_value(
-            &template,
-            &[
-                ("ID", Some(id.clone())),
-                ("IssueInstant", Some(issue_instant.to_string())),
-                ("Destination", Some(destination.clone())),
-                ("Issuer", Some(issuer_of(init_setting, init_meta))),
-                ("NameIDFormat", Some(name_id_format.to_string())),
-                ("NameID", Some(subject.name_id.to_string())),
-                (
-                    "SessionIndex",
-                    subject
-                        .session_indexes
-                        .first()
-                        .map(|value| (*value).to_string()),
-                ),
-            ],
-        )
+        let mut replacements = vec![
+            ("ID", Some(id.clone())),
+            ("IssueInstant", Some(issue_instant.to_string())),
+            ("Destination", Some(destination.clone())),
+            ("Issuer", Some(issuer.clone())),
+            ("NameIDFormat", Some(name_id_format.to_string())),
+            ("NameID", Some(subject.name_id.to_string())),
+            (
+                "SessionIndex",
+                subject
+                    .session_indexes
+                    .first()
+                    .map(|value| (*value).to_string()),
+            ),
+        ];
+        if matches!(validation, LogoutRequestValidation::SessionAuthority) {
+            replacements.push(("NotOnOrAfter", not_on_or_after.map(str::to_string)));
+        }
+        replace_tags_by_optional_value(&template, &replacements)
     } else {
         render_default_logout_request(
             init_setting,
             init_meta,
             &id,
-            issue_instant,
+            LogoutRequestTimeAttributes {
+                issue_instant,
+                not_on_or_after,
+            },
             &destination,
             subject,
             name_id_format,
         )?
     };
+    let session_indexes = subject.session_indexes.as_slice();
+    let expectation = match validation {
+        LogoutRequestValidation::Compatibility => None,
+        LogoutRequestValidation::SessionAuthority => {
+            let expiration = not_on_or_after.ok_or_else(|| {
+                SamlError::Invalid(
+                    "Session Authority LogoutRequest is missing its generated expiration".into(),
+                )
+            })?;
+            Some(OutboundLogoutRequestExpectation {
+                id: &id,
+                issue_instant,
+                destination: &destination,
+                issuer: &issuer,
+                expiration,
+                name_id: subject.name_id,
+                name_id_format,
+                session_indexes,
+            })
+        }
+    };
+    if let Some(expectation) = expectation.as_ref() {
+        validate_logout_request_outbound(
+            &xml,
+            expectation,
+            OutboundLogoutRequestValidation::BeforeSigning,
+        )?;
+    }
     let (context, signature, sig_alg) = if want_signed {
         sign_logout(
             init_setting,
@@ -234,15 +297,31 @@ fn create_logout_request_for_subject_inner(
             None,
         )
     };
-    Ok(BindingContext {
-        id,
-        context,
-        relay_state: relay_state.map(str::to_string),
-        entity_endpoint: destination,
-        binding,
-        request_type: "SAMLRequest",
-        signature,
-        sig_alg,
+    if let Some(expectation) = expectation
+        .as_ref()
+        .filter(|_| want_signed && matches!(binding, Binding::Post))
+    {
+        let signed_xml = String::from_utf8(crate::binding::base64_decode(&context)?)
+            .map_err(|error| SamlError::Xml(error.to_string()))?;
+        validate_logout_request_outbound(
+            &signed_xml,
+            expectation,
+            OutboundLogoutRequestValidation::AfterPostSigning,
+        )?;
+    }
+    Ok(CreatedLogoutRequest {
+        context: BindingContext {
+            id,
+            context,
+            relay_state: relay_state.map(str::to_string),
+            entity_endpoint: destination,
+            binding,
+            request_type: "SAMLRequest",
+            signature,
+            sig_alg,
+        },
+        issue_instant: issue_instant.to_string(),
+        not_on_or_after: not_on_or_after.map(str::to_string),
     })
 }
 

@@ -363,6 +363,10 @@ pub struct TemplatePolicy {
     /// SP login request template.
     pub login_request_template: Option<String>,
     /// Logout request template.
+    ///
+    /// Typed Session Authority generation requires a complete unqualified
+    /// `NotOnOrAfter="{NotOnOrAfter}"` root attribute. Typed SP and raw
+    /// compatibility generation do not synthesize the attribute.
     pub logout_request_template: Option<String>,
     /// Logout response template.
     ///

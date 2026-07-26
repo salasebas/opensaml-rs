@@ -35,7 +35,7 @@ mod raw_mapping;
 mod slo;
 mod sp;
 
-use crate::config::{IdpConfig, SpConfig};
+use crate::config::{validated_idp_issuance_lifetime, IdpConfig, SpConfig};
 use crate::entity::EntitySetting;
 use crate::error::SamlError as Error;
 use crate::idp::IdentityProvider;
@@ -59,6 +59,7 @@ pub struct Sp {
 /// Marker role for an Identity Provider facade.
 pub struct Idp {
     identity_provider: IdentityProvider,
+    issuance_lifetime: time::Duration,
 }
 
 /// Error type returned by the typed SAML API.
@@ -84,12 +85,16 @@ impl Saml {
     /// # Errors
     ///
     /// Returns [`SamlError`] when the IdP config cannot be converted into raw
-    /// settings or metadata, including missing metadata, missing keys, or
-    /// unsupported crypto configuration.
+    /// settings or metadata, including an invalid issuance lifetime, missing
+    /// metadata, missing keys, or unsupported crypto configuration.
     pub fn idp(config: IdpConfig) -> Result<Saml<Idp>, SamlError> {
+        let issuance_lifetime = validated_idp_issuance_lifetime(config.issuance_lifetime)?;
         let setting = EntitySetting::try_from(&config)?;
         let raw_config = raw_idp_metadata_config(&config);
         let identity_provider = IdentityProvider::from_config(&raw_config, setting)?;
-        Ok(Saml(Idp { identity_provider }))
+        Ok(Saml(Idp {
+            identity_provider,
+            issuance_lifetime,
+        }))
     }
 }

@@ -7,8 +7,13 @@ use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, XmlVersion};
 
 mod outbound_logout;
+mod outbound_logout_request;
 
 pub(crate) use outbound_logout::{validate_logout_response_outbound, OutboundLogoutValidation};
+pub(crate) use outbound_logout_request::{
+    validate_logout_request_outbound, OutboundLogoutRequestExpectation,
+    OutboundLogoutRequestValidation,
+};
 
 const XML_ENCRYPTION_NS: &[u8] = b"http://www.w3.org/2001/04/xmlenc#";
 
