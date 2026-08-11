@@ -44,7 +44,7 @@ default = ["crypto-bergshamra"]
 crypto-bergshamra = ["dep:bergshamra"]
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 quick-xml = "0.41"
 thiserror = "2"
