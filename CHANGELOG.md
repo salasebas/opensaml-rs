@@ -9,6 +9,28 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.4.0](https://github.com/salasebas/opensaml-rs/compare/v0.3.0...v0.4.0) - 2026-08-11
+
+### Added
+
+- *(api)* [**breaking**] enforce standards-aware Response signature policy ([#81](https://github.com/salasebas/opensaml-rs/pull/81))
+
+### Fixed
+
+- *(slo)* [**breaking**] emit session authority logout expiration ([#101](https://github.com/salasebas/opensaml-rs/pull/101))
+- *(slo)* [**breaking**] validate LogoutRequest time bounds ([#73](https://github.com/salasebas/opensaml-rs/pull/73))
+- *(slo)* [**breaking**] reject non-conformant custom LogoutResponse templates ([#91](https://github.com/salasebas/opensaml-rs/pull/91))
+- *(sso)* [**breaking**] enforce UTC IssueInstant on responses and assertions ([#90](https://github.com/salasebas/opensaml-rs/pull/90))
+- *(slo)* [**breaking**] validate logout response issue instant ([#80](https://github.com/salasebas/opensaml-rs/pull/80))
+- *(protocol)* [**breaking**] validate AuthnRequest IssueInstant ([#74](https://github.com/salasebas/opensaml-rs/pull/74))
+
+### Other
+
+- *(deps)* bump the cargo-maintenance group across 1 directory with 4 updates ([#104](https://github.com/salasebas/opensaml-rs/pull/104))
+- *(slo)* add external HTTP-Redirect interoperability fixtures ([#99](https://github.com/salasebas/opensaml-rs/pull/99))
+- *(migrations)* start 0.3 to 0.4 guide ([#84](https://github.com/salasebas/opensaml-rs/pull/84))
+- *(deps)* bump uuid in the cargo-maintenance group ([#93](https://github.com/salasebas/opensaml-rs/pull/93))
+
 ### Fixed
 
 - *(slo)* [**breaking**] require UTC LogoutRequest `IssueInstant`, validate
