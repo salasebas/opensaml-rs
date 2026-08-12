@@ -9,9 +9,9 @@ Identity Provider toolkit.
 cargo install --locked cargo-nextest
 ```
 
-The default `crypto-bergshamra` feature requires Rust 1.85 because the
-`bergshamra` 0.6.3 dependency graph reaches `kryptering` 0.4.1 and
-`crypto-bigint` 0.7.5, which declares Rust 1.85.
+All published workspace packages require Rust 1.88. The default
+`crypto-bergshamra` feature uses `bergshamra` 0.8.0 with `kryptering` 0.5 and
+preserves the RustCrypto-backed defaults.
 
 ## Tests
 

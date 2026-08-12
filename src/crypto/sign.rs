@@ -16,6 +16,14 @@ fn crypto_err(err: impl std::fmt::Display) -> SamlError {
     SamlError::Crypto(err.to_string())
 }
 
+fn require_operation_key<T>(
+    key: Result<Option<T>, impl std::fmt::Display>,
+    missing: &'static str,
+) -> Result<T, SamlError> {
+    key.map_err(crypto_err)?
+        .ok_or_else(|| SamlError::MissingKey(missing.into()))
+}
+
 fn find_assertion(root: &Node) -> Option<&Node> {
     if root.local_name == "Assertion" {
         return Some(root);
@@ -161,9 +169,7 @@ pub fn construct_message_signature(
     key: &Key,
     sig_alg: &str,
 ) -> Result<String, SamlError> {
-    let signing = key
-        .to_signing_key()
-        .ok_or_else(|| SamlError::MissingKey("no signing key".into()))?;
+    let signing = require_operation_key(key.to_signing_key(), "no signing key")?;
     let alg = bergshamra::crypto::sign::from_uri(sig_alg).map_err(crypto_err)?;
     let signature = alg
         .sign(&signing, octet_string.as_bytes())
@@ -179,9 +185,7 @@ pub fn verify_message_signature(
     sig_alg: &str,
 ) -> Result<bool, SamlError> {
     let key = load_certificate(cert)?;
-    let verifying = key
-        .to_signing_key()
-        .ok_or_else(|| SamlError::MissingKey("no verification key".into()))?;
+    let verifying = require_operation_key(key.to_signing_key(), "no verification key")?;
     let alg = bergshamra::crypto::sign::from_uri(sig_alg).map_err(crypto_err)?;
     let signature = base64_decode(signature_b64)?;
     alg.verify(&verifying, octet_string.as_bytes(), &signature)
@@ -203,6 +207,26 @@ mod tests {
     const RESPONSE: &str = include_str!("../../tests/fixtures/response.xml");
 
     const AUTHN_REQUEST: &str = "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"_req1\" Version=\"2.0\" IssueInstant=\"2024-01-01T00:00:00Z\"><saml:Issuer>https://sp.example.com/metadata</saml:Issuer></samlp:AuthnRequest>";
+
+    #[test]
+    fn operation_key_maps_provider_failure_to_crypto() {
+        let result = require_operation_key::<()>(Err("provider import failed"), "missing");
+
+        assert!(matches!(
+            result,
+            Err(SamlError::Crypto(message)) if message == "provider import failed"
+        ));
+    }
+
+    #[test]
+    fn operation_key_preserves_missing_key_error() {
+        let result = require_operation_key::<()>(Ok::<Option<()>, &str>(None), "no signing key");
+
+        assert!(matches!(
+            result,
+            Err(SamlError::MissingKey(message)) if message == "no signing key"
+        ));
+    }
 
     #[test]
     fn sign_message_then_verify_round_trip() -> Result<(), Box<dyn std::error::Error>> {
