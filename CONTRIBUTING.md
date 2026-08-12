@@ -22,10 +22,15 @@ cargo fmt --all --check
 cargo clippy -p saml-rs --all-targets -- -D warnings
 cargo nextest run -p saml-rs
 cargo test -p saml-rs --doc
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --all-features --no-deps
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps
 cargo test -p saml-rs --doc --no-default-features
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps --no-default-features
 cargo check -p saml-rs --no-default-features
 ```
+
+Do not use `--all-features`. Document-crypto providers are mutually exclusive.
+AWS-LC, FIPS, and provider-specific rustdoc run in the Linux `provider-matrix`
+job in `.github/workflows/ci.yml`.
 
 `unwrap_used`, `expect_used`, and `panic` are package `warn` lints, so under
 `-D warnings` they fail the build, including tests. Prefer returning

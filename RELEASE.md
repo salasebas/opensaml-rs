@@ -48,7 +48,7 @@ name if the repository rename has not happened yet.
 
    ```bash
    cargo fmt --all --check
-   cargo clippy -p saml-rs --all-targets --all-features -- -D warnings
+   cargo clippy -p saml-rs --all-targets -- -D warnings
    cargo nextest run -p saml-rs
    cargo test -p saml-rs --doc
    cargo check -p saml-rs --no-default-features

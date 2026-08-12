@@ -55,6 +55,7 @@ jobs:
       - run: cargo check -p saml-rs --no-default-features
       - run: cargo test -p saml-rs --no-default-features --test no_default_features
       - run: cargo test -p saml-rs --doc --no-default-features
+      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps --no-default-features
 
   provider-matrix:
     name: Crypto provider (${{ matrix.provider }})
@@ -96,6 +97,7 @@ jobs:
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # zizmor: ignore[impostor-commit,ref-version-mismatch]
       - run: cargo check --workspace --locked --no-default-features --features "$CRYPTO_PROVIDER_FEATURES"
       - run: cargo clippy --workspace --locked --all-targets --no-default-features --features "$CRYPTO_PROVIDER_FEATURES" -- -D warnings
+      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps --no-default-features --features "$CRYPTO_PROVIDER_FEATURES"
       - name: Run provider security regressions
         run: >-
           cargo nextest run -p saml-rs --locked
