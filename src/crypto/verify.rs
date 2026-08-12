@@ -411,26 +411,29 @@ pub fn verify_signature_with_limits(
         have_key = true;
         let mut manager = KeysManager::new();
         manager.add_key(key);
-        // Trust model (audited against bergshamra 0.7.0):
+        // Trust model (audited against bergshamra 0.8.0):
         // - Metadata certificates are pinned key material, not a public CA
         //   chain. Verification uses only the metadata-pinned key; inline
         //   KeyInfo (X509Certificate/KeyValue) is never imported as key
         //   material.
-        // - Set `trusted_keys_only`, `strict_verification`, and
-        //   `hmac_min_out_len` explicitly instead of relying on upstream
-        //   defaults.
-        // - `strict_verification`: each signed reference must target the
+        // - Set `trusted_keys_only`, `strict_verification`,
+        //   `require_reference_digests`, and `hmac_min_out_len` explicitly
+        //   instead of relying on upstream defaults.
+        // - `strict_verification`: same-document references must target the
         //   document element, an ancestor, or a sibling of the Signature (XSW
-        //   guard).
-        // - `with_insecure(true)`: intentionally skips X.509 chain/path/time
-        //   validation only, which is irrelevant to our pinning model. It does
-        //   not skip signature, digest, reference, duplicate-ID, or XSW
-        //   enforcement.
+        //   guard); the surrounding preflight and result checks reject
+        //   external or unresolved SAML references.
+        // - `with_insecure(true)`: intentionally skips Bergshamra's X.509
+        //   certificate validation (chain/trust/time), which is irrelevant to
+        //   our leaf-key pinning model. `trusted_keys_only` still confines
+        //   verification to metadata-pinned keys, and this setting does not
+        //   skip signature, digest, reference, duplicate-ID, or XSW checks.
         // - Inbound SAML verification must never use
         //   `DsigContext::new_permissive()`.
         let ctx = DsigContext::new(manager)
             .with_trusted_keys_only(true)
             .with_strict_verification(true)
+            .with_require_reference_digests(true)
             .with_hmac_min_out_len(160)
             .with_insecure(true);
         match verify(&ctx, xml) {
@@ -538,6 +541,7 @@ pub(crate) fn verify_signatures_detailed_with_limits(
         let ctx = DsigContext::new(manager)
             .with_trusted_keys_only(true)
             .with_strict_verification(true)
+            .with_require_reference_digests(true)
             .with_hmac_min_out_len(160)
             .with_insecure(true);
         match verify_all(&ctx, xml) {
@@ -889,6 +893,7 @@ mod tests {
         let ctx = DsigContext::new(KeysManager::new());
         assert!(ctx.trusted_keys_only);
         assert!(ctx.strict_verification);
+        assert!(ctx.require_reference_digests);
         assert_eq!(ctx.hmac_min_out_len, 160);
         assert!(!ctx.insecure);
 
@@ -896,6 +901,7 @@ mod tests {
         assert!(insecure.insecure);
         assert!(insecure.trusted_keys_only);
         assert!(insecure.strict_verification);
+        assert!(insecure.require_reference_digests);
         assert_eq!(insecure.hmac_min_out_len, 160);
     }
 

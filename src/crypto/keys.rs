@@ -74,7 +74,8 @@ mod tests {
     #[test]
     fn loads_certificate_and_builds_key_info() -> Result<(), Box<dyn std::error::Error>> {
         let key = load_certificate(IDP_CERT)?;
-        assert!(key.rsa_public_key().is_some());
+        assert_eq!(key.algorithm_name(), "RSA");
+        assert!(key.to_spki_der().is_some());
 
         let key_info = build_key_info(SP_CERT);
         assert!(key_info.contains("<ds:X509Certificate>"));
