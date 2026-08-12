@@ -1231,7 +1231,7 @@ fn flow_conformance_encrypted_custom_signed_assertion_and_message(
     encrypted_signed(true, true)
 }
 
-#[cfg(not(feature = "crypto-fips"))]
+#[cfg(feature = "crypto-rustcrypto")]
 #[test]
 fn flow_conformance_encrypted_assertion_rejects_default_software_rsa(
 ) -> Result<(), Box<dyn std::error::Error>> {

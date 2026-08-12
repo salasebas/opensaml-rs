@@ -17,12 +17,16 @@ const SOFTWARE_RSA_DECRYPTION_DISABLED: &str = "XML-Enc RSA key-transport decryp
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
 pub struct AssertionDecryptionOptions {
-    /// Allow the bundled software RSA backend for XML-Enc key transport.
+    /// Allow the bundled RustCrypto software RSA backend for XML-Enc key transport.
     ///
-    /// This preserves compatibility with PEM private-key decryption, but it
-    /// reaches `RUSTSEC-2023-0071`-affected code when an attacker can observe
-    /// timing. Keep this `false` unless the caller has a deployment-specific
-    /// reason to accept that risk.
+    /// This flag is enforced only when `crypto-rustcrypto` is selected. That
+    /// backend reaches `RUSTSEC-2023-0071`-affected `rsa` code when an attacker
+    /// can observe timing. Keep this `false` unless the caller has a
+    /// deployment-specific reason to accept that risk.
+    ///
+    /// AWS-LC and FIPS builds use `aws-lc-rs` for RSA-OAEP and ignore this
+    /// flag. FIPS still rejects algorithms outside its approved set, including
+    /// the SHA-1 `RSA_OAEP_MGF1P` key transport.
     pub allow_insecure_software_rsa_key_transport_decryption: bool,
 }
 
@@ -32,6 +36,20 @@ fn crypto_err(err: impl std::fmt::Display) -> SamlError {
 
 pub(crate) fn software_rsa_decryption_disabled() -> SamlError {
     SamlError::Unsupported(SOFTWARE_RSA_DECRYPTION_DISABLED.into())
+}
+
+/// Reject RustCrypto software RSA key-transport decryption unless the caller
+/// opted in. AWS-LC and FIPS ignore the flag because they do not use the
+/// `RUSTSEC-2023-0071`-affected `rsa` crate.
+pub(crate) fn require_software_rsa_opt_in(
+    options: AssertionDecryptionOptions,
+) -> Result<(), SamlError> {
+    if cfg!(feature = "crypto-rustcrypto")
+        && !options.allow_insecure_software_rsa_key_transport_decryption
+    {
+        return Err(software_rsa_decryption_disabled());
+    }
+    Ok(())
 }
 
 fn child<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
@@ -103,9 +121,7 @@ pub fn decrypt_assertion_with_limits(
     limits: XmlLimits,
 ) -> Result<(String, String), SamlError> {
     super::provider::ensure_crypto_provider_initialized()?;
-    if !options.allow_insecure_software_rsa_key_transport_decryption {
-        return Err(software_rsa_decryption_disabled());
-    }
+    require_software_rsa_opt_in(options)?;
 
     let doc = dom::parse_with_limits(xml, limits)?;
     let encrypted = child(&doc.root, "EncryptedAssertion")
@@ -167,13 +183,8 @@ mod tests {
         assert!(!encrypted.contains("<saml:Assertion"));
 
         let key = load_private_key(SP_PRIVKEY, None)?;
-        let (response, assertion) = decrypt_assertion(
-            &encrypted,
-            &key,
-            AssertionDecryptionOptions {
-                allow_insecure_software_rsa_key_transport_decryption: true,
-            },
-        )?;
+        let (response, assertion) =
+            decrypt_assertion(&encrypted, &key, software_rsa_test_options())?;
         assert!(assertion.contains("Assertion"));
         assert!(assertion.contains("_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7"));
         assert!(response.contains("Assertion"));
@@ -181,6 +192,15 @@ mod tests {
         Ok(())
     }
 
+    fn software_rsa_test_options() -> AssertionDecryptionOptions {
+        AssertionDecryptionOptions {
+            allow_insecure_software_rsa_key_transport_decryption: cfg!(
+                feature = "crypto-rustcrypto"
+            ),
+        }
+    }
+
+    #[cfg(feature = "crypto-rustcrypto")]
     #[test]
     fn decrypt_rejects_software_rsa_by_default() -> Result<(), Box<dyn std::error::Error>> {
         let encrypted = encrypt_assertion(RESPONSE, SP_CERT, AES_256, RSA_OAEP_MGF1P, "saml")?;
@@ -190,6 +210,20 @@ mod tests {
             Err(SamlError::Unsupported(message))
                 if message.contains("RUSTSEC-2023-0071")
         ));
+        Ok(())
+    }
+
+    #[cfg(feature = "crypto-aws-lc")]
+    #[test]
+    fn aws_lc_decrypts_rsa_oaep_with_default_options() -> Result<(), Box<dyn std::error::Error>> {
+        let encrypted = encrypt_assertion(RESPONSE, SP_CERT, AES_256, RSA_OAEP_MGF1P, "saml")?;
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let (response, assertion) =
+            decrypt_assertion(&encrypted, &key, AssertionDecryptionOptions::default())?;
+        assert!(assertion.contains("Assertion"));
+        assert!(assertion.contains("_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7"));
+        assert!(response.contains("Assertion"));
+        assert!(!response.contains("EncryptedAssertion"));
         Ok(())
     }
 }

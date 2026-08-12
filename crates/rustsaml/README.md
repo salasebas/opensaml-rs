@@ -183,9 +183,11 @@ With `crypto-bergshamra` enabled:
 
 - XML signatures can be verified against metadata-declared keys.
 - Signed-reference placement checks help mitigate XML Signature Wrapping (XSW).
-- XML-Enc support is available, but software RSA key-transport decryption is
-  gated off by default and requires an explicit compatibility opt-in through
+- XML-Enc support is available. On the default RustCrypto provider, software
+  RSA key-transport decryption is gated off by default and requires an
+  explicit compatibility opt-in through
   [`XmlEncryptionPolicy`](https://docs.rs/rustsaml/latest/rustsaml/struct.XmlEncryptionPolicy.html).
+  AWS-LC decrypts RSA-OAEP with the default options.
 
 ## Security
 
@@ -206,9 +208,9 @@ Security-sensitive defaults and checks include:
 - Detached Redirect/SimpleSign signatures bound to the fields consumed by the
   flow parser.
 - HTTP-Redirect raw DEFLATE output limits.
-- XML-Enc software RSA key-transport decryption disabled by default because the
-  bundled RustCrypto RSA backend, reached through `bergshamra` / `kryptering`,
-  is affected by RUSTSEC-2023-0071.
+- XML-Enc software RSA key-transport decryption disabled by default on
+  RustCrypto because that backend, reached through `bergshamra` / `kryptering`,
+  is affected by RUSTSEC-2023-0071. AWS-LC and FIPS do not apply this gate.
 
 Schema validation is optional defense in depth via
 `context::set_schema_validator`.

@@ -9,6 +9,11 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+### Fixed
+
+- *(crypto)* apply the software RSA key-transport opt-in only to RustCrypto so
+  AWS-LC decrypts RSA-OAEP with default options
+
 ## [0.4.0](https://github.com/salasebas/opensaml-rs/compare/v0.3.0...v0.4.0) - 2026-08-11
 
 ### Added

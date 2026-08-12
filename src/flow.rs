@@ -116,10 +116,12 @@ pub struct FlowOptions<'a> {
     pub decrypt_key: Option<&'a str>,
     /// Passphrase for `decrypt_key`.
     pub decrypt_key_pass: Option<&'a str>,
-    /// Allow XML-Enc RSA key-transport decryption with the bundled software RSA backend.
+    /// Allow XML-Enc RSA key-transport decryption with the bundled RustCrypto
+    /// software RSA backend.
     ///
-    /// Disabled by default because that path reaches `RUSTSEC-2023-0071`-affected
-    /// code when an attacker can observe timing.
+    /// Enforced only for `crypto-rustcrypto`, where that path reaches
+    /// `RUSTSEC-2023-0071`-affected `rsa` code when an attacker can observe
+    /// timing. AWS-LC and FIPS ignore this flag.
     pub allow_insecure_software_rsa_key_transport_decryption: bool,
     /// Clock drift tolerance `(not_before_ms, not_on_or_after_ms)`.
     pub clock_drifts: (i64, i64),
@@ -553,7 +555,7 @@ fn verify_and_prepare(
 ) -> Result<PreparedMessage, SamlError> {
     use crate::crypto::{
         decrypt_assertion_with_limits,
-        enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
+        enc::{require_software_rsa_opt_in, AssertionDecryptionOptions},
         keys::load_private_key,
         verify::has_xml_signature_with_limits,
     };
@@ -569,13 +571,13 @@ fn verify_and_prepare(
         require_response_coverage(response_signature_required, evidence.response_covered)?;
     }
     let decrypt_required = opts.decrypt_key.is_some();
-    if decrypt_required && !opts.allow_insecure_software_rsa_key_transport_decryption {
-        return Err(software_rsa_decryption_disabled());
-    }
     let decrypt_options = AssertionDecryptionOptions {
         allow_insecure_software_rsa_key_transport_decryption: opts
             .allow_insecure_software_rsa_key_transport_decryption,
     };
+    if decrypt_required {
+        require_software_rsa_opt_in(decrypt_options)?;
+    }
     let load_key = || load_private_key(opts.decrypt_key.unwrap_or_default(), opts.decrypt_key_pass);
 
     if decrypt_required && evidence.verified && parser_type == ParserType::SamlResponse {
