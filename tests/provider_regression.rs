@@ -9,14 +9,16 @@ use saml_rs::constants::key_encryption_algorithm::RSA_OAEP_MGF1P;
 use saml_rs::constants::signature_algorithm::RSA_SHA256;
 use saml_rs::crypto::keys::load_private_key;
 use saml_rs::crypto::{
-    construct_message_signature, construct_saml_signature, decrypt_assertion, encrypt_assertion,
-    verify_message_signature, verify_signature, AssertionDecryptionOptions,
+    construct_message_signature, construct_saml_signature, encrypt_assertion,
+    verify_message_signature, verify_signature,
 };
+#[cfg(not(feature = "crypto-fips"))]
+use saml_rs::crypto::{decrypt_assertion, AssertionDecryptionOptions};
 #[cfg(feature = "crypto-fips")]
 use saml_rs::SamlError;
 use saml_rs::{initialize_crypto_provider, CryptoFipsStatus, CryptoProvider};
 
-const PRIVATE_KEY: &str = include_str!("fixtures/key/idp/nocrypt.pem");
+const PRIVATE_KEY: &str = include_str!("fixtures/key/idp/provider_matrix_privkey.pkcs8.pem");
 const CERTIFICATE: &str = include_str!("fixtures/key/idp/cert.cer");
 const RESPONSE: &str = include_str!("fixtures/response.xml");
 
