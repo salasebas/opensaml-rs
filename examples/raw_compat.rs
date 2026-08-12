@@ -4,7 +4,11 @@
 //! is for callers that need direct access to raw `ServiceProvider`,
 //! `IdentityProvider`, `HttpRequest`, or `FlowResult` values.
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use saml_rs::constants::signature_algorithm::RSA_SHA256;
     use saml_rs::raw::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
@@ -79,7 +83,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn main() {
-    eprintln!("Enable the `crypto-bergshamra` feature (on by default) to sign and verify.");
+    eprintln!("Enable a crypto provider feature (`crypto-bergshamra` is on by default).");
 }

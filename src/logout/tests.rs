@@ -340,7 +340,11 @@ fn unsigned_logout_request_rejects_unexpected_issuer_when_explicitly_allowed(
     Ok(())
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 mod signed_tests {
     use super::*;
     use crate::constants::signature_algorithm::RSA_SHA256;
@@ -844,10 +848,18 @@ fn default_logout_response_parsing_requires_signature() -> Result<(), Box<dyn st
     let result =
         parse_logout_response(&sp.setting, &idp.metadata, Binding::Post, &request, "_req1");
 
-    #[cfg(feature = "crypto-bergshamra")]
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     assert!(matches!(result, Err(SamlError::SignatureMissing)));
 
-    #[cfg(not(feature = "crypto-bergshamra"))]
+    #[cfg(not(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )))]
     assert!(matches!(result, Err(SamlError::Unsupported(_))));
 
     Ok(())

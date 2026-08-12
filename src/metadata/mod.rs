@@ -5,7 +5,11 @@ pub mod idp;
 pub mod sp;
 mod write;
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub use crate::crypto::MetadataSignatureVerification;
 pub use generate::{
     generate_idp_metadata, generate_sp_metadata, try_generate_idp_metadata, Endpoint,
@@ -202,14 +206,18 @@ impl Metadata {
     }
 
     /// Verify this metadata document's enveloped signature against trusted
-    /// certificate(s) (federation trust anchor). Requires `crypto-bergshamra`.
+    /// certificate(s) (federation trust anchor). Requires a crypto provider.
     ///
     /// # Errors
     ///
     /// Returns [`SamlError`] when XML parsing, certificate loading,
     /// cryptographic verification, or signed `<EntityDescriptor>` coverage
     /// checks fail.
-    #[cfg(feature = "crypto-bergshamra")]
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     pub fn verify_signature(&self, trusted_certificates: &[String]) -> Result<bool, SamlError> {
         self.verify_signature_with_limits(trusted_certificates, XmlLimits::default())
     }
@@ -221,7 +229,11 @@ impl Metadata {
     /// Returns [`SamlError`] when XML parsing, certificate loading,
     /// cryptographic verification, or signed `<EntityDescriptor>` coverage
     /// checks fail.
-    #[cfg(feature = "crypto-bergshamra")]
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     pub fn verify_signature_with_limits(
         &self,
         trusted_certificates: &[String],
@@ -242,7 +254,11 @@ impl Metadata {
     /// Returns [`SamlError`] when XML parsing, certificate loading,
     /// cryptographic verification, transform policy, or signed
     /// `<EntityDescriptor>` coverage checks fail.
-    #[cfg(feature = "crypto-bergshamra")]
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     pub fn verify_signature_detailed(
         &self,
         trusted_certificates: &[String],
@@ -258,7 +274,11 @@ impl Metadata {
     /// Returns [`SamlError`] when XML parsing, certificate loading,
     /// cryptographic verification, transform policy, or signed
     /// `<EntityDescriptor>` coverage checks fail.
-    #[cfg(feature = "crypto-bergshamra")]
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     pub fn verify_signature_detailed_with_limits(
         &self,
         trusted_certificates: &[String],

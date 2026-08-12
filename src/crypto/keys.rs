@@ -1,5 +1,5 @@
-//! Key, certificate and KeyInfo helpers backed by `bergshamra` keys
-//! (feature `crypto-bergshamra`).
+//! Key, certificate and KeyInfo helpers backed by the selected `bergshamra`
+//! provider.
 
 use crate::error::SamlError;
 use crate::util::normalize_cert_string;
@@ -13,6 +13,7 @@ fn crypto_err(err: impl std::fmt::Display) -> SamlError {
 
 /// Load a private key from PEM (PKCS#1/PKCS#8, optionally passphrase-protected).
 pub fn load_private_key(pem: &str, password: Option<&str>) -> Result<Key, SamlError> {
+    super::provider::ensure_crypto_provider_initialized()?;
     load_pem_auto(pem.as_bytes(), password).map_err(crypto_err)
 }
 
@@ -35,6 +36,7 @@ fn to_cert_pem(cert: &str) -> String {
 
 /// Load an X.509 certificate (PEM or bare base64) as a verification key.
 pub fn load_certificate(cert: &str) -> Result<Key, SamlError> {
+    super::provider::ensure_crypto_provider_initialized()?;
     load_x509_cert_pem(to_cert_pem(cert).as_bytes()).map_err(crypto_err)
 }
 

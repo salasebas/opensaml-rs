@@ -1,5 +1,5 @@
-//! Assertion encryption/decryption, delegating XML-Enc to `bergshamra`
-//! (feature `crypto-bergshamra`).
+//! Assertion encryption/decryption, delegating XML-Enc to the selected
+//! `bergshamra` provider.
 
 use super::keys::load_certificate;
 use super::xml_syntax::validate_crypto_xml_prefix;
@@ -50,6 +50,7 @@ pub fn encrypt_assertion(
     key_alg: &str,
     tag_prefix: &str,
 ) -> Result<String, SamlError> {
+    super::provider::ensure_crypto_provider_initialized()?;
     validate_crypto_xml_prefix("EncryptedAssertion", tag_prefix)?;
     let doc = dom::parse(xml)?;
     let assertion = child(&doc.root, "Assertion")
@@ -101,6 +102,7 @@ pub fn decrypt_assertion_with_limits(
     options: AssertionDecryptionOptions,
     limits: XmlLimits,
 ) -> Result<(String, String), SamlError> {
+    super::provider::ensure_crypto_provider_initialized()?;
     if !options.allow_insecure_software_rsa_key_transport_decryption {
         return Err(software_rsa_decryption_disabled());
     }

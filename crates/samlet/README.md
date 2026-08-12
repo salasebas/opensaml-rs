@@ -157,7 +157,13 @@ reaching for hidden lower-level module paths.
 ```toml
 [features]
 default = ["crypto-bergshamra"]
-crypto-bergshamra = ["dep:bergshamra"]
+crypto-bergshamra = ["saml-rs/crypto-bergshamra"]
+crypto-rustcrypto = ["saml-rs/crypto-rustcrypto"]
+crypto-aws-lc = ["saml-rs/crypto-aws-lc"]
+crypto-fips = ["saml-rs/crypto-fips"]
+crypto-legacy-algorithms = ["saml-rs/crypto-legacy-algorithms"]
+crypto-post-quantum = ["saml-rs/crypto-post-quantum"]
+crypto-pkcs11 = ["saml-rs/crypto-pkcs11"]
 ```
 
 With `default-features = false`, the protocol layer still builds messages,
@@ -165,8 +171,12 @@ parses metadata, and runs extraction. Operations that need signing,
 verification, or encryption return `SamlError::Unsupported`.
 
 All published workspace packages require Rust 1.88. The default
-`crypto-bergshamra` feature uses `bergshamra` 0.8.0 with `kryptering` 0.5 and
-preserves the RustCrypto-backed defaults.
+`crypto-bergshamra` compatibility feature preserves the complete RustCrypto
+configuration. With default features disabled, select exactly one of
+`crypto-rustcrypto`, `crypto-aws-lc`, or `crypto-fips`; the latter two initially
+support Linux x86_64/aarch64. Optional algorithm and PKCS#11 capabilities are
+forwarded separately. FIPS selection performs active AWS-LC attestation but is
+not a certification claim for the consuming binary or deployment.
 
 With `crypto-bergshamra` enabled:
 
@@ -209,7 +219,7 @@ cargo fmt --all --check
 cargo clippy -p samlet --all-targets -- -D warnings
 cargo nextest run -p samlet
 cargo test -p samlet --doc
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p samlet --lib --all-features --no-deps
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p samlet --lib --no-deps
 cargo test -p samlet --doc --no-default-features
 cargo check -p samlet --no-default-features
 ```

@@ -1,10 +1,18 @@
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 use crate::binding::base64_encode;
 use crate::constants::{Binding, ParserType};
 use crate::entity::EntitySetting;
 use crate::error::SamlError;
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub(super) fn sign_logout(
     setting: &EntitySetting,
     binding: Binding,
@@ -72,7 +80,11 @@ pub(super) fn sign_logout(
     }
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 pub(super) fn sign_logout(
     _setting: &EntitySetting,
     _binding: Binding,
@@ -82,6 +94,6 @@ pub(super) fn sign_logout(
     _parser_type: ParserType,
 ) -> Result<(String, Option<String>, Option<String>), SamlError> {
     Err(SamlError::Unsupported(
-        "signing logout messages requires feature crypto-bergshamra".into(),
+        "signing logout messages requires a crypto provider feature".into(),
     ))
 }

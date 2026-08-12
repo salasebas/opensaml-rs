@@ -1,5 +1,5 @@
-//! XML-DSig signing and detached message signatures, delegating crypto to
-//! `bergshamra` (feature `crypto-bergshamra`).
+//! XML-DSig signing and detached message signatures, delegating crypto to the
+//! selected `bergshamra` provider.
 
 use super::keys::load_certificate;
 use super::xml_syntax::validate_crypto_xml_prefix;
@@ -95,6 +95,7 @@ pub fn construct_saml_signature(
     transforms: &[String],
     config: Option<&SignatureConfig>,
 ) -> Result<String, SamlError> {
+    super::provider::ensure_crypto_provider_initialized()?;
     let doc = dom::parse(xml)?;
     let target = if sign_message {
         &doc.root
@@ -169,6 +170,7 @@ pub fn construct_message_signature(
     key: &Key,
     sig_alg: &str,
 ) -> Result<String, SamlError> {
+    super::provider::ensure_crypto_provider_initialized()?;
     let signing = require_operation_key(key.to_signing_key(), "no signing key")?;
     let alg = bergshamra::crypto::sign::from_uri(sig_alg).map_err(crypto_err)?;
     let signature = alg

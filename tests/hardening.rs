@@ -1,5 +1,9 @@
 //! Production-hardening tests: Audience restriction and InResponseTo / anti-replay.
-#![cfg(feature = "crypto-bergshamra")]
+#![cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 #![allow(clippy::unwrap_used)]
 
 use saml_rs::constants::signature_algorithm::RSA_SHA256;

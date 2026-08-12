@@ -1,5 +1,5 @@
 //! XML-DSig verification and anti-wrapping checks, delegating cryptography to
-//! `bergshamra` (feature `crypto-bergshamra`).
+//! the selected `bergshamra` provider.
 //!
 //! Security model:
 //! - `trusted_keys_only`: the signature is verified against the certificate(s)

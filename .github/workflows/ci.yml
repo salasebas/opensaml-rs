@@ -41,7 +41,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   feature-check:
     name: Feature check
@@ -55,6 +55,49 @@ jobs:
       - run: cargo check -p saml-rs --no-default-features
       - run: cargo test -p saml-rs --no-default-features --test no_default_features
       - run: cargo test -p saml-rs --doc --no-default-features
+
+  provider-matrix:
+    name: Crypto provider (${{ matrix.provider }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: rustcrypto
+            features: crypto-rustcrypto,crypto-legacy-algorithms,crypto-post-quantum,crypto-pkcs11
+          - provider: aws-lc
+            features: crypto-aws-lc
+          - provider: fips
+            features: crypto-fips
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
+      - name: Install AWS-LC native build dependencies
+        if: matrix.provider != 'rustcrypto'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential cmake clang libclang-dev perl pkg-config
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: matrix.provider == 'fips'
+        with:
+          go-version: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
+      - run: cargo check --workspace --locked --no-default-features --features "${{ matrix.features }}"
+      - run: cargo clippy --workspace --locked --all-targets --no-default-features --features "${{ matrix.features }}" -- -D warnings
+      - name: Run provider security regressions
+        run: >-
+          cargo nextest run -p saml-rs --locked
+          --no-default-features --features "${{ matrix.features }}"
+          --test provider_regression
+          --test xsw
+          --test metadata_signature
+          --test metadata_trust
+          --test external_slo_redirect
 
   msrv:
     name: MSRV (Rust 1.88)
@@ -106,7 +149,7 @@ jobs:
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
       - run: cargo nextest run -p ${{ matrix.package }}
       - run: cargo test -p ${{ matrix.package }} --doc
-      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p ${{ matrix.package }} --lib --all-features --no-deps
+      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p ${{ matrix.package }} --lib --no-deps
       - run: cargo check -p ${{ matrix.package }} --examples
       - run: cargo run -p ${{ matrix.package }} --example sso
       - run: cargo run -p ${{ matrix.package }} --example slo
@@ -132,7 +175,7 @@ jobs:
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
       - run: cargo nextest run -p ${{ matrix.package }}
       - run: cargo test -p ${{ matrix.package }} --doc
-      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p ${{ matrix.package }} --lib --all-features --no-deps
+      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p ${{ matrix.package }} --lib --no-deps
       - run: cargo check -p ${{ matrix.package }} --all-targets --no-default-features
       - run: cargo nextest run -p ${{ matrix.package }} --no-default-features
       - run: cargo test -p ${{ matrix.package }} --doc --no-default-features
@@ -144,6 +187,7 @@ jobs:
       - fmt
       - clippy
       - feature-check
+      - provider-matrix
       - msrv
       - semver
       - test
