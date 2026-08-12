@@ -173,10 +173,11 @@ verification, or encryption return `OpenSamlError::Unsupported`.
 All published workspace packages require Rust 1.88. The default
 `crypto-bergshamra` compatibility feature preserves the complete RustCrypto
 configuration. With default features disabled, select exactly one of
-`crypto-rustcrypto`, `crypto-aws-lc`, or `crypto-fips`; the latter two initially
-support Linux x86_64/aarch64. Optional algorithm and PKCS#11 capabilities are
-forwarded separately. FIPS selection performs active AWS-LC attestation but is
-not a certification claim for the consuming binary or deployment.
+`crypto-rustcrypto`, `crypto-aws-lc`, or `crypto-fips`. Bergshamra supports the
+latter two on Linux x86_64/aarch64, while this repository's provider matrix
+currently validates Linux x86_64. Optional algorithm and PKCS#11 capabilities
+are forwarded separately. FIPS selection performs active AWS-LC attestation
+but is not a certification claim for the consuming binary or deployment.
 
 With `crypto-bergshamra` enabled:
 

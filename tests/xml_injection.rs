@@ -11,10 +11,9 @@ use saml_rs::constants::{
     data_encryption_algorithm::AES_256, key_encryption_algorithm::RSA_OAEP_MGF1P,
 };
 use saml_rs::crypto::keys::load_private_key;
-use saml_rs::crypto::{
-    construct_saml_signature, decrypt_assertion, encrypt_assertion, verify_signature,
-    AssertionDecryptionOptions,
-};
+use saml_rs::crypto::{construct_saml_signature, encrypt_assertion, verify_signature};
+#[cfg(not(feature = "crypto-fips"))]
+use saml_rs::crypto::{decrypt_assertion, AssertionDecryptionOptions};
 use saml_rs::entity::{EntitySetting, SignatureAction, SignatureConfig, User};
 use saml_rs::flow::HttpRequest;
 use saml_rs::idp::LoginResponseOptions;
@@ -189,6 +188,7 @@ fn crypto_signature_escapes_reference_uri_id() -> TestResult {
     Ok(())
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn crypto_encrypt_assertion_prefix_still_round_trips() -> TestResult {
     let encrypted = encrypt_assertion(RESPONSE, CERT, AES_256, RSA_OAEP_MGF1P, "saml2")?;

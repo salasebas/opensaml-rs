@@ -6,6 +6,8 @@
 
 use saml_rs::constants::data_encryption_algorithm::AES_256;
 use saml_rs::constants::key_encryption_algorithm::RSA_OAEP_MGF1P;
+#[cfg(feature = "crypto-fips")]
+use saml_rs::constants::signature_algorithm::RSA_SHA1;
 use saml_rs::constants::signature_algorithm::RSA_SHA256;
 use saml_rs::crypto::keys::load_private_key;
 use saml_rs::crypto::{
@@ -87,6 +89,18 @@ fn fips_provider_rejects_sha1_rsa_oaep_key_transport() -> Result<(), Box<dyn std
 
     assert!(matches!(
         encrypt_assertion(RESPONSE, CERTIFICATE, AES_256, RSA_OAEP_MGF1P, "saml",),
+        Err(SamlError::Crypto(_))
+    ));
+    Ok(())
+}
+
+#[cfg(feature = "crypto-fips")]
+#[test]
+fn fips_provider_rejects_rsa_sha1_signatures() -> Result<(), Box<dyn std::error::Error>> {
+    let key = load_private_key(PRIVATE_KEY, None)?;
+
+    assert!(matches!(
+        construct_message_signature("SAMLRequest=provider-matrix", &key, RSA_SHA1),
         Err(SamlError::Crypto(_))
     ));
     Ok(())

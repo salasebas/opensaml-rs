@@ -398,15 +398,21 @@ pub fn verify_signature_with_limits(
         }
     }
 
+    super::provider::ensure_crypto_provider_initialized()?;
+
     // Try each metadata certificate individually (rolling-cert support): the
     // signature verifies if any one of the declared keys matches.
     let mut have_key = false;
+    let mut key_load_error = None;
     let mut tried_invalid = false;
     let mut last_err: Option<SamlError> = None;
     for cert in metadata_certs {
         let key = match load_certificate(cert) {
             Ok(key) => key,
-            Err(_) => continue,
+            Err(error) => {
+                key_load_error.get_or_insert(error);
+                continue;
+            }
         };
         have_key = true;
         let mut manager = KeysManager::new();
@@ -450,7 +456,10 @@ pub fn verify_signature_with_limits(
         }
     }
     if !have_key {
-        return Err(SamlError::NoTrustedCertificate);
+        return Err(key_load_error.unwrap_or(SamlError::NoTrustedCertificate));
+    }
+    if let Some(error) = key_load_error {
+        return Err(error);
     }
     // A clean "invalid" (key mismatch / tampered) is a non-error false; only
     // surface a structural error when no certificate produced a verdict.
@@ -525,7 +534,10 @@ pub(crate) fn verify_signatures_detailed_with_limits(
         }
     }
 
+    super::provider::ensure_crypto_provider_initialized()?;
+
     let mut have_key = false;
+    let mut key_load_error = None;
     let mut tried_invalid = false;
     let mut last_err: Option<SamlError> = None;
     let mut first_signature_verified = false;
@@ -533,7 +545,10 @@ pub(crate) fn verify_signatures_detailed_with_limits(
     for cert in metadata_certs {
         let key = match load_certificate(cert) {
             Ok(key) => key,
-            Err(_) => continue,
+            Err(error) => {
+                key_load_error.get_or_insert(error);
+                continue;
+            }
         };
         have_key = true;
         let mut manager = KeysManager::new();
@@ -563,7 +578,7 @@ pub(crate) fn verify_signatures_detailed_with_limits(
         }
     }
     if !have_key {
-        return Err(SamlError::NoTrustedCertificate);
+        return Err(key_load_error.unwrap_or(SamlError::NoTrustedCertificate));
     }
     if first_signature_verified && !targets.is_empty() {
         let assertion_directly_covered = assertion_is_directly_covered(root, &targets);
@@ -575,6 +590,9 @@ pub(crate) fn verify_signatures_detailed_with_limits(
             assertion_directly_covered,
             response_covered,
         });
+    }
+    if let Some(error) = key_load_error {
+        return Err(error);
     }
     match last_err {
         Some(error) if !tried_invalid => Err(error),

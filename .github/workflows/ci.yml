@@ -101,10 +101,17 @@ jobs:
           cargo nextest run -p saml-rs --locked
           --no-default-features --features "$CRYPTO_PROVIDER_FEATURES"
           --test provider_regression
+          --test index_conformance
+          --test typed_sso
           --test xsw
           --test metadata_signature
           --test metadata_trust
           --test external_slo_redirect
+      - name: Run provider error propagation regression
+        run: >-
+          cargo test -p saml-rs --locked
+          --no-default-features --features "$CRYPTO_PROVIDER_FEATURES"
+          --lib detached_verification_preserves_provider_error
 
   msrv:
     name: MSRV (Rust 1.88)

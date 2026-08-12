@@ -216,7 +216,9 @@ those Bergshamra capabilities without selecting a provider. The default
 `crypto-bergshamra` alias enables them with RustCrypto to preserve existing
 behavior; direct provider selection starts with only that provider's baseline.
 
-AWS-LC and FIPS initially support Linux x86_64/aarch64. `saml-rs` initializes
+Bergshamra supports AWS-LC and FIPS on Linux x86_64/aarch64. The `saml-rs`
+provider matrix currently validates Linux x86_64; Linux aarch64 is an upstream
+capability that this repository does not exercise in CI. `saml-rs` initializes
 Bergshamra before its first crypto operation. Applications can fail early and
 inspect the result during startup:
 
@@ -224,9 +226,7 @@ inspect the result during startup:
 use saml_rs::{initialize_crypto_provider, CryptoFipsStatus};
 
 let provider = initialize_crypto_provider()?;
-if cfg!(feature = "crypto-fips") {
-    assert_eq!(provider.fips_status(), CryptoFipsStatus::Active);
-}
+assert_ne!(provider.fips_status(), CryptoFipsStatus::Uninitialized);
 # Ok::<(), saml_rs::SamlError>(())
 ```
 

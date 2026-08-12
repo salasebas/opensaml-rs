@@ -3,18 +3,16 @@ use saml_rs::constants::{Binding, ParserType};
 use saml_rs::flow::{flow, FlowOptions, FlowResult, HttpRequest};
 use saml_rs::{SamlError, SsoSession};
 
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 use saml_rs::constants::{
     data_encryption_algorithm::AES_256, key_encryption_algorithm::RSA_OAEP_MGF1P,
 };
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 use saml_rs::crypto::encrypt_assertion;
 
@@ -41,16 +39,14 @@ const LOGOUT_REQUEST_MALFORMED_ISSUE_INSTANT_CONTEXT: &str =
     "LogoutRequest IssueInstant must use the SAML-conformant UTC xs:dateTime form ending in Z";
 const LOGOUT_REQUEST_MALFORMED_NOT_ON_OR_AFTER_CONTEXT: &str =
     "LogoutRequest NotOnOrAfter must use the SAML-conformant UTC xs:dateTime form ending in Z";
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 const PRIVATE_KEY: &str = include_str!("fixtures/key/sp_privkey.pem");
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 const CERTIFICATE: &str = include_str!("fixtures/key/sp_signing_cert.cer");
 
@@ -196,10 +192,9 @@ fn response_xml_with_issue_instants(
     )
 }
 
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 fn expect_decrypted_assertion_profile_rejection_with_context(
     xml: &str,
@@ -881,10 +876,9 @@ fn all_parser_roots_accept_version_2() -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 #[test]
 fn decrypted_assertion_is_revalidated_before_signature_selection(
@@ -897,10 +891,9 @@ fn decrypted_assertion_is_revalidated_before_signature_selection(
     expect_decrypted_assertion_profile_rejection_with_context(&wrong_version, "Version")
 }
 
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 #[test]
 fn decrypted_assertion_issue_instant_is_revalidated_before_signature_selection(
@@ -916,10 +909,9 @@ fn decrypted_assertion_issue_instant_is_revalidated_before_signature_selection(
     )
 }
 
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 #[test]
 fn decrypted_assertion_qualified_issue_instant_is_revalidated_before_signature_selection(
@@ -942,10 +934,9 @@ fn decrypted_assertion_qualified_issue_instant_is_revalidated_before_signature_s
     )
 }
 
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
+#[cfg(all(
+    not(feature = "crypto-fips"),
+    any(feature = "crypto-rustcrypto", feature = "crypto-aws-lc")
 ))]
 #[test]
 fn decrypted_assertion_honors_xml_depth_limit_before_profile(

@@ -327,7 +327,9 @@ mod crypto {
     use super::*;
     use saml_rs::constants::data_encryption_algorithm::AES_256;
     use saml_rs::constants::key_encryption_algorithm::RSA_OAEP_MGF1P;
-    use saml_rs::constants::signature_algorithm::{RSA_SHA1, RSA_SHA512};
+    #[cfg(not(feature = "crypto-fips"))]
+    use saml_rs::constants::signature_algorithm::RSA_SHA1;
+    use saml_rs::constants::signature_algorithm::RSA_SHA512;
     use saml_rs::crypto::keys::load_private_key;
     use saml_rs::crypto::{
         construct_message_signature, construct_saml_signature, encrypt_assertion,
@@ -338,15 +340,19 @@ mod crypto {
     const SP_PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
     const SIGN_CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
     const REQUEST: &str = include_str!("fixtures/misc/request.xml");
+    #[cfg(not(feature = "crypto-fips"))]
     const RESPONSE_SIGNED: &str = include_str!("fixtures/misc/response_signed.xml");
+    #[cfg(not(feature = "crypto-fips"))]
     const SIGNED_SHA1: &str = include_str!("fixtures/misc/signed_request_sha1.xml");
     const SIGNED_SHA256: &str = include_str!("fixtures/misc/signed_request_sha256.xml");
     const SIGNED_SHA512: &str = include_str!("fixtures/misc/signed_request_sha512.xml");
+    #[cfg(not(feature = "crypto-fips"))]
     const FALSE_SHA1: &str = include_str!("fixtures/misc/false_signed_request_sha1.xml");
     const FALSE_SHA256: &str = include_str!("fixtures/misc/false_signed_request_sha256.xml");
     const FALSE_SHA512: &str = include_str!("fixtures/misc/false_signed_request_sha512.xml");
     const INVALID_RESPONSE: &str = include_str!("fixtures/misc/invalid_response.xml");
 
+    #[cfg(not(feature = "crypto-fips"))]
     const OCTET_SHA1: &str = "SAMLRequest=fVNdj9MwEHxH4j9Yfm/i5PpBrLaotEJUOrioKTzwgoy9oZZiO9ibu/LvcXLtKUhHnyzZM7Mzu+tlEKZp+abDkz3A7w4CkrNpbODDw4p23nIngg7cCgOBo+TV5vM9zxPGW+/QSdfQEeU2Q4QAHrWzlOx3K/rjHSsWbFEzdsfETDE2z5ksVKHqYlHP84WooVBS5lNKvoEPkbeiUYaS0rtHrcB/iRVWtCoJRuNRM4QO9jagsBiRLJtO2GKSzY/5HZ/lfDr7TskuIrUVOIidEFueplq1CZyFaRtIpDNpVT1U4B+1hKQ9tUO5IegHbZW2v25n/PkMCvzT8VhOyofqSMnmmnvrbOgM+Iv818P9i4nwrwcFxmVp1IJzb+K9kIGu374hZNm3mQ9R/fp1rgEUSqBYpmPsC7nlfd/2u9I1Wv4hH503Av8fKkuy4UarST1AORihm41SHkKI4ZrGPW09CIyzQN8BTce1LmsFaliy2ACEM5KtM63wOvRTiNYlPoe7xhtjt01cmwPU65ubJbnscfG6jMeT8+qS/lWpwV96w2BEXN/Hn2P9Fw==&SigAlg=http%3A%2F%2Fwww.w3.org%2F2000%2F09%2Fxmldsig%23rsa-sha1";
     const OCTET_SHA256: &str = "SAMLRequest=fZJbTwIxEIX/yqbvy3Yv3BogQYiRBIWw6INvY3eAJt0WO10v/966YIKJkPRpek7nfDMdEdT6IKaN35s1vjVIPvqstSHRXoxZ44ywQIqEgRpJeCnK6f1SZB0uDs56K61mZ5brDiBC55U1LFrMx2wrB8P+IB/GeQHbuOgVwxigB3EqewXfDjDPZJ9Fz+goWMYsvBB8RA0uDHkwPpR42o1THvNswzMRTtHtpEX2wqJ5QFEGfOvce38QSaKtBL235EXOeZoQ2aRUZqexVDvzaEp070pikveG3W5otTrx3ShTBdl1tNejiMTdZrOKV4/lhkXTX9yZNdTU6E4dntbLfzIVnGdtJpDEJqOfaYqW1k0ua2v0UIGHUXKuHx3X+hBSLuYrq5X8im6tq8Ffhkg7aVtRVbxtpQJrUHpaVQ6JAozW9mPmEDyGzYEmZMnk2PbvB5p8Aw==&SigAlg=http%3A%2F%2Fwww.w3.org%2F2001%2F04%2Fxmldsig-more%23rsa-sha256";
     const OCTET_SHA512: &str = "SAMLRequest=fZJfT8IwFMW/ytL3sY5tCA0jQYiRBIWw6INvY3eAJt0WO10v/966YIKJkPRpek7nfDMdEdT6IKaN35s1vjVIPvqstSHRXoxZ44ywQIqEgRpJeCnK6f1SZB0uDs56K61mZ5brDiBC55U1LFrMx2wrB8P+IB/GeQHbuOgVwxigB3EqewXfDjDPZJ9Fz+goWMYsvBB8RA0uDHkwPpR42o1THvNswzMRTtHtpEX2wqJ5QFEGfOvce38QSaKtBL235EXOeZoQ2aRUZqexVDvzaEp070pikveG3W5otTrx3ShTBdl1tNejiMTdZrOKV4/lhkXTX9yZNdTU6E4dntbLfzIVnGdtJpDEJqOfaYqW1k0ua2v0UIGHUXKuHx3X+hBSLuYrq5X8im6tq8Ffhkg7aVtRVbxtpQJrUHpaVQ6JAozW9mPmEDyGzYEmZMnk2PbvB5p8Aw==&SigAlg=http%3A%2F%2Fwww.w3.org%2F2001%2F04%2Fxmldsig-more%23rsa-sha512";
@@ -379,6 +385,7 @@ mod crypto {
         assert!(verify_message_signature(octet, &sig, SIGN_CERT, alg)?);
         Ok(())
     }
+    #[cfg(not(feature = "crypto-fips"))]
     #[test]
     fn sign_message_rsa_sha1() -> Result<(), Box<dyn std::error::Error>> {
         sign_and_verify(OCTET_SHA1, RSA_SHA1)
@@ -393,6 +400,7 @@ mod crypto {
     }
 
     // 12-14: verify binary message signature.
+    #[cfg(not(feature = "crypto-fips"))]
     #[test]
     fn verify_binary_message_rsa_sha1() -> Result<(), Box<dyn std::error::Error>> {
         sign_and_verify(OCTET_SHA1, RSA_SHA1)
@@ -407,6 +415,7 @@ mod crypto {
     }
 
     // 15-17: verify stringified message signature.
+    #[cfg(not(feature = "crypto-fips"))]
     #[test]
     fn verify_stringified_message_rsa_sha1() -> Result<(), Box<dyn std::error::Error>> {
         sign_and_verify(OCTET_SHA1, RSA_SHA1)
@@ -427,6 +436,7 @@ mod crypto {
         assert!(verify_signature(&signed, &[SIGN_CERT.to_string()])?.0);
         Ok(())
     }
+    #[cfg(not(feature = "crypto-fips"))]
     #[test]
     fn construct_signature_rsa_sha1() -> Result<(), Box<dyn std::error::Error>> {
         construct_and_verify(RSA_SHA1)
@@ -441,11 +451,13 @@ mod crypto {
     }
 
     // 21-26: verify a signed XML against metadata + integrity (tampered) checks.
+    #[cfg(not(feature = "crypto-fips"))]
     #[test]
     fn verify_xml_signature_sha1_with_metadata() -> Result<(), Box<dyn std::error::Error>> {
         assert!(verify_signature(RESPONSE_SIGNED, &idp_signing())?.0);
         Ok(())
     }
+    #[cfg(not(feature = "crypto-fips"))]
     #[test]
     fn integrity_check_request_sha1() -> Result<(), Box<dyn std::error::Error>> {
         assert!(!verify_signature(FALSE_SHA1, &sp_signing())?.0);
@@ -483,6 +495,7 @@ mod crypto {
     }
 
     // 28-30: verify with a bare certificate (samlify `keyFile`).
+    #[cfg(not(feature = "crypto-fips"))]
     #[test]
     fn reject_issuer_only_request_sha1_with_cert() -> Result<(), Box<dyn std::error::Error>> {
         assert_content_not_covered(verify_signature(SIGNED_SHA1, &[SP_CERT.to_string()]))
@@ -497,6 +510,7 @@ mod crypto {
     }
 
     // 31-35: encrypt assertion + error cases.
+    #[cfg(not(feature = "crypto-fips"))]
     #[test]
     fn encrypt_assertion_passes() -> Result<(), Box<dyn std::error::Error>> {
         encrypt_assertion(RESPONSE_SIGNED, SP_CERT, AES_256, RSA_OAEP_MGF1P, "saml")?;

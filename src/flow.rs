@@ -720,14 +720,21 @@ fn verify_detached(
         sig_alg,
         octet,
     )?;
-    let verified = opts.signing_certs.iter().any(|cert| {
-        crate::crypto::verify_message_signature(octet, signature, cert, sig_alg).unwrap_or(false)
-    });
-    if verified {
-        Ok(sig_alg.to_string())
-    } else {
-        Err(detached_signature_verification())
+    crate::crypto::initialize_crypto_provider()?;
+
+    let mut provider_error = None;
+    for cert in opts.signing_certs {
+        match crate::crypto::verify_message_signature(octet, signature, cert, sig_alg) {
+            Ok(true) => return Ok(sig_alg.to_string()),
+            Ok(false) => {}
+            Err(error @ SamlError::Crypto(_)) => {
+                provider_error.get_or_insert(error);
+            }
+            Err(_) => {}
+        }
     }
+
+    provider_error.map_or_else(|| Err(detached_signature_verification()), Err)
 }
 
 #[cfg(not(any(
@@ -1111,4 +1118,50 @@ pub(crate) fn flow_with_expected_recipient(
         assertion_signature,
         response_signature,
     )
+}
+
+#[cfg(all(
+    test,
+    any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )
+))]
+mod tests {
+    use super::*;
+    use crate::constants::signature_algorithm::RSA_SHA256;
+
+    #[test]
+    fn detached_verification_preserves_provider_error() {
+        let certificates = vec!["not a certificate".to_string()];
+        let options = FlowOptions {
+            signing_certs: &certificates,
+            ..Default::default()
+        };
+        let octet = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("SAMLRequest", "payload")
+            .append_pair("SigAlg", RSA_SHA256)
+            .finish();
+        let request = HttpRequest {
+            query: vec![
+                ("SAMLRequest".into(), "payload".into()),
+                ("SigAlg".into(), RSA_SHA256.into()),
+                ("Signature".into(), "AA==".into()),
+            ],
+            octet_string: Some(octet),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            verify_detached(
+                Binding::Redirect,
+                ParserType::SamlRequest,
+                &request,
+                &options,
+                "<samlp:AuthnRequest/>",
+            ),
+            Err(SamlError::Crypto(_))
+        ));
+    }
 }

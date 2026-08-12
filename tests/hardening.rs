@@ -584,6 +584,7 @@ fn hardening_subject_confirmation_request_id_must_match() -> Result<(), Box<dyn 
     )
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn hardening_sign_then_encrypt_message_auto_resolves() -> Result<(), Box<dyn std::error::Error>> {
     // Request sign-then-encrypt (encrypt_then_sign=false) with an encrypted,

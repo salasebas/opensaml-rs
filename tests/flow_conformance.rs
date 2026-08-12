@@ -1119,6 +1119,7 @@ fn flow_conformance_send_custom_assertion_and_message_simplesign(
 
 // ----- encrypted assertion variants (43-47, 54) -----
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_nonsigned_assertion() -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_setting = signing();
@@ -1140,6 +1141,7 @@ fn flow_conformance_encrypted_nonsigned_assertion() -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 fn encrypted_signed(custom: bool, with_message: bool) -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_setting = signing();
     idp_setting.is_assertion_encrypted = true;
@@ -1178,15 +1180,18 @@ fn encrypted_signed(custom: bool, with_message: bool) -> Result<(), Box<dyn std:
     Ok(())
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_signed_assertion() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(false, false)
 }
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_custom_signed_assertion() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(true, false)
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_required_response_signature_rejects_encrypted_assertion_only_post(
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1213,17 +1218,20 @@ fn flow_conformance_required_response_signature_rejects_encrypted_assertion_only
         other => Err(format!("expected SignatureMissing, got {other:?}").into()),
     }
 }
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_signed_assertion_and_message(
 ) -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(false, true)
 }
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_custom_signed_assertion_and_message(
 ) -> Result<(), Box<dyn std::error::Error>> {
     encrypted_signed(true, true)
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_assertion_rejects_default_software_rsa(
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1251,6 +1259,7 @@ fn flow_conformance_encrypted_assertion_rejects_default_software_rsa(
     Ok(())
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_nonsigned_assertion_encrypt_then_sign(
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1657,6 +1666,7 @@ fn flow_conformance_signed_logout_response_wrong_request_id_rejected(
 
 // ----- customize encrypted-assertion prefix (55-56) -----
 
+#[cfg(not(feature = "crypto-fips"))]
 fn encrypted_prefix(prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut idp_setting = signing();
     idp_setting.is_assertion_encrypted = true;
@@ -1674,10 +1684,12 @@ fn encrypted_prefix(prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_prefix_saml2() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_prefix("saml2")
 }
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn flow_conformance_encrypted_prefix_default_saml() -> Result<(), Box<dyn std::error::Error>> {
     encrypted_prefix("saml")

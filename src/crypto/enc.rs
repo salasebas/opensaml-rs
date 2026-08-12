@@ -148,7 +148,7 @@ fn strip_xml_declaration(xml: &str) -> &str {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "crypto-fips")))]
 mod tests {
     use super::*;
     use crate::constants::data_encryption_algorithm::AES_256;
