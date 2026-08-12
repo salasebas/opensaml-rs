@@ -235,8 +235,9 @@ fail-closed and map to `SamlError::Crypto`. `crypto-fips` means that the selecte
 AWS-LC provider actively attested FIPS mode; it does not claim that a consuming
 binary or deployment is FIPS certified. FIPS policy rejects algorithms outside
 its approved set, including the currently exposed SHA-1-based
-`RSA_OAEP_MGF1P` XML-Enc key transport. AWS-LC also has a narrower capability
-set than RustCrypto; consult Bergshamra's
+`RSA_OAEP_MGF1P` XML-Enc key transport. Bergshamra's AWS-LC providers also
+reject the `RSA_SHA1` signature mapping and have a narrower capability set than
+RustCrypto; consult Bergshamra's
 [provider-capability documentation](https://github.com/kushaldas/bergshamra/blob/v0.8.0/docs/provider-capabilities.md)
 before enabling custom algorithm URIs.
 

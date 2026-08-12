@@ -6,7 +6,7 @@
 
 use saml_rs::constants::data_encryption_algorithm::AES_256;
 use saml_rs::constants::key_encryption_algorithm::RSA_OAEP_MGF1P;
-#[cfg(feature = "crypto-fips")]
+#[cfg(any(feature = "crypto-aws-lc", feature = "crypto-fips"))]
 use saml_rs::constants::signature_algorithm::RSA_SHA1;
 use saml_rs::constants::signature_algorithm::RSA_SHA256;
 use saml_rs::crypto::keys::load_private_key;
@@ -16,7 +16,7 @@ use saml_rs::crypto::{
 };
 #[cfg(not(feature = "crypto-fips"))]
 use saml_rs::crypto::{decrypt_assertion, AssertionDecryptionOptions};
-#[cfg(feature = "crypto-fips")]
+#[cfg(any(feature = "crypto-aws-lc", feature = "crypto-fips"))]
 use saml_rs::SamlError;
 use saml_rs::{initialize_crypto_provider, CryptoFipsStatus, CryptoProvider};
 
@@ -94,9 +94,9 @@ fn fips_provider_rejects_sha1_rsa_oaep_key_transport() -> Result<(), Box<dyn std
     Ok(())
 }
 
-#[cfg(feature = "crypto-fips")]
+#[cfg(any(feature = "crypto-aws-lc", feature = "crypto-fips"))]
 #[test]
-fn fips_provider_rejects_rsa_sha1_signatures() -> Result<(), Box<dyn std::error::Error>> {
+fn aws_lc_providers_reject_rsa_sha1_signatures() -> Result<(), Box<dyn std::error::Error>> {
     let key = load_private_key(PRIVATE_KEY, None)?;
 
     assert!(matches!(

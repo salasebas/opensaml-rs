@@ -197,7 +197,7 @@ pub fn verify_message_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(feature = "crypto-fips"))]
+    #[cfg(feature = "crypto-rustcrypto")]
     use crate::constants::signature_algorithm::RSA_SHA1;
     use crate::constants::signature_algorithm::{RSA_SHA256, RSA_SHA256_MGF1, RSA_SHA512};
     use crate::crypto::keys::load_private_key;
@@ -233,9 +233,9 @@ mod tests {
     #[test]
     fn sign_message_then_verify_round_trip() -> Result<(), Box<dyn std::error::Error>> {
         let key = load_private_key(SP_PRIVKEY, None)?;
-        #[cfg(not(feature = "crypto-fips"))]
+        #[cfg(feature = "crypto-rustcrypto")]
         let algorithms = [RSA_SHA1, RSA_SHA256, RSA_SHA512];
-        #[cfg(feature = "crypto-fips")]
+        #[cfg(not(feature = "crypto-rustcrypto"))]
         let algorithms = [RSA_SHA256, RSA_SHA512];
         for alg in algorithms {
             let signed =
