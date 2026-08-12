@@ -69,11 +69,15 @@ jobs:
             features: crypto-aws-lc
           - provider: fips
             features: crypto-fips
+    env:
+      CRYPTO_PROVIDER_FEATURES: ${{ matrix.features }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      # The stable action ref publishes immutable generated commits outside
+      # the repository's default-branch history.
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # zizmor: ignore[impostor-commit,ref-version-mismatch]
         with:
           components: clippy
       - name: Install AWS-LC native build dependencies
@@ -85,14 +89,17 @@ jobs:
         if: matrix.provider == 'fips'
         with:
           go-version: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
-      - run: cargo check --workspace --locked --no-default-features --features "${{ matrix.features }}"
-      - run: cargo clippy --workspace --locked --all-targets --no-default-features --features "${{ matrix.features }}" -- -D warnings
+      # Keep the workspace's existing immutable v2 cache pin.
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # zizmor: ignore[ref-version-mismatch]
+      # The nextest action ref publishes immutable generated commits outside
+      # the repository's default-branch history.
+      - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # zizmor: ignore[impostor-commit,ref-version-mismatch]
+      - run: cargo check --workspace --locked --no-default-features --features "$CRYPTO_PROVIDER_FEATURES"
+      - run: cargo clippy --workspace --locked --all-targets --no-default-features --features "$CRYPTO_PROVIDER_FEATURES" -- -D warnings
       - name: Run provider security regressions
         run: >-
           cargo nextest run -p saml-rs --locked
-          --no-default-features --features "${{ matrix.features }}"
+          --no-default-features --features "$CRYPTO_PROVIDER_FEATURES"
           --test provider_regression
           --test xsw
           --test metadata_signature
