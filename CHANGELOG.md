@@ -9,6 +9,16 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.5.0](https://github.com/salasebas/opensaml-rs/compare/v0.4.0...v0.5.0) - 2026-08-13
+
+### Added
+
+- *(crypto)* expose selectable Bergshamra providers ([#110](https://github.com/salasebas/opensaml-rs/pull/110))
+
+### Other
+
+- *(crypto)* [**breaking**] upgrade Bergshamra to 0.8 and MSRV to Rust 1.88 ([#108](https://github.com/salasebas/opensaml-rs/pull/108))
+
 ### Fixed
 
 - *(crypto)* apply the software RSA key-transport opt-in only to RustCrypto so
