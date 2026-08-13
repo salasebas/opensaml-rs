@@ -6,9 +6,7 @@
 
 use saml_rs::constants::data_encryption_algorithm::AES_256;
 use saml_rs::constants::key_encryption_algorithm::RSA_OAEP_MGF1P;
-#[cfg(any(feature = "crypto-aws-lc", feature = "crypto-fips"))]
-use saml_rs::constants::signature_algorithm::RSA_SHA1;
-use saml_rs::constants::signature_algorithm::RSA_SHA256;
+use saml_rs::constants::signature_algorithm::{RSA_SHA1, RSA_SHA256};
 use saml_rs::crypto::keys::load_private_key;
 use saml_rs::crypto::{
     construct_message_signature, construct_saml_signature, encrypt_assertion,
@@ -23,6 +21,10 @@ use saml_rs::{initialize_crypto_provider, CryptoFipsStatus, CryptoProvider};
 const PRIVATE_KEY: &str = include_str!("fixtures/key/idp/provider_matrix_privkey.pkcs8.pem");
 const CERTIFICATE: &str = include_str!("fixtures/key/idp/cert.cer");
 const RESPONSE: &str = include_str!("fixtures/response.xml");
+const RESPONSE_SIGNED_SHA1: &str = include_str!("fixtures/misc/response_signed.xml");
+const RSA_SHA1_OCTETS: &str = "SAMLRequest=provider-matrix";
+// PKCS#1 v1.5 RSA-SHA1 over RSA_SHA1_OCTETS with provider_matrix_privkey.
+const RSA_SHA1_SIGNATURE: &str = "C6V+Aylkp2rFZJEZrpZrYFZDl2xn8kLuuSZcsxZ6ClDkYUBADwl3cVdDstU0i1Kx9CV56m3La/iT463DoKASWY+Jg31NU2741dgH6q3vuWLnUOlKTWHCHrbGOBdpU1DzZw2Ab9CA2KOg7KPlOFvJZMfY2IfdznPyQk4GNr54ij/HZWTZbASdBca6yGONqbsyU2f+IdKAYd+qDOgXn7WZQ3LkCNY1tOTGSoGmRv1FRCfJ4MP2FW2MMSueuS8NLPeW4tsgZ7pIK5Vx2HGeKNz4QtEOlMkOnWNJb6o9MgdywQ0sxbN+vI/m2O1qZz4G/JuoX1NXj+hoQ7UJ2UejcdiscA==";
 
 #[test]
 fn provider_initialization_reports_selected_provider_and_attestation(
@@ -108,13 +110,66 @@ fn fips_provider_rejects_sha1_rsa_oaep_key_transport() -> Result<(), Box<dyn std
     Ok(())
 }
 
+#[cfg(feature = "crypto-rustcrypto")]
+#[test]
+fn rustcrypto_signs_the_committed_rsa_sha1_detached_vector(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let key = load_private_key(PRIVATE_KEY, None)?;
+    let signature = construct_message_signature(RSA_SHA1_OCTETS, &key, RSA_SHA1)?;
+
+    assert_eq!(signature, RSA_SHA1_SIGNATURE);
+    Ok(())
+}
+
 #[cfg(any(feature = "crypto-aws-lc", feature = "crypto-fips"))]
 #[test]
-fn aws_lc_providers_reject_rsa_sha1_signatures() -> Result<(), Box<dyn std::error::Error>> {
+fn aws_lc_providers_reject_signing_rsa_sha1() -> Result<(), Box<dyn std::error::Error>> {
     let key = load_private_key(PRIVATE_KEY, None)?;
 
     assert!(matches!(
-        construct_message_signature("SAMLRequest=provider-matrix", &key, RSA_SHA1),
+        construct_message_signature(RSA_SHA1_OCTETS, &key, RSA_SHA1),
+        Err(SamlError::Crypto(_))
+    ));
+    Ok(())
+}
+
+#[cfg(not(feature = "crypto-fips"))]
+#[test]
+fn non_fips_providers_verify_rsa_sha1_detached_signature() -> Result<(), Box<dyn std::error::Error>>
+{
+    initialize_crypto_provider()?;
+
+    assert!(verify_message_signature(
+        RSA_SHA1_OCTETS,
+        RSA_SHA1_SIGNATURE,
+        CERTIFICATE,
+        RSA_SHA1,
+    )?);
+    Ok(())
+}
+
+#[cfg(not(feature = "crypto-fips"))]
+#[test]
+fn non_fips_providers_verify_rsa_sha1_enveloped_signature() -> Result<(), Box<dyn std::error::Error>>
+{
+    initialize_crypto_provider()?;
+    let (verified, _) = verify_signature(RESPONSE_SIGNED_SHA1, &[CERTIFICATE.to_string()])?;
+
+    assert!(verified);
+    Ok(())
+}
+
+#[cfg(feature = "crypto-fips")]
+#[test]
+fn fips_provider_rejects_verifying_rsa_sha1() -> Result<(), Box<dyn std::error::Error>> {
+    initialize_crypto_provider()?;
+
+    assert!(matches!(
+        verify_message_signature(RSA_SHA1_OCTETS, RSA_SHA1_SIGNATURE, CERTIFICATE, RSA_SHA1),
+        Err(SamlError::Crypto(_))
+    ));
+    assert!(matches!(
+        verify_signature(RESPONSE_SIGNED_SHA1, &[CERTIFICATE.to_string()]),
         Err(SamlError::Crypto(_))
     ));
     Ok(())
