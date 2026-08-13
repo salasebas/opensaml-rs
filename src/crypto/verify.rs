@@ -1105,9 +1105,20 @@ mod tests {
     #[test]
     fn rolling_cert_unloadable_peer_does_not_block_valid_signature(
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // response_signed.xml is SHA-1; FIPS rejects that digest.
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let signed = construct_saml_signature(
+            RESPONSE,
+            false,
+            &key,
+            SP_SIGNING_CERT,
+            RSA_SHA256,
+            &[],
+            None,
+        )?;
         let (verified, content) = verify_signature(
-            RESPONSE_SIGNED,
-            &["not a certificate".to_string(), IDP_CERT.to_string()],
+            &signed,
+            &["not a certificate".to_string(), SP_SIGNING_CERT.to_string()],
         )?;
         assert!(verified);
         assert!(content
