@@ -128,10 +128,11 @@ Add regression tests for security fixes.
 
 ## Docs And Releases
 
-- Keep README claims aligned with `CHANGELOG.md`.
 - Do not hardcode future release versions in docs. This repository uses
   release-plz and Conventional Commits to decide the next version.
 - The published crate is `saml-rs`, and Rust imports use `saml_rs`.
+- Do not edit `CHANGELOG.md` by hand. release-plz writes it from Conventional
+  Commits on the release PR.
 
 ## Agent skills
 
