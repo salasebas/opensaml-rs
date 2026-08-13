@@ -725,10 +725,11 @@ fn verify_detached(
     crate::crypto::initialize_crypto_provider()?;
 
     let mut provider_error = None;
+    let mut tried_invalid = false;
     for cert in opts.signing_certs {
         match crate::crypto::verify_message_signature(octet, signature, cert, sig_alg) {
             Ok(true) => return Ok(sig_alg.to_string()),
-            Ok(false) => {}
+            Ok(false) => tried_invalid = true,
             Err(error @ SamlError::Crypto(_)) => {
                 provider_error.get_or_insert(error);
             }
@@ -736,7 +737,11 @@ fn verify_detached(
         }
     }
 
-    provider_error.map_or_else(|| Err(detached_signature_verification()), Err)
+    // A leftover unloadable cert must not poison a rolling-cert verdict.
+    match provider_error {
+        Some(error) if !tried_invalid => Err(error),
+        _ => Err(detached_signature_verification()),
+    }
 }
 
 #[cfg(not(any(
@@ -1165,5 +1170,54 @@ mod tests {
             ),
             Err(SamlError::Crypto(_))
         ));
+    }
+
+    #[test]
+    fn detached_rolling_cert_unloadable_peer_keeps_invalid_verdict(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        const SP_PRIVKEY: &str = include_str!("../tests/fixtures/key/sp_privkey.pem");
+        const SP_CERT: &str = include_str!("../tests/fixtures/key/sp_signing_cert.cer");
+
+        let key = crate::crypto::keys::load_private_key(SP_PRIVKEY, None)?;
+        let signature =
+            crate::crypto::construct_message_signature("SAMLRequest=other", &key, RSA_SHA256)?;
+        let octet = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("SAMLRequest", "payload")
+            .append_pair("SigAlg", RSA_SHA256)
+            .finish();
+        let request = HttpRequest {
+            query: vec![
+                ("SAMLRequest".into(), "payload".into()),
+                ("SigAlg".into(), RSA_SHA256.into()),
+                ("Signature".into(), signature),
+            ],
+            octet_string: Some(octet),
+            ..Default::default()
+        };
+        let garbage = "not a certificate".to_string();
+        let signer = SP_CERT.to_string();
+
+        for certificates in [vec![garbage.clone(), signer.clone()], vec![signer, garbage]] {
+            let options = FlowOptions {
+                signing_certs: &certificates,
+                ..Default::default()
+            };
+            assert!(
+                matches!(
+                    verify_detached(
+                        Binding::Redirect,
+                        ParserType::SamlRequest,
+                        &request,
+                        &options,
+                        "<samlp:AuthnRequest/>",
+                    ),
+                    Err(SamlError::SignatureVerification {
+                        reason: SignatureVerificationReason::DetachedMessageSignature,
+                    })
+                ),
+                "unloadable leftover must not replace detached-invalid with Crypto"
+            );
+        }
+        Ok(())
     }
 }
