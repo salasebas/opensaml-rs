@@ -458,11 +458,9 @@ pub fn verify_signature_with_limits(
     if !have_key {
         return Err(key_load_error.unwrap_or(SamlError::NoTrustedCertificate));
     }
-    if let Some(error) = key_load_error {
-        return Err(error);
-    }
+    // A leftover unloadable cert must not poison a rolling-cert verdict.
     // A clean "invalid" (key mismatch / tampered) is a non-error false; only
-    // surface a structural error when no certificate produced a verdict.
+    // surface a structural error when no loaded certificate produced a verdict.
     match last_err {
         Some(err) if !tried_invalid => Err(err),
         _ => Ok((false, None)),
@@ -590,9 +588,6 @@ pub(crate) fn verify_signatures_detailed_with_limits(
             assertion_directly_covered,
             response_covered,
         });
-    }
-    if let Some(error) = key_load_error {
-        return Err(error);
     }
     match last_err {
         Some(error) if !tried_invalid => Err(error),
@@ -1071,6 +1066,53 @@ mod tests {
         // false_signed_request_sha256.xml: signature present but content tampered
         let (verified, _) = verify_signature(FALSE_SIGNED, &[SP_CERT.to_string()])?;
         assert!(!verified, "tampered message must not verify");
+        Ok(())
+    }
+
+    #[test]
+    fn rolling_cert_unloadable_peer_keeps_invalid_verdict() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let garbage = "not a certificate".to_string();
+        let signer = SP_CERT.to_string();
+        for certs in [vec![garbage.clone(), signer.clone()], vec![signer, garbage]] {
+            assert_eq!(
+                verify_signature(FALSE_SIGNED, &certs)?,
+                (false, None),
+                "unloadable leftover must not replace Invalid with Crypto"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn detailed_rolling_cert_unloadable_peer_keeps_invalid_verdict(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let garbage = "not a certificate".to_string();
+        let signer = SP_CERT.to_string();
+        for certs in [vec![garbage.clone(), signer.clone()], vec![signer, garbage]] {
+            let result =
+                verify_signatures_detailed_with_limits(FALSE_SIGNED, &certs, XmlLimits::default())?;
+            assert!(
+                !result.verified()
+                    && !result.assertion_directly_covered()
+                    && !result.response_covered(),
+                "unloadable leftover must not replace Invalid with Crypto"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rolling_cert_unloadable_peer_does_not_block_valid_signature(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (verified, content) = verify_signature(
+            RESPONSE_SIGNED,
+            &["not a certificate".to_string(), IDP_CERT.to_string()],
+        )?;
+        assert!(verified);
+        assert!(content
+            .ok_or("expected signed assertion")?
+            .contains("Assertion"));
         Ok(())
     }
 

@@ -111,9 +111,9 @@ jobs:
           --test external_slo_redirect
       - name: Run provider error propagation regression
         run: >-
-          cargo test -p saml-rs --locked
+          cargo nextest run -p saml-rs --locked
           --no-default-features --features "$CRYPTO_PROVIDER_FEATURES"
-          --lib detached_verification_preserves_provider_error
+          --lib detached_verification_preserves_provider_error unloadable_peer
 
   msrv:
     name: MSRV (Rust 1.88)
