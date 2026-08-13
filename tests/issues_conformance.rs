@@ -171,7 +171,11 @@ fn issue_86_duplicate_issuer_deduped() -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 #[test]
 fn issue_87_existence_check_for_signature() -> Result<(), Box<dyn std::error::Error>> {
     // An unsigned response verifies to false (no signature present).

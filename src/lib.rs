@@ -263,13 +263,40 @@
 //! expected flow so we can consider the implementation.
 //!
 //! XML cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
-//! message signatures) is delegated to `bergshamra` behind the
-//! `crypto-bergshamra` feature, which is on by default. Configure assertion
-//! encryption and XML-Enc compatibility exceptions through [`XmlEncryptionPolicy`].
+//! message signatures) is delegated to `bergshamra`. The default
+//! `crypto-bergshamra` compatibility feature selects RustCrypto; applications
+//! can instead select `crypto-aws-lc` or `crypto-fips` with default features
+//! disabled. Configure assertion encryption and XML-Enc compatibility exceptions
+//! through [`XmlEncryptionPolicy`].
 //! Disable default features to build the crypto-free protocol layer; crypto
 //! operations then fail closed with [`SamlError::Unsupported`].
 
 #![forbid(unsafe_code)]
+
+#[cfg(any(
+    all(feature = "crypto-rustcrypto", feature = "crypto-aws-lc"),
+    all(feature = "crypto-rustcrypto", feature = "crypto-fips"),
+    all(feature = "crypto-aws-lc", feature = "crypto-fips")
+))]
+compile_error!(
+    "crypto-rustcrypto, crypto-aws-lc, and crypto-fips are mutually exclusive; select exactly one"
+);
+
+#[cfg(all(
+    any(
+        feature = "crypto-legacy-algorithms",
+        feature = "crypto-post-quantum",
+        feature = "crypto-pkcs11"
+    ),
+    not(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))
+))]
+compile_error!(
+    "crypto capability features require one provider: crypto-rustcrypto, crypto-aws-lc, or crypto-fips"
+);
 
 #[doc(hidden)]
 pub mod api;
@@ -324,11 +351,24 @@ pub use config::{
     SpDescriptor, SpMetadataConfig, SpValidationPolicy, TemplatePolicy, TransformAlgorithm,
     XmlEncryptionPolicy, XmlPolicy,
 };
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
+pub use crypto::{
+    crypto_provider_info, initialize_crypto_provider, CryptoFipsStatus, CryptoProvider,
+    CryptoProviderInfo,
+};
 #[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::EntitySetting`."]
 pub use entity::EntitySetting;
 #[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::IdentityProvider`."]
 pub use idp::IdentityProvider;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub use metadata::MetadataSignatureVerification;
 pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,

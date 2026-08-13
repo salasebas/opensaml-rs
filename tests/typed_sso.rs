@@ -1,4 +1,8 @@
-#![cfg(feature = "crypto-bergshamra")]
+#![cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 
 use std::{
     collections::HashMap,
@@ -17,8 +21,9 @@ use saml_rs::{
     RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, ResponseSignaturePolicy,
     Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
     SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject, TemplatePolicy,
-    XmlEncryptionPolicy, XmlPolicy,
 };
+#[cfg(not(feature = "crypto-fips"))]
+use saml_rs::{XmlEncryptionPolicy, XmlPolicy};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use url::Url;
 
@@ -79,6 +84,7 @@ fn credentials() -> Credentials {
     }
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 fn encryption_credentials() -> Credentials {
     Credentials {
         encryption_certificate: Some(CertificatePem::new(CERT)),
@@ -87,6 +93,7 @@ fn encryption_credentials() -> Credentials {
     }
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 fn encrypted_xml_policy() -> XmlPolicy {
     XmlPolicy {
         encryption: XmlEncryptionPolicy::encrypt_assertions()
@@ -127,6 +134,7 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
         .build()
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 fn encrypted_sp_config() -> Result<SpConfig, SamlError> {
     SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
         .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
@@ -136,6 +144,7 @@ fn encrypted_sp_config() -> Result<SpConfig, SamlError> {
         .build()
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 fn encrypted_idp_config() -> Result<IdpConfig, SamlError> {
     IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
         .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
@@ -796,6 +805,7 @@ fn typed_sign_response_satisfies_required_response_signature(
     Ok(())
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn typed_encrypted_cbc_response_is_signed_by_default() -> Result<(), Box<dyn std::error::Error>> {
     let sp = Saml::sp(encrypted_sp_config()?)?;
@@ -824,6 +834,7 @@ fn typed_encrypted_cbc_response_is_signed_by_default() -> Result<(), Box<dyn std
     Ok(())
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn typed_strict_sp_rejects_explicit_unsigned_encrypted_cbc_compatibility(
 ) -> Result<(), Box<dyn std::error::Error>> {

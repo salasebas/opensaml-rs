@@ -228,7 +228,7 @@ impl ServiceProvider {
     /// Build a login `<AuthnRequest>` for `idp` over `binding`.
     ///
     /// When both sides require signing, the request is signed (requires the
-    /// `crypto-bergshamra` feature and the SP's `private_key`/`signing_cert`).
+    /// a crypto provider feature and the SP's `private_key`/`signing_cert`).
     /// `custom` overrides template rendering, receiving the resolved template
     /// and returning `(id, xml)`.
     ///
@@ -389,7 +389,11 @@ impl ServiceProvider {
         })
     }
 
-    #[cfg(feature = "crypto-bergshamra")]
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     fn signed_request_context(
         &self,
         binding: Binding,
@@ -471,7 +475,11 @@ impl ServiceProvider {
         })
     }
 
-    #[cfg(not(feature = "crypto-bergshamra"))]
+    #[cfg(not(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )))]
     fn signed_request_context(
         &self,
         _binding: Binding,
@@ -481,7 +489,7 @@ impl ServiceProvider {
         _id: String,
     ) -> Result<BindingContext, SamlError> {
         Err(SamlError::Unsupported(
-            "signing AuthnRequest requires feature crypto-bergshamra".into(),
+            "signing AuthnRequest requires a crypto provider feature".into(),
         ))
     }
 
@@ -771,7 +779,14 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "crypto-bergshamra"))]
+#[cfg(all(
+    test,
+    any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )
+))]
 mod crypto_tests {
     use super::*;
     use crate::binding::base64_decode;

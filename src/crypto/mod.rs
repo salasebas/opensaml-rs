@@ -4,29 +4,84 @@
 //! through the [`XmlSecurityBackend`] trait.
 
 mod backend;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 mod bergshamra;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub mod enc;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub mod keys;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
+mod provider;
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub mod sign;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub mod verify;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 mod xml_syntax;
 
 pub use backend::XmlSecurityBackend;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub use bergshamra::BergshamraBackend;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub use enc::{
     decrypt_assertion, decrypt_assertion_with_limits, encrypt_assertion, AssertionDecryptionOptions,
 };
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
+pub use provider::{
+    crypto_provider_info, initialize_crypto_provider, CryptoFipsStatus, CryptoProvider,
+    CryptoProviderInfo,
+};
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub use sign::{construct_message_signature, construct_saml_signature, verify_message_signature};
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 pub use verify::{
     verify_metadata_signature, verify_metadata_signature_detailed,
     verify_metadata_signature_detailed_with_limits, verify_metadata_signature_with_limits,

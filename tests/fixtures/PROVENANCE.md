@@ -19,6 +19,22 @@ specifications, interoperability evidence, or focused local tests.
 
 Fixture key material is test-only and must not be used outside tests.
 
+## Crypto provider matrix fixture audit
+
+`tests/provider_regression.rs` deliberately uses the matching
+`key/idp/provider_matrix_privkey.pkcs8.pem` and `key/idp/cert.cer` pair for
+every provider. The private key is the unencrypted PKCS#8 encoding of the same
+test-only RSA key stored historically as `key/idp/nocrypt.pem`; their public-key
+SHA-256 fingerprints match. The pair has a 2048-bit RSA key with exponent
+65537 and a SHA-256-signed certificate. This avoids making provider
+compatibility depend on encrypted or provider-specific private-key formats and
+unusual key sizes retained for loader regressions.
+
+The committed RSA certificate fixtures were audited for the provider matrix:
+their public keys range from 2048 to 4096 bits. Historical encrypted keys and
+expired certificates remain test-only inputs for their existing focused
+regressions and are not provider-support or production-security claims.
+
 ## External SLO HTTP-Redirect fixtures
 
 The fixtures under `tests/fixtures/interop/` are immutable interoperability

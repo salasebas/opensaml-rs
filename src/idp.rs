@@ -240,7 +240,7 @@ impl IdentityProvider {
 
     /// Generate a login `<Response>` for `sp` over `binding`.
     ///
-    /// Requires the `crypto-bergshamra` feature: the response is always signed
+    /// Requires a crypto provider feature: the response is always signed
     /// (assertion- or message-level) and optionally encrypted. Attributes are
     /// taken from `user`; `options` carries `InResponseTo`, RelayState, the
     /// encrypt-then-sign toggle, and an optional `customTagReplacement` hook.
@@ -250,7 +250,7 @@ impl IdentityProvider {
     /// Returns an error if `binding` is unsupported, the SP metadata has no ACS
     /// endpoint for `binding`, response template rendering fails, the IdP
     /// signing key or certificate configuration is missing or invalid, the
-    /// `crypto-bergshamra` feature is unavailable, XML signature construction
+    /// no crypto provider feature is enabled, XML signature construction
     /// fails, the SP encryption certificate is missing when assertion
     /// encryption is enabled, XML encryption fails, or detached-signature
     /// construction for Redirect/SimpleSign fails.
@@ -331,7 +331,11 @@ impl IdentityProvider {
     }
 
     /// Wrap the finalized response XML into the per-binding transport context.
-    #[cfg(feature = "crypto-bergshamra")]
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     fn bind_response(
         &self,
         binding: Binding,
@@ -380,7 +384,11 @@ impl IdentityProvider {
         }
     }
 
-    #[cfg(not(feature = "crypto-bergshamra"))]
+    #[cfg(not(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )))]
     fn bind_response(
         &self,
         _binding: Binding,
@@ -389,11 +397,15 @@ impl IdentityProvider {
         _relay_state: Option<&str>,
     ) -> Result<(String, Option<String>, Option<String>), SamlError> {
         Err(SamlError::Unsupported(
-            "createLoginResponse requires feature crypto-bergshamra".into(),
+            "createLoginResponse requires a crypto provider feature".into(),
         ))
     }
 
-    #[cfg(feature = "crypto-bergshamra")]
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     fn finalize_login_response(
         &self,
         sp: &ServiceProvider,
@@ -476,7 +488,11 @@ impl IdentityProvider {
         Ok(xml)
     }
 
-    #[cfg(not(feature = "crypto-bergshamra"))]
+    #[cfg(not(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )))]
     fn finalize_login_response(
         &self,
         _sp: &ServiceProvider,
@@ -485,7 +501,7 @@ impl IdentityProvider {
         _encrypt_then_sign: bool,
     ) -> Result<String, SamlError> {
         Err(SamlError::Unsupported(
-            "createLoginResponse requires feature crypto-bergshamra".into(),
+            "createLoginResponse requires a crypto provider feature".into(),
         ))
     }
 
@@ -644,7 +660,14 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "crypto-bergshamra"))]
+#[cfg(all(
+    test,
+    any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )
+))]
 mod crypto_tests {
     use super::*;
     use crate::constants::signature_algorithm::RSA_SHA256;

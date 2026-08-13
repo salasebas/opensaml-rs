@@ -1,4 +1,4 @@
-//! `bergshamra`-backed XML security (feature `crypto-bergshamra`).
+//! `bergshamra`-backed XML security for the selected provider feature.
 
 use crate::crypto::backend::XmlSecurityBackend;
 use crate::error::SamlError;

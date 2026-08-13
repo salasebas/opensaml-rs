@@ -76,10 +76,15 @@ also check:
 
 ```bash
 cargo test -p saml-rs --doc
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --all-features --no-deps
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps
 cargo test -p saml-rs --doc --no-default-features
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps --no-default-features
 cargo check -p saml-rs --no-default-features
 ```
+
+Do not use `--all-features`. Document-crypto providers are mutually exclusive.
+AWS-LC, FIPS, and provider-specific rustdoc run in the Linux `provider-matrix`
+job in `.github/workflows/ci.yml`.
 
 ## Rust Style
 
@@ -123,10 +128,11 @@ Add regression tests for security fixes.
 
 ## Docs And Releases
 
-- Keep README claims aligned with `CHANGELOG.md`.
 - Do not hardcode future release versions in docs. This repository uses
   release-plz and Conventional Commits to decide the next version.
 - The published crate is `saml-rs`, and Rust imports use `saml_rs`.
+- Do not edit `CHANGELOG.md` by hand. release-plz writes it from Conventional
+  Commits on the release PR.
 
 ## Agent skills
 

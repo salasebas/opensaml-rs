@@ -6,10 +6,18 @@ use crate::binding::{
 };
 use crate::constants::{Binding, ParserType};
 use crate::context::is_valid_xml_with_limits;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 use crate::error::SignatureVerificationReason;
 use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 use crate::model::RelayStateParam;
 use crate::model::{authn_statement_not_on_or_after_values, earliest_authn_session_expiration};
 use crate::util::Value;
@@ -108,10 +116,12 @@ pub struct FlowOptions<'a> {
     pub decrypt_key: Option<&'a str>,
     /// Passphrase for `decrypt_key`.
     pub decrypt_key_pass: Option<&'a str>,
-    /// Allow XML-Enc RSA key-transport decryption with the bundled software RSA backend.
+    /// Allow XML-Enc RSA key-transport decryption with the bundled RustCrypto
+    /// software RSA backend.
     ///
-    /// Disabled by default because that path reaches `RUSTSEC-2023-0071`-affected
-    /// code when an attacker can observe timing.
+    /// Enforced only for `crypto-rustcrypto`, where that path reaches
+    /// `RUSTSEC-2023-0071`-affected `rsa` code when an attacker can observe
+    /// timing. AWS-LC and FIPS ignore this flag.
     pub allow_insecure_software_rsa_key_transport_decryption: bool,
     /// Clock drift tolerance `(not_before_ms, not_on_or_after_ms)`.
     pub clock_drifts: (i64, i64),
@@ -174,7 +184,11 @@ struct PreparedMessage {
     response_authenticated: bool,
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 #[derive(Debug)]
 struct EmbeddedSignatureEvidence {
     verified: bool,
@@ -248,31 +262,51 @@ fn assertion_shortcut(xml: &str, limits: XmlLimits) -> Result<Option<String>, Sa
     )
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn verified_content_not_covered() -> SamlError {
     SamlError::SignedReferenceMismatch
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn decoded_octet_params(octet: &str) -> Vec<(String, String)> {
     url::form_urlencoded::parse(octet.as_bytes())
         .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect()
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn detached_signature_verification() -> SamlError {
     SamlError::SignatureVerification {
         reason: SignatureVerificationReason::DetachedMessageSignature,
     }
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn relay_state_param(value: Option<&str>) -> Option<RelayStateParam> {
     RelayStateParam::try_from_option(value.map(str::to_string)).ok()
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn detached_relay_state_mismatch(expected: Option<&str>, actual: Option<&str>) -> SamlError {
     match (relay_state_param(expected), relay_state_param(actual)) {
         (Some(expected), Some(actual)) => SamlError::RelayStateMismatch { expected, actual },
@@ -282,7 +316,11 @@ fn detached_relay_state_mismatch(expected: Option<&str>, actual: Option<&str>) -
     }
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn ensure_redirect_octet_matches_consumed_fields(
     parser_type: ParserType,
     request: &HttpRequest,
@@ -322,7 +360,11 @@ fn ensure_redirect_octet_matches_consumed_fields(
     Ok(())
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn ensure_simplesign_octet_matches_consumed_fields(
     parser_type: ParserType,
     request: &HttpRequest,
@@ -355,7 +397,11 @@ fn ensure_simplesign_octet_matches_consumed_fields(
     }
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn ensure_detached_octet_matches_consumed_fields(
     binding: Binding,
     parser_type: ParserType,
@@ -379,7 +425,11 @@ fn ensure_detached_octet_matches_consumed_fields(
     }
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn required_xml_signature_failed(signature_present: bool) -> SamlError {
     if signature_present {
         SamlError::SignatureVerification {
@@ -390,7 +440,11 @@ fn required_xml_signature_failed(signature_present: bool) -> SamlError {
     }
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn verify_embedded_signature(
     xml: &str,
     opts: &FlowOptions<'_>,
@@ -408,7 +462,11 @@ fn verify_embedded_signature(
     })
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn require_direct_assertion_coverage(
     assertion_signature: AssertionSignatureRequirement,
     assertion_directly_covered: bool,
@@ -419,7 +477,11 @@ fn require_direct_assertion_coverage(
     Ok(())
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn require_response_coverage(
     response_signature_required: bool,
     response_covered: bool,
@@ -430,7 +492,11 @@ fn require_response_coverage(
     Ok(())
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn response_uses_cbc_encrypted_assertion(xml: &str, limits: XmlLimits) -> Result<bool, SamlError> {
     let document = crate::xml::dom::parse_with_limits(xml, limits)?;
     Ok(document
@@ -454,7 +520,11 @@ fn response_uses_cbc_encrypted_assertion(xml: &str, limits: XmlLimits) -> Result
         .any(crate::constants::is_xml_encryption_cbc_algorithm))
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn response_signature_is_required(
     requirement: ResponseSignatureRequirement,
     xml: &str,
@@ -470,8 +540,12 @@ fn response_signature_is_required(
 }
 
 /// Verify and optionally decrypt the message, returning the authenticated
-/// `(saml_content, assertion)`. Requires `crypto-bergshamra`.
-#[cfg(feature = "crypto-bergshamra")]
+/// `(saml_content, assertion)`. Requires a crypto provider.
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn verify_and_prepare(
     xml: &str,
     parser_type: ParserType,
@@ -481,7 +555,7 @@ fn verify_and_prepare(
 ) -> Result<PreparedMessage, SamlError> {
     use crate::crypto::{
         decrypt_assertion_with_limits,
-        enc::{software_rsa_decryption_disabled, AssertionDecryptionOptions},
+        enc::{require_software_rsa_opt_in, AssertionDecryptionOptions},
         keys::load_private_key,
         verify::has_xml_signature_with_limits,
     };
@@ -497,13 +571,13 @@ fn verify_and_prepare(
         require_response_coverage(response_signature_required, evidence.response_covered)?;
     }
     let decrypt_required = opts.decrypt_key.is_some();
-    if decrypt_required && !opts.allow_insecure_software_rsa_key_transport_decryption {
-        return Err(software_rsa_decryption_disabled());
-    }
     let decrypt_options = AssertionDecryptionOptions {
         allow_insecure_software_rsa_key_transport_decryption: opts
             .allow_insecure_software_rsa_key_transport_decryption,
     };
+    if decrypt_required {
+        require_software_rsa_opt_in(decrypt_options)?;
+    }
     let load_key = || load_private_key(opts.decrypt_key.unwrap_or_default(), opts.decrypt_key_pass);
 
     if decrypt_required && evidence.verified && parser_type == ParserType::SamlResponse {
@@ -597,7 +671,11 @@ fn verify_and_prepare(
     Err(required_xml_signature_failed(signature_present))
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn verify_and_prepare(
     _xml: &str,
     _parser_type: ParserType,
@@ -606,13 +684,17 @@ fn verify_and_prepare(
     _response_signature: ResponseSignatureRequirement,
 ) -> Result<PreparedMessage, SamlError> {
     Err(SamlError::Unsupported(
-        "signature verification requires feature crypto-bergshamra".into(),
+        "signature verification requires a crypto provider feature".into(),
     ))
 }
 
 /// Verify a detached (redirect/SimpleSign) message signature, returning the
-/// verified `SigAlg`. Requires `crypto-bergshamra`.
-#[cfg(feature = "crypto-bergshamra")]
+/// verified `SigAlg`. Requires a crypto provider.
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn verify_detached(
     binding: Binding,
     parser_type: ParserType,
@@ -640,17 +722,33 @@ fn verify_detached(
         sig_alg,
         octet,
     )?;
-    let verified = opts.signing_certs.iter().any(|cert| {
-        crate::crypto::verify_message_signature(octet, signature, cert, sig_alg).unwrap_or(false)
-    });
-    if verified {
-        Ok(sig_alg.to_string())
-    } else {
-        Err(detached_signature_verification())
+    crate::crypto::initialize_crypto_provider()?;
+
+    let mut provider_error = None;
+    let mut tried_invalid = false;
+    for cert in opts.signing_certs {
+        match crate::crypto::verify_message_signature(octet, signature, cert, sig_alg) {
+            Ok(true) => return Ok(sig_alg.to_string()),
+            Ok(false) => tried_invalid = true,
+            Err(error @ SamlError::Crypto(_)) => {
+                provider_error.get_or_insert(error);
+            }
+            Err(_) => {}
+        }
+    }
+
+    // A leftover unloadable cert must not poison a rolling-cert verdict.
+    match provider_error {
+        Some(error) if !tried_invalid => Err(error),
+        _ => Err(detached_signature_verification()),
     }
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn verify_detached(
     _binding: Binding,
     _parser_type: ParserType,
@@ -659,7 +757,7 @@ fn verify_detached(
     _xml: &str,
 ) -> Result<String, SamlError> {
     Err(SamlError::Unsupported(
-        "signature verification requires feature crypto-bergshamra".into(),
+        "signature verification requires a crypto provider feature".into(),
     ))
 }
 
@@ -1027,4 +1125,99 @@ pub(crate) fn flow_with_expected_recipient(
         assertion_signature,
         response_signature,
     )
+}
+
+#[cfg(all(
+    test,
+    any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )
+))]
+mod tests {
+    use super::*;
+    use crate::constants::signature_algorithm::RSA_SHA256;
+
+    #[test]
+    fn detached_verification_preserves_provider_error() {
+        let certificates = vec!["not a certificate".to_string()];
+        let options = FlowOptions {
+            signing_certs: &certificates,
+            ..Default::default()
+        };
+        let octet = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("SAMLRequest", "payload")
+            .append_pair("SigAlg", RSA_SHA256)
+            .finish();
+        let request = HttpRequest {
+            query: vec![
+                ("SAMLRequest".into(), "payload".into()),
+                ("SigAlg".into(), RSA_SHA256.into()),
+                ("Signature".into(), "AA==".into()),
+            ],
+            octet_string: Some(octet),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            verify_detached(
+                Binding::Redirect,
+                ParserType::SamlRequest,
+                &request,
+                &options,
+                "<samlp:AuthnRequest/>",
+            ),
+            Err(SamlError::Crypto(_))
+        ));
+    }
+
+    #[test]
+    fn detached_rolling_cert_unloadable_peer_keeps_invalid_verdict(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        const SP_PRIVKEY: &str = include_str!("../tests/fixtures/key/sp_privkey.pem");
+        const SP_CERT: &str = include_str!("../tests/fixtures/key/sp_signing_cert.cer");
+
+        let key = crate::crypto::keys::load_private_key(SP_PRIVKEY, None)?;
+        let signature =
+            crate::crypto::construct_message_signature("SAMLRequest=other", &key, RSA_SHA256)?;
+        let octet = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("SAMLRequest", "payload")
+            .append_pair("SigAlg", RSA_SHA256)
+            .finish();
+        let request = HttpRequest {
+            query: vec![
+                ("SAMLRequest".into(), "payload".into()),
+                ("SigAlg".into(), RSA_SHA256.into()),
+                ("Signature".into(), signature),
+            ],
+            octet_string: Some(octet),
+            ..Default::default()
+        };
+        let garbage = "not a certificate".to_string();
+        let signer = SP_CERT.to_string();
+
+        for certificates in [vec![garbage.clone(), signer.clone()], vec![signer, garbage]] {
+            let options = FlowOptions {
+                signing_certs: &certificates,
+                ..Default::default()
+            };
+            assert!(
+                matches!(
+                    verify_detached(
+                        Binding::Redirect,
+                        ParserType::SamlRequest,
+                        &request,
+                        &options,
+                        "<samlp:AuthnRequest/>",
+                    ),
+                    Err(SamlError::SignatureVerification {
+                        reason: SignatureVerificationReason::DetachedMessageSignature,
+                    })
+                ),
+                "unloadable leftover must not replace detached-invalid with Crypto"
+            );
+        }
+        Ok(())
+    }
 }

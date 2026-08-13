@@ -250,8 +250,8 @@ impl XmlEncryptionPolicy {
         }
     }
 
-    /// Explicitly allow software RSA key-transport decryption despite
-    /// `RUSTSEC-2023-0071` timing-risk concerns in the bundled backend.
+    /// Explicitly allow RustCrypto software RSA key-transport decryption despite
+    /// `RUSTSEC-2023-0071` timing-risk concerns in that backend.
     pub fn allow_insecure_software_rsa_key_transport_decryption() -> Self {
         Self {
             allow_insecure_software_rsa_key_transport_decryption: true,
@@ -274,10 +274,11 @@ impl XmlEncryptionPolicy {
 ///
 /// # Examples
 ///
-/// Software RSA key-transport decryption is disabled by default because the
-/// bundled RustCrypto RSA backend, reached through `bergshamra` / `kryptering`,
-/// is affected by `RUSTSEC-2023-0071`. Enable it only as an explicit
-/// compatibility exception for a deployment that accepts that risk.
+/// Software RSA key-transport decryption is disabled by default on the
+/// RustCrypto provider because that backend, reached through `bergshamra` /
+/// `kryptering`, is affected by `RUSTSEC-2023-0071`. Enable it only as an
+/// explicit compatibility exception for a RustCrypto deployment that accepts
+/// that risk. AWS-LC and FIPS ignore this opt-in.
 ///
 /// ```
 /// use saml_rs::{AcsEndpoint, EntityId, SpConfig, XmlEncryptionPolicy, XmlPolicy};

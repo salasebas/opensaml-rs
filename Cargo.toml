@@ -32,7 +32,8 @@ members = [
 ]
 
 [package.metadata.docs.rs]
-all-features = true
+no-default-features = true
+features = ["crypto-bergshamra"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lib]
@@ -41,7 +42,18 @@ path = "src/lib.rs"
 
 [features]
 default = ["crypto-bergshamra"]
-crypto-bergshamra = ["dep:bergshamra"]
+crypto-bergshamra = [
+    "crypto-rustcrypto",
+    "crypto-legacy-algorithms",
+    "crypto-post-quantum",
+    "crypto-pkcs11",
+]
+crypto-rustcrypto = ["dep:bergshamra", "bergshamra/rustcrypto"]
+crypto-aws-lc = ["dep:bergshamra", "bergshamra/aws-lc"]
+crypto-fips = ["dep:bergshamra", "bergshamra/fips"]
+crypto-legacy-algorithms = ["bergshamra?/legacy-algorithms"]
+crypto-post-quantum = ["bergshamra?/post-quantum"]
+crypto-pkcs11 = ["bergshamra?/pkcs11"]
 
 [dependencies]
 base64 = "0.23"
@@ -51,7 +63,7 @@ thiserror = "2"
 time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 url = "2"
 uuid = { version = "1", default-features = false, features = ["v4"] }
-bergshamra = { version = "0.8.0", optional = true }
+bergshamra = { version = "0.8.0", optional = true, default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

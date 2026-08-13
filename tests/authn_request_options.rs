@@ -434,7 +434,11 @@ fn requested_response_binding_without_acs_returns_missing_metadata(
     }
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 mod signed {
     use super::*;
     use saml_rs::constants::signature_algorithm::RSA_SHA256;

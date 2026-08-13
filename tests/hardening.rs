@@ -1,5 +1,9 @@
 //! Production-hardening tests: Audience restriction and InResponseTo / anti-replay.
-#![cfg(feature = "crypto-bergshamra")]
+#![cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 #![allow(clippy::unwrap_used)]
 
 use saml_rs::constants::signature_algorithm::RSA_SHA256;
@@ -580,6 +584,7 @@ fn hardening_subject_confirmation_request_id_must_match() -> Result<(), Box<dyn 
     )
 }
 
+#[cfg(not(feature = "crypto-fips"))]
 #[test]
 fn hardening_sign_then_encrypt_message_auto_resolves() -> Result<(), Box<dyn std::error::Error>> {
     // Request sign-then-encrypt (encrypt_then_sign=false) with an encrypted,

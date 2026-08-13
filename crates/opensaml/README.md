@@ -157,7 +157,13 @@ reaching for hidden lower-level module paths.
 ```toml
 [features]
 default = ["crypto-bergshamra"]
-crypto-bergshamra = ["dep:bergshamra"]
+crypto-bergshamra = ["saml-rs/crypto-bergshamra"]
+crypto-rustcrypto = ["saml-rs/crypto-rustcrypto"]
+crypto-aws-lc = ["saml-rs/crypto-aws-lc"]
+crypto-fips = ["saml-rs/crypto-fips"]
+crypto-legacy-algorithms = ["saml-rs/crypto-legacy-algorithms"]
+crypto-post-quantum = ["saml-rs/crypto-post-quantum"]
+crypto-pkcs11 = ["saml-rs/crypto-pkcs11"]
 ```
 
 With `default-features = false`, the protocol layer still builds messages,
@@ -165,16 +171,23 @@ parses metadata, and runs extraction. Operations that need signing,
 verification, or encryption return `OpenSamlError::Unsupported`.
 
 All published workspace packages require Rust 1.88. The default
-`crypto-bergshamra` feature uses `bergshamra` 0.8.0 with `kryptering` 0.5 and
-preserves the RustCrypto-backed defaults.
+`crypto-bergshamra` compatibility feature preserves the complete RustCrypto
+configuration. With default features disabled, select exactly one of
+`crypto-rustcrypto`, `crypto-aws-lc`, or `crypto-fips`. Bergshamra supports the
+latter two on Linux x86_64/aarch64, while this repository's provider matrix
+currently validates Linux x86_64. Optional algorithm and PKCS#11 capabilities
+are forwarded separately. FIPS selection performs active AWS-LC attestation
+but is not a certification claim for the consuming binary or deployment.
 
 With `crypto-bergshamra` enabled:
 
 - XML signatures can be verified against metadata-declared keys.
 - Signed-reference placement checks help mitigate XML Signature Wrapping (XSW).
-- XML-Enc support is available, but software RSA key-transport decryption is
-  gated off by default and requires an explicit compatibility opt-in through
+- XML-Enc support is available. On the default RustCrypto provider, software
+  RSA key-transport decryption is gated off by default and requires an
+  explicit compatibility opt-in through
   [`XmlEncryptionPolicy`](https://docs.rs/opensaml/latest/opensaml/struct.XmlEncryptionPolicy.html).
+  AWS-LC decrypts RSA-OAEP with the default options.
 
 ## Security
 
@@ -195,9 +208,9 @@ Security-sensitive defaults and checks include:
 - Detached Redirect/SimpleSign signatures bound to the fields consumed by the
   flow parser.
 - HTTP-Redirect raw DEFLATE output limits.
-- XML-Enc software RSA key-transport decryption disabled by default because the
-  bundled RustCrypto RSA backend, reached through `bergshamra` / `kryptering`,
-  is affected by RUSTSEC-2023-0071.
+- XML-Enc software RSA key-transport decryption disabled by default on
+  RustCrypto because that backend, reached through `bergshamra` / `kryptering`,
+  is affected by RUSTSEC-2023-0071. AWS-LC and FIPS do not apply this gate.
 
 Schema validation is optional defense in depth via
 `context::set_schema_validator`.
@@ -209,7 +222,7 @@ cargo fmt --all --check
 cargo clippy -p opensaml --all-targets -- -D warnings
 cargo nextest run -p opensaml
 cargo test -p opensaml --doc
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p opensaml --lib --all-features --no-deps
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p opensaml --lib --no-deps
 cargo test -p opensaml --doc --no-default-features
 cargo check -p opensaml --no-default-features
 ```

@@ -1,5 +1,5 @@
 //! XML-DSig verification and anti-wrapping checks, delegating cryptography to
-//! `bergshamra` (feature `crypto-bergshamra`).
+//! the selected `bergshamra` provider.
 //!
 //! Security model:
 //! - `trusted_keys_only`: the signature is verified against the certificate(s)
@@ -398,15 +398,21 @@ pub fn verify_signature_with_limits(
         }
     }
 
+    super::provider::ensure_crypto_provider_initialized()?;
+
     // Try each metadata certificate individually (rolling-cert support): the
     // signature verifies if any one of the declared keys matches.
     let mut have_key = false;
+    let mut key_load_error = None;
     let mut tried_invalid = false;
     let mut last_err: Option<SamlError> = None;
     for cert in metadata_certs {
         let key = match load_certificate(cert) {
             Ok(key) => key,
-            Err(_) => continue,
+            Err(error) => {
+                key_load_error.get_or_insert(error);
+                continue;
+            }
         };
         have_key = true;
         let mut manager = KeysManager::new();
@@ -450,10 +456,11 @@ pub fn verify_signature_with_limits(
         }
     }
     if !have_key {
-        return Err(SamlError::NoTrustedCertificate);
+        return Err(key_load_error.unwrap_or(SamlError::NoTrustedCertificate));
     }
+    // A leftover unloadable cert must not poison a rolling-cert verdict.
     // A clean "invalid" (key mismatch / tampered) is a non-error false; only
-    // surface a structural error when no certificate produced a verdict.
+    // surface a structural error when no loaded certificate produced a verdict.
     match last_err {
         Some(err) if !tried_invalid => Err(err),
         _ => Ok((false, None)),
@@ -525,7 +532,10 @@ pub(crate) fn verify_signatures_detailed_with_limits(
         }
     }
 
+    super::provider::ensure_crypto_provider_initialized()?;
+
     let mut have_key = false;
+    let mut key_load_error = None;
     let mut tried_invalid = false;
     let mut last_err: Option<SamlError> = None;
     let mut first_signature_verified = false;
@@ -533,7 +543,10 @@ pub(crate) fn verify_signatures_detailed_with_limits(
     for cert in metadata_certs {
         let key = match load_certificate(cert) {
             Ok(key) => key,
-            Err(_) => continue,
+            Err(error) => {
+                key_load_error.get_or_insert(error);
+                continue;
+            }
         };
         have_key = true;
         let mut manager = KeysManager::new();
@@ -563,7 +576,7 @@ pub(crate) fn verify_signatures_detailed_with_limits(
         }
     }
     if !have_key {
-        return Err(SamlError::NoTrustedCertificate);
+        return Err(key_load_error.unwrap_or(SamlError::NoTrustedCertificate));
     }
     if first_signature_verified && !targets.is_empty() {
         let assertion_directly_covered = assertion_is_directly_covered(root, &targets);
@@ -1053,6 +1066,64 @@ mod tests {
         // false_signed_request_sha256.xml: signature present but content tampered
         let (verified, _) = verify_signature(FALSE_SIGNED, &[SP_CERT.to_string()])?;
         assert!(!verified, "tampered message must not verify");
+        Ok(())
+    }
+
+    #[test]
+    fn rolling_cert_unloadable_peer_keeps_invalid_verdict() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let garbage = "not a certificate".to_string();
+        let signer = SP_CERT.to_string();
+        for certs in [vec![garbage.clone(), signer.clone()], vec![signer, garbage]] {
+            assert_eq!(
+                verify_signature(FALSE_SIGNED, &certs)?,
+                (false, None),
+                "unloadable leftover must not replace Invalid with Crypto"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn detailed_rolling_cert_unloadable_peer_keeps_invalid_verdict(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let garbage = "not a certificate".to_string();
+        let signer = SP_CERT.to_string();
+        for certs in [vec![garbage.clone(), signer.clone()], vec![signer, garbage]] {
+            let result =
+                verify_signatures_detailed_with_limits(FALSE_SIGNED, &certs, XmlLimits::default())?;
+            assert!(
+                !result.verified()
+                    && !result.assertion_directly_covered()
+                    && !result.response_covered(),
+                "unloadable leftover must not replace Invalid with Crypto"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rolling_cert_unloadable_peer_does_not_block_valid_signature(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // response_signed.xml is SHA-1; FIPS rejects that digest.
+        let key = load_private_key(SP_PRIVKEY, None)?;
+        let signed = construct_saml_signature(
+            RESPONSE,
+            false,
+            &key,
+            SP_SIGNING_CERT,
+            RSA_SHA256,
+            &[],
+            None,
+        )?;
+        let (verified, content) = verify_signature(
+            &signed,
+            &["not a certificate".to_string(), SP_SIGNING_CERT.to_string()],
+        )?;
+        assert!(verified);
+        assert!(content
+            .ok_or("expected signed assertion")?
+            .contains("Assertion"));
         Ok(())
     }
 

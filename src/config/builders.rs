@@ -14,7 +14,11 @@ use super::policies::{
     AlgorithmPolicy, AssertionEncryptionPolicy, AuthnRequestSigningPolicy, IdpValidationPolicy,
     SpValidationPolicy, TemplatePolicy, XmlPolicy,
 };
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 use super::policies::{
     AssertionSignaturePolicy, AuthnRequestValidationPolicy, LogoutPolicy, LogoutSignaturePolicy,
     ResponseSignaturePolicy,
@@ -474,37 +478,57 @@ fn validate_signing_credentials(credentials: &Credentials) -> Result<(), SamlErr
     Ok(())
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn validate_sp_crypto_support(_config: &SpConfig) -> Result<(), SamlError> {
     Ok(())
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn validate_sp_crypto_support(config: &SpConfig) -> Result<(), SamlError> {
     if sp_config_requires_crypto(config) {
         return Err(SamlError::Unsupported(
-            "selected SP config policy requires the crypto-bergshamra feature".into(),
+            "selected SP config policy requires a crypto provider feature".into(),
         ));
     }
     Ok(())
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn validate_idp_crypto_support(_config: &IdpConfig) -> Result<(), SamlError> {
     Ok(())
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn validate_idp_crypto_support(config: &IdpConfig) -> Result<(), SamlError> {
     if idp_config_requires_crypto(config) {
         return Err(SamlError::Unsupported(
-            "selected IdP config policy requires the crypto-bergshamra feature".into(),
+            "selected IdP config policy requires a crypto provider feature".into(),
         ));
     }
     Ok(())
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn sp_config_requires_crypto(config: &SpConfig) -> bool {
     matches!(
         config.validation.assertions,
@@ -522,7 +546,11 @@ fn sp_config_requires_crypto(config: &SpConfig) -> bool {
         )
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn idp_config_requires_crypto(config: &IdpConfig) -> bool {
     matches!(
         config.validation.authn_requests,
@@ -534,13 +562,21 @@ fn idp_config_requires_crypto(config: &IdpConfig) -> bool {
         )
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn logout_policy_requires_crypto(policy: LogoutPolicy) -> bool {
     logout_signature_policy_requires_crypto(policy.requests)
         || logout_signature_policy_requires_crypto(policy.responses)
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn logout_signature_policy_requires_crypto(policy: LogoutSignaturePolicy) -> bool {
     matches!(policy, LogoutSignaturePolicy::RequireSigned)
 }

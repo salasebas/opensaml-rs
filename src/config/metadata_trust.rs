@@ -1,10 +1,18 @@
 use core::ops::Deref;
 
 use crate::error::SamlError;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 use crate::error::SignatureVerificationReason;
 use crate::metadata::Metadata;
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 use crate::xml::XmlLimits;
 
 use super::credentials::CertificatePem;
@@ -49,7 +57,14 @@ pub enum MetadataTrustPolicy<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(feature = "crypto-bergshamra"), allow(dead_code))]
+#[cfg_attr(
+    not(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    )),
+    allow(dead_code)
+)]
 pub(super) enum AppliedMetadataTrust {
     UnsignedForCompatibility,
     SignedByPinnedCertificates {
@@ -95,7 +110,11 @@ where
     }
 }
 
-#[cfg(feature = "crypto-bergshamra")]
+#[cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
 fn verify_pinned_metadata_signature<M>(
     metadata: &M,
     trusted_certificates: &[CertificatePem],
@@ -122,7 +141,11 @@ where
     })
 }
 
-#[cfg(not(feature = "crypto-bergshamra"))]
+#[cfg(not(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+)))]
 fn verify_pinned_metadata_signature<M>(
     _metadata: &M,
     _trusted_certificates: &[CertificatePem],
@@ -131,6 +154,6 @@ where
     M: Deref<Target = Metadata>,
 {
     Err(SamlError::Unsupported(
-        "signed metadata verification requires the crypto-bergshamra feature".into(),
+        "signed metadata verification requires a crypto provider feature".into(),
     ))
 }

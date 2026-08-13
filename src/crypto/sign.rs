@@ -1,5 +1,5 @@
-//! XML-DSig signing and detached message signatures, delegating crypto to
-//! `bergshamra` (feature `crypto-bergshamra`).
+//! XML-DSig signing and detached message signatures, delegating crypto to the
+//! selected `bergshamra` provider.
 
 use super::keys::load_certificate;
 use super::xml_syntax::validate_crypto_xml_prefix;
@@ -95,6 +95,7 @@ pub fn construct_saml_signature(
     transforms: &[String],
     config: Option<&SignatureConfig>,
 ) -> Result<String, SamlError> {
+    super::provider::ensure_crypto_provider_initialized()?;
     let doc = dom::parse(xml)?;
     let target = if sign_message {
         &doc.root
@@ -169,6 +170,7 @@ pub fn construct_message_signature(
     key: &Key,
     sig_alg: &str,
 ) -> Result<String, SamlError> {
+    super::provider::ensure_crypto_provider_initialized()?;
     let signing = require_operation_key(key.to_signing_key(), "no signing key")?;
     let alg = bergshamra::crypto::sign::from_uri(sig_alg).map_err(crypto_err)?;
     let signature = alg
@@ -195,9 +197,9 @@ pub fn verify_message_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::signature_algorithm::{
-        RSA_SHA1, RSA_SHA256, RSA_SHA256_MGF1, RSA_SHA512,
-    };
+    #[cfg(feature = "crypto-rustcrypto")]
+    use crate::constants::signature_algorithm::RSA_SHA1;
+    use crate::constants::signature_algorithm::{RSA_SHA256, RSA_SHA256_MGF1, RSA_SHA512};
     use crate::crypto::keys::load_private_key;
     use crate::crypto::verify::verify_signature;
     use crate::entity::EntitySetting;
@@ -231,7 +233,11 @@ mod tests {
     #[test]
     fn sign_message_then_verify_round_trip() -> Result<(), Box<dyn std::error::Error>> {
         let key = load_private_key(SP_PRIVKEY, None)?;
-        for alg in [RSA_SHA1, RSA_SHA256, RSA_SHA512] {
+        #[cfg(feature = "crypto-rustcrypto")]
+        let algorithms = [RSA_SHA1, RSA_SHA256, RSA_SHA512];
+        #[cfg(not(feature = "crypto-rustcrypto"))]
+        let algorithms = [RSA_SHA256, RSA_SHA512];
+        for alg in algorithms {
             let signed =
                 construct_saml_signature(AUTHN_REQUEST, true, &key, SP_CERT, alg, &[], None)?;
             assert!(signed.contains("<ds:Signature"));
