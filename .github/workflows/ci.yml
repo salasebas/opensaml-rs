@@ -40,7 +40,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   feature-check:
@@ -51,7 +51,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - run: cargo check -p saml-rs --no-default-features
       - run: cargo test -p saml-rs --no-default-features --test no_default_features
       - run: cargo test -p saml-rs --doc --no-default-features
@@ -91,7 +91,7 @@ jobs:
         with:
           go-version: stable
       # Keep the workspace's existing immutable v2 cache pin.
-      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # zizmor: ignore[ref-version-mismatch]
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # zizmor: ignore[ref-version-mismatch]
       # The nextest action ref publishes immutable generated commits outside
       # the repository's default-branch history.
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # zizmor: ignore[impostor-commit,ref-version-mismatch]
@@ -125,7 +125,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # 1.88.0
         with:
           toolchain: 1.88.0
-      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
       - run: cargo nextest run -p saml-rs --locked
       - run: cargo test -p saml-rs --doc --locked
@@ -138,7 +138,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2
         with:
           package: saml-rs
@@ -164,7 +164,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
       - run: cargo nextest run -p ${{ matrix.package }}
       - run: cargo test -p ${{ matrix.package }} --doc
@@ -190,7 +190,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - uses: taiki-e/install-action@cfdc41eb4dcb5a6d098e06c87a1e91076b799307 # nextest
       - run: cargo nextest run -p ${{ matrix.package }}
       - run: cargo test -p ${{ matrix.package }} --doc
@@ -214,6 +214,6 @@ jobs:
     if: always()
     steps:
       - name: Check required jobs
-        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: ${{ toJSON(needs) }}
