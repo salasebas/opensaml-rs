@@ -494,3 +494,52 @@ pub(crate) fn validate_protocol_profile(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AUTHN_REQUEST_START: &str = concat!(
+        r#"<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" "#,
+        r#"ID="a" Version="2.0" IssueInstant="2020-01-01T00:00:00Z">"#,
+    );
+
+    fn limits_with_attribute_budget(max_attributes_per_element: usize) -> XmlLimits {
+        XmlLimits {
+            max_attributes_per_element,
+            ..XmlLimits::default()
+        }
+    }
+
+    fn namespace_binding_limit(result: Result<(), SamlError>) -> bool {
+        matches!(
+            result,
+            Err(SamlError::Xml(message)) if message.contains("namespace bindings in scope")
+        )
+    }
+
+    #[test]
+    fn in_scope_namespace_budget_counts_nested_bindings_not_siblings() {
+        let limits = limits_with_attribute_budget(2);
+        let siblings = format!(
+            "{AUTHN_REQUEST_START}\
+             <p0 xmlns:p0=\"urn:test:0\"/>\
+             <p1 xmlns:p1=\"urn:test:1\"/>\
+             </samlp:AuthnRequest>"
+        );
+        let nested = format!(
+            "{AUTHN_REQUEST_START}\
+             <p0 xmlns:p0=\"urn:test:0\">\
+             <p1 xmlns:p1=\"urn:test:1\"/>\
+             </p0>\
+             </samlp:AuthnRequest>"
+        );
+
+        assert!(validate_protocol_profile(&siblings, ParserType::SamlRequest, limits).is_ok());
+        assert!(namespace_binding_limit(validate_protocol_profile(
+            &nested,
+            ParserType::SamlRequest,
+            limits,
+        )));
+    }
+}

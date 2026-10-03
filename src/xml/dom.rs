@@ -35,6 +35,9 @@ pub struct XmlLimits {
     /// Maximum element nodes in the document.
     pub max_nodes: usize,
     /// Maximum attributes on one element.
+    ///
+    /// Protocol-profile validation also uses this number as the maximum
+    /// namespace bindings allowed in scope at once.
     pub max_attributes_per_element: usize,
     /// Maximum decoded bytes for one attribute value.
     pub max_attribute_value_bytes: usize,
