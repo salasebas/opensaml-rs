@@ -59,14 +59,6 @@ Service Provider SSO:
 4. In the assertion consumer service, pass the posted fields and that pending
    value to `sp.finish_sso(...)`.
 
-The returned `SsoSession::verified_xml_signatures()` view preserves one evidence
-item per successfully verified embedded XML signature that covers the Response
-root or consumed Assertion. Each item reports the exact
-`SignatureMethod@Algorithm` URI and its verified coverage. This differs from
-`SsoSession::sig_alg()`, which remains the singular detached `SigAlg` from a
-verified HTTP-Redirect or HTTP-POST-SimpleSign signature. Reporting an embedded
-algorithm does not itself apply an application algorithm allowlist.
-
 The same shape, checked by `cargo test --doc`, is in the
 [crate-root SSO example](https://docs.rs/saml-rs/latest/saml_rs/#sp-initiated-sso).
 Identity Provider receive-and-respond is in

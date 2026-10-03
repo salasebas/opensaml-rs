@@ -8,7 +8,7 @@ use saml_rs::{
     LogoutSignaturePolicy, NameIdCreationPolicy, Passphrase, PrivateKeyPem,
     ResponseSignaturePolicy, SamlError, SignatureAlgorithm, SloEndpoint, SpConfig,
     SpMetadataConfig, SpValidationPolicy, SsoEndpoint, TemplatePolicy, TransformAlgorithm,
-    XmlEncryptionPolicy, XmlPolicy, XmlSignatureProfile,
+    XmlEncryptionPolicy, XmlPolicy,
 };
 
 fn signing_credentials() -> Credentials {
@@ -196,10 +196,6 @@ fn builders_default_to_strict_validation() -> Result<(), Box<dyn std::error::Err
         NameIdCreationPolicy::DoNotAllowCreate
     );
     assert_eq!(sp.validation.logout, LogoutPolicy::strict());
-    assert_eq!(
-        sp.validation.xml_signatures,
-        XmlSignatureProfile::AllowProviderSupportedForCompatibility
-    );
     Ok(())
 }
 
@@ -258,14 +254,6 @@ fn public_validation_defaults_remain_compatibility() {
     assert_eq!(
         AuthnRequestValidationPolicy::default(),
         AuthnRequestValidationPolicy::AllowUnsignedForCompatibility
-    );
-    assert_eq!(
-        XmlSignatureProfile::default(),
-        XmlSignatureProfile::AllowProviderSupportedForCompatibility
-    );
-    assert_eq!(
-        SpValidationPolicy::strict().xml_signatures,
-        XmlSignatureProfile::AllowProviderSupportedForCompatibility
     );
 }
 

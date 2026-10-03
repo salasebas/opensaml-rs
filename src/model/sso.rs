@@ -111,59 +111,6 @@ impl Assertion {
     }
 }
 
-/// Authenticated SAML objects covered by one verified embedded XML signature.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VerifiedXmlSignatureCoverage {
-    /// The signature covers the top-level SAML `Response` element.
-    ResponseRoot,
-    /// The signature directly covers the Assertion consumed for this session.
-    ConsumedAssertion,
-    /// The signature covers both the Response root and the consumed Assertion.
-    ResponseRootAndConsumedAssertion,
-}
-
-/// Evidence from one successfully verified embedded XML signature.
-///
-/// The algorithm URI comes from the exact `SignatureMethod` belonging to the
-/// signature node that the XML verifier reported as valid. This evidence does
-/// not contain raw XML, signature bytes, or certificate material, and exposing
-/// it does not apply an application algorithm allowlist.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerifiedXmlSignature {
-    algorithm_uri: String,
-    coverage: VerifiedXmlSignatureCoverage,
-}
-
-impl VerifiedXmlSignature {
-    pub(crate) fn from_verified_coverage(
-        algorithm_uri: String,
-        response_covered: bool,
-        assertion_directly_covered: bool,
-    ) -> Option<Self> {
-        let coverage = match (response_covered, assertion_directly_covered) {
-            (true, true) => VerifiedXmlSignatureCoverage::ResponseRootAndConsumedAssertion,
-            (true, false) => VerifiedXmlSignatureCoverage::ResponseRoot,
-            (false, true) => VerifiedXmlSignatureCoverage::ConsumedAssertion,
-            (false, false) => return None,
-        };
-        Some(Self {
-            algorithm_uri,
-            coverage,
-        })
-    }
-
-    /// Exact XML-DSig `SignatureMethod@Algorithm` URI for this verified signature.
-    pub fn algorithm_uri(&self) -> &str {
-        &self.algorithm_uri
-    }
-
-    /// Authenticated SAML object coverage established by this signature's
-    /// verified references.
-    pub fn coverage(&self) -> VerifiedXmlSignatureCoverage {
-        self.coverage
-    }
-}
-
 /// Parsed SSO login session.
 #[derive(Debug, Clone)]
 pub struct SsoSession {
@@ -180,7 +127,6 @@ pub struct SsoSession {
     not_before: Option<SamlInstant>,
     not_on_or_after: Option<SamlInstant>,
     sig_alg: Option<String>,
-    verified_xml_signatures: Vec<VerifiedXmlSignature>,
     raw_flow: FlowResult,
 }
 
@@ -260,25 +206,9 @@ impl SsoSession {
         self.not_on_or_after.as_ref()
     }
 
-    /// Verified detached Redirect or HTTP-POST-SimpleSign algorithm, when applicable.
-    ///
-    /// Embedded XML signatures are exposed separately through
-    /// [`Self::verified_xml_signatures`] because a message can contain multiple
-    /// verified signatures with different algorithms and coverage.
+    /// Verified detached signature algorithm, when applicable.
     pub fn sig_alg(&self) -> Option<&str> {
         self.sig_alg.as_deref()
-    }
-
-    /// Successfully verified embedded XML signatures that authenticate this
-    /// session's Response root or consumed Assertion.
-    ///
-    /// Each item is bound to one exact verifier-approved signature node and
-    /// its verified references. Invalid, untrusted, malformed, or unrelated
-    /// signatures are not included. The view preserves distinct signatures;
-    /// it does not select a signature by XML order. Applications may inspect
-    /// the reported algorithm URIs to enforce their own allowlist.
-    pub fn verified_xml_signatures(&self) -> &[VerifiedXmlSignature] {
-        &self.verified_xml_signatures
     }
 
     /// Assertion view.
@@ -464,15 +394,6 @@ impl TryFrom<FlowResult> for SsoSession {
     type Error = SamlError;
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
-        Self::try_from_with_verified_xml_signatures(raw_flow, Vec::new())
-    }
-}
-
-impl SsoSession {
-    pub(crate) fn try_from_with_verified_xml_signatures(
-        raw_flow: FlowResult,
-        verified_xml_signatures: Vec<VerifiedXmlSignature>,
-    ) -> Result<Self, SamlError> {
         let response_id = MessageId::try_new(required_str(&raw_flow.extract, "response.id")?)?;
         let response_issue_instant =
             issue_instant_from_extract(&raw_flow.extract, "response.issueInstant", "Response")?;
@@ -509,7 +430,6 @@ impl SsoSession {
             not_before,
             not_on_or_after,
             sig_alg,
-            verified_xml_signatures,
             raw_flow,
         })
     }

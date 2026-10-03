@@ -257,10 +257,6 @@ pub enum SamlError {
     #[error("consumed assertion is not directly covered by a trusted XML signature")]
     AssertionSignatureRequired,
 
-    /// An embedded XML signature selected an algorithm outside the strict SAML profile.
-    #[error("embedded XML signature algorithm is not allowed")]
-    AlgorithmUnsupported,
-
     // Metadata / trust validation.
     /// No trusted certificate could be selected for verification.
     #[error("no trusted certificate could be selected for verification")]

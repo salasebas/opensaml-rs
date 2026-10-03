@@ -341,11 +341,6 @@ fn parse_roots_inner(
             Event::DocType(_) => {
                 return Err(SamlError::Xml("DOCTYPE is not allowed".into()));
             }
-            Event::PI(instruction) if instruction.target() == "xml-stylesheet" => {
-                return Err(SamlError::Xml(
-                    "xml-stylesheet processing instructions are not allowed".into(),
-                ));
-            }
             Event::Eof => break,
             _ => {}
         }
@@ -431,13 +426,6 @@ mod tests {
 
         assert_eq!(document.root.local_name, "Root");
         Ok(())
-    }
-
-    #[test]
-    fn parse_rejects_stylesheet_processing_instruction() {
-        let result = parse("<?xml-stylesheet href=\"external.xsl\"?><Root/>");
-
-        assert!(matches!(result, Err(SamlError::Xml(_))));
     }
 
     #[test]

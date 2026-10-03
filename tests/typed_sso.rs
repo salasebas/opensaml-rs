@@ -10,20 +10,17 @@ use std::{
 };
 
 use saml_rs::binding::{base64_decode, base64_encode, deflate_raw_decode};
-use saml_rs::constants::signature_algorithm::{RSA_SHA256, RSA_SHA512};
-use saml_rs::crypto::{construct_saml_signature, keys::load_private_key};
 use saml_rs::error::TimeWindowField;
 use saml_rs::raw::Binding;
 use saml_rs::template::{LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
 use saml_rs::xml::dom::parse;
 use saml_rs::{
-    AcsEndpoint, AssertionSignaturePolicy, AuthnRequest, BrowserInput, CertificatePem, Credentials,
-    EntityId, ForceAuthn, FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy,
-    MetadataTrustPolicy, NameId, NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot,
-    PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso,
-    ResponseSignaturePolicy, Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor,
-    SpValidationPolicy, SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject,
-    TemplatePolicy, VerifiedXmlSignatureCoverage,
+    AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, ForceAuthn,
+    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId,
+    NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
+    RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, ResponseSignaturePolicy,
+    Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
+    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject, TemplatePolicy,
 };
 #[cfg(not(feature = "crypto-fips"))]
 use saml_rs::{XmlEncryptionPolicy, XmlPolicy};
@@ -122,19 +119,6 @@ fn response_signature_required_sp_config() -> Result<SpConfig, SamlError> {
     SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
         .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
         .acs_endpoint(AcsEndpoint::simple_sign(SP_ACS_SIMPLESIGN)?)
-        .credentials(credentials())
-        .validation(validation)
-        .build()
-}
-
-fn response_root_only_sp_config() -> Result<SpConfig, SamlError> {
-    let validation = SpValidationPolicy {
-        assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
-        responses: ResponseSignaturePolicy::RequireSigned,
-        ..SpValidationPolicy::strict()
-    };
-    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
-        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
         .credentials(credentials())
         .validation(validation)
         .build()
@@ -768,96 +752,6 @@ fn typed_facade_runs_sp_initiated_sso() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
-fn typed_http_post_exposes_verified_assertion_signature_evidence(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let exchange = start_receive_respond()?;
-    let session = exchange.sp.finish_sso(
-        &exchange.idp_descriptor,
-        &exchange.pending,
-        BrowserInput::<SsoResponse>::post(exchange.response_fields),
-        validation(),
-    )?;
-
-    let [signature] = session.verified_xml_signatures() else {
-        return Err("expected one verified embedded XML signature".into());
-    };
-    assert_eq!(signature.algorithm_uri(), RSA_SHA256);
-    assert_eq!(
-        signature.coverage(),
-        VerifiedXmlSignatureCoverage::ConsumedAssertion
-    );
-    assert_eq!(session.sig_alg(), None);
-    Ok(())
-}
-
-#[test]
-fn typed_http_post_exposes_verified_response_root_signature_evidence(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = Saml::sp(response_root_only_sp_config()?)?;
-    let idp = Saml::idp(idp_config()?)?;
-    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
-    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
-    let received = idp.receive_sso(
-        &sp_descriptor,
-        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
-        validation(),
-    )?;
-    let response = idp.respond_sso(
-        &sp_descriptor,
-        &received,
-        subject(),
-        RespondSso::post().sign_response(),
-    )?;
-    let session = sp.finish_sso(
-        &idp_descriptor,
-        &started.pending,
-        BrowserInput::<SsoResponse>::post(post_fields(&response)?),
-        validation(),
-    )?;
-
-    let [signature] = session.verified_xml_signatures() else {
-        return Err("expected one verified embedded XML signature".into());
-    };
-    assert_eq!(signature.algorithm_uri(), RSA_SHA256);
-    assert_eq!(
-        signature.coverage(),
-        VerifiedXmlSignatureCoverage::ResponseRoot
-    );
-    assert_eq!(session.sig_alg(), None);
-    Ok(())
-}
-
-#[test]
-fn typed_http_post_preserves_distinct_response_and_assertion_signature_evidence(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let exchange = start_receive_respond()?;
-    let response_xml = response_xml_from_fields(&exchange.response_fields)?;
-    let key = load_private_key(PRIVKEY, None)?;
-    let response_and_assertion_signed =
-        construct_saml_signature(&response_xml, true, &key, CERT, RSA_SHA512, &[], None)?;
-    let response_fields =
-        response_fields_with_xml(exchange.response_fields, &response_and_assertion_signed)?;
-    let session = exchange.sp.finish_sso(
-        &exchange.idp_descriptor,
-        &exchange.pending,
-        BrowserInput::<SsoResponse>::post(response_fields),
-        validation(),
-    )?;
-
-    assert_eq!(session.verified_xml_signatures().len(), 2);
-    assert!(session.verified_xml_signatures().iter().any(|signature| {
-        signature.algorithm_uri() == RSA_SHA512
-            && signature.coverage() == VerifiedXmlSignatureCoverage::ResponseRoot
-    }));
-    assert!(session.verified_xml_signatures().iter().any(|signature| {
-        signature.algorithm_uri() == RSA_SHA256
-            && signature.coverage() == VerifiedXmlSignatureCoverage::ConsumedAssertion
-    }));
-    assert_eq!(session.sig_alg(), None);
-    Ok(())
-}
-
-#[test]
 fn typed_required_response_signature_rejects_assertion_only_post(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sp = Saml::sp(response_signature_required_sp_config()?)?;
@@ -1005,15 +899,6 @@ fn typed_facade_runs_simplesign_sso_response_binding() -> Result<(), Box<dyn std
         session.assertion_issue_instant()
     );
     assert_eq!(session.name_id().value(), "alice@example.com");
-    assert_eq!(session.sig_alg(), Some(RSA_SHA256));
-    let [signature] = session.verified_xml_signatures() else {
-        return Err("expected one verified embedded XML signature".into());
-    };
-    assert_eq!(signature.algorithm_uri(), RSA_SHA256);
-    assert_eq!(
-        signature.coverage(),
-        VerifiedXmlSignatureCoverage::ConsumedAssertion
-    );
     Ok(())
 }
 

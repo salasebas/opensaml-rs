@@ -1,9 +1,7 @@
 use crate::browser::{BrowserInput, Outbound, PendingAuthnRequest, SsoResponseBinding, Started};
 use crate::config::IdpDescriptor;
-use crate::flow::{FlowResultWithSignatureEvidence, HttpRequest};
-use crate::model::{
-    AuthnRequest, SamlValidationContext, SsoResponse, SsoSession, VerifiedXmlSignature,
-};
+use crate::flow::HttpRequest;
+use crate::model::{AuthnRequest, SamlValidationContext, SsoResponse, SsoSession};
 use crate::sp::{LoginRequestOptions, LoginResponseParseOptions, ServiceProvider};
 
 use super::raw_mapping::{
@@ -11,23 +9,6 @@ use super::raw_mapping::{
     raw_idp_descriptor, relay_state_from_input, selected_acs,
 };
 use super::{ForceAuthn, Saml, SamlError, Sp, StartSso};
-
-fn session_from_verified_flow(
-    result: FlowResultWithSignatureEvidence,
-) -> Result<SsoSession, SamlError> {
-    let (flow, evidence) = result.into_parts();
-    let verified_xml_signatures = evidence
-        .into_iter()
-        .filter_map(|signature| {
-            VerifiedXmlSignature::from_verified_coverage(
-                signature.algorithm_uri().to_string(),
-                signature.response_covered(),
-                signature.assertion_directly_covered(),
-            )
-        })
-        .collect();
-    SsoSession::try_from_with_verified_xml_signatures(flow, verified_xml_signatures)
-}
 
 impl Saml<Sp> {
     /// Local SP metadata XML.
@@ -181,7 +162,7 @@ impl Saml<Sp> {
                 )
                 .with_expected_recipient(pending.acs().location().as_str()),
             )?;
-        let session = session_from_verified_flow(flow)?;
+        let session = SsoSession::try_from(flow)?;
         session.check_and_store_replay(&mut validation)?;
         Ok(session)
     }
@@ -213,7 +194,7 @@ impl Saml<Sp> {
                 validation.now(),
                 validation.clock_skew().as_millis(),
             )?;
-        let session = session_from_verified_flow(flow)?;
+        let session = SsoSession::try_from(flow)?;
         session.check_and_store_replay(&mut validation)?;
         Ok(session)
     }

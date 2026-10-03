@@ -2,7 +2,7 @@ use saml_rs::{
     AcsEndpoint, AuthnRequest, EndpointUrl, EntityId, Idp, LogoutBinding, LogoutRequest, MessageId,
     NameIdCreationRequest, PendingAuthnRequest, PendingLogoutRequest, PendingSnapshot,
     RelayStateParam, Saml, SamlError, SamlInstant, SloEndpoint, Sp, SsoEndpoint, SsoRequestBinding,
-    SsoResponseBinding, VerifiedXmlSignature, VerifiedXmlSignatureCoverage,
+    SsoResponseBinding,
 };
 
 fn assert_send_sync<T: Send + Sync>() {}
@@ -83,11 +83,6 @@ fn typed_api_contract_reexports_browser_and_model_types() {
         saml_rs::SsoSession::response_issue_instant;
     let _: for<'a> fn(&'a saml_rs::SsoSession) -> &'a SamlInstant =
         saml_rs::SsoSession::assertion_issue_instant;
-    let _: for<'a> fn(&'a saml_rs::SsoSession) -> &'a [VerifiedXmlSignature] =
-        saml_rs::SsoSession::verified_xml_signatures;
-    let _: for<'a> fn(&'a VerifiedXmlSignature) -> &'a str = VerifiedXmlSignature::algorithm_uri;
-    let _: fn(&VerifiedXmlSignature) -> VerifiedXmlSignatureCoverage =
-        VerifiedXmlSignature::coverage;
     let _ = std::any::type_name::<saml_rs::BrowserInput<saml_rs::AuthnRequest>>();
     let _ = std::any::type_name::<saml_rs::FormField>();
     let _ = std::any::type_name::<saml_rs::Outbound<saml_rs::AuthnRequest>>();
@@ -111,8 +106,6 @@ fn typed_api_contract_reexports_browser_and_model_types() {
     let _ = std::any::type_name::<saml_rs::SessionIndex>();
     let _ = std::any::type_name::<saml_rs::SsoResponse>();
     let _ = std::any::type_name::<saml_rs::SsoSession>();
-    let _ = std::any::type_name::<VerifiedXmlSignature>();
-    let _ = std::any::type_name::<VerifiedXmlSignatureCoverage>();
     let _ = std::any::type_name::<saml_rs::Subject>();
     let _ = std::any::type_name::<saml_rs::SubjectConfirmation>();
 }

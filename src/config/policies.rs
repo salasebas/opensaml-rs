@@ -44,26 +44,6 @@ pub enum ResponseSignaturePolicy {
     RequireSigned,
 }
 
-/// Inbound embedded XML-signature algorithm and reference profile.
-///
-/// The selected profile applies to every embedded signature that authenticates
-/// an accepted SSO or Single Logout message. [`Self::StrictRsaSha2`] is an
-/// explicit library policy. SAML does not require a receiver to reject other
-/// provider-supported algorithms, and [`SpValidationPolicy::strict`] keeps the
-/// provider-supported profile.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum XmlSignatureProfile {
-    /// Require one local `#id` reference, RSA-SHA256/384/512, a SHA-256/384/512
-    /// digest, and exclusive canonicalization. Each transform element, when
-    /// present, must belong to the XML-DSig namespace and use enveloped-signature
-    /// or exclusive canonicalization.
-    StrictRsaSha2,
-    /// Accept every algorithm and same-document reference shape supported by
-    /// the selected cryptographic provider.
-    #[default]
-    AllowProviderSupportedForCompatibility,
-}
-
 /// Whether an SP signs outgoing AuthnRequests.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AuthnRequestSigningPolicy {
@@ -121,8 +101,6 @@ pub struct SpValidationPolicy {
     pub assertions: AssertionSignaturePolicy,
     /// Top-level SAML Response signature requirement.
     pub responses: ResponseSignaturePolicy,
-    /// Embedded XML-signature algorithm and reference requirements.
-    pub xml_signatures: XmlSignatureProfile,
     /// Outbound AuthnRequest signing behavior.
     pub authn_requests: AuthnRequestSigningPolicy,
     /// Audience validation behavior.
@@ -139,7 +117,6 @@ impl SpValidationPolicy {
         Self {
             assertions: AssertionSignaturePolicy::RequireSigned,
             responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
-            xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
             authn_requests: AuthnRequestSigningPolicy::Sign,
             audience: AudienceValidationPolicy::Validate,
             name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
@@ -152,7 +129,6 @@ impl SpValidationPolicy {
         Self {
             assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
             responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility,
-            xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
             authn_requests: AuthnRequestSigningPolicy::DoNotSignForCompatibility,
             audience: AudienceValidationPolicy::SkipForCompatibility,
             name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
