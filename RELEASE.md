@@ -33,11 +33,11 @@ Recommended setup is crates.io trusted publishing:
    `main` branch. The workflow runs from `main`; the `vX.Y.Z` tag is created
    later by release-plz.
 3. In crates.io, configure trusted publishing for `saml-rs`: repository
-   `salasebas/opensaml-rs`, workflow `.github/workflows/release-plz.yml`,
+   `salasebas/saml-rs`, workflow `.github/workflows/release-plz.yml`,
    environment `release`.
 4. Do not configure `CARGO_REGISTRY_TOKEN` when using trusted publishing.
 
-The GitHub repository is `salasebas/opensaml-rs`. The published crate name is
+The GitHub repository is `salasebas/saml-rs`. The published crate name is
 `saml-rs`.
 
 ## Manual fallback

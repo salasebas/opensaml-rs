@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/saml-rs.svg)](https://crates.io/crates/saml-rs)
 [![docs.rs](https://img.shields.io/docsrs/saml-rs)](https://docs.rs/saml-rs)
-[![MIT licensed](https://img.shields.io/crates/l/saml-rs)](https://github.com/salasebas/opensaml-rs/blob/main/LICENSE)
+[![MIT licensed](https://img.shields.io/crates/l/saml-rs)](https://github.com/salasebas/saml-rs/blob/main/LICENSE)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success)](#security)
 
 Pure-Rust SAML 2.0 Service Provider and Identity Provider support. Use it when
@@ -12,13 +12,13 @@ detached message signatures go through
 [`bergshamra`](https://crates.io/crates/bergshamra).
 
 The Cargo package is `saml-rs`. The Rust import path is `saml_rs`. Source and
-issues live in [salasebas/opensaml-rs](https://github.com/salasebas/opensaml-rs).
+issues live in [salasebas/saml-rs](https://github.com/salasebas/saml-rs).
 
 **Status:** pre-1.0. Minor releases can change the API or runtime behavior.
 There has been no external security audit. Review the crate, your
 configuration, and the peer metadata trust model before production use.
 
-**Help:** [open an issue](https://github.com/salasebas/opensaml-rs/issues).
+**Help:** [open an issue](https://github.com/salasebas/saml-rs/issues).
 Before a minor upgrade, read the
 [migration guides](docs/migrations/README.md).
 
@@ -225,7 +225,7 @@ cargo nextest run -p saml-rs --no-default-features --features crypto-rustcrypto
 ```
 
 AWS-LC and FIPS checks run on supported Linux runners. See
-[`.github/workflows/ci.yml`](https://github.com/salasebas/opensaml-rs/blob/main/.github/workflows/ci.yml).
+[`.github/workflows/ci.yml`](https://github.com/salasebas/saml-rs/blob/main/.github/workflows/ci.yml).
 
 ## License
 
