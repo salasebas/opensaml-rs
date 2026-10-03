@@ -4,39 +4,36 @@
 [![docs.rs](https://img.shields.io/docsrs/rustsaml)](https://docs.rs/rustsaml)
 [![MIT licensed](https://img.shields.io/crates/l/rustsaml)](https://github.com/salasebas/saml-rs/blob/main/LICENSE)
 
-Compatibility re-export of [`saml-rs`](https://crates.io/crates/saml-rs). The
-implementation, examples, and issue tracker are in
-[salasebas/saml-rs](https://github.com/salasebas/saml-rs).
+**Deprecated.** `rustsaml` will no longer be maintained. Please use
+[`saml-rs`](https://crates.io/crates/saml-rs).
 
-**Status:** maintained with `saml-rs`, and pre-1.0. New projects should depend
-on `saml-rs`. The Rust import path here is `rustsaml`.
+```toml
+[dependencies]
+saml-rs = "0.5"
+```
+
+```rust
+use saml_rs::{Saml, Sp};
+```
+
+The import path changes from `rustsaml` to `saml_rs`. The API is the same.
+
+This package remains a compatibility re-export, so existing dependencies keep
+resolving. Do not add `rustsaml` to a new project.
+
+The implementation, examples, and issue tracker are in
+[salasebas/saml-rs](https://github.com/salasebas/saml-rs).
 
 **Help:** [open an issue](https://github.com/salasebas/saml-rs/issues) on
 the source repository.
 
-## Install
-
-```toml
-[dependencies]
-rustsaml = "0.5"
-```
-
-```rust
-use rustsaml::{Saml, Sp};
-```
-
-Feature flags match `saml-rs` and are forwarded to it. With
-`default-features = false`, select one crypto provider before calling signing
-or encryption APIs. The canonical feature list is in the
-[saml-rs README](https://github.com/salasebas/saml-rs/blob/main/README.md#features).
-
-## Use it
+## Use saml-rs
 
 Follow the [saml-rs guide](https://github.com/salasebas/saml-rs/blob/main/README.md):
 
 - [Signed SSO example](https://github.com/salasebas/saml-rs/blob/main/examples/sso.rs)
 - [Single Logout example](https://github.com/salasebas/saml-rs/blob/main/examples/slo.rs)
-- [API reference](https://docs.rs/rustsaml)
+- [API reference](https://docs.rs/saml-rs)
 - [Migration guides](https://github.com/salasebas/saml-rs/blob/main/docs/migrations/README.md)
 
 From a clone of the source repository:
@@ -47,8 +44,7 @@ cargo run -p saml-rs --example sso
 
 ## Security
 
-`rustsaml` 0.5 and later forbid unsafe code and re-export the `saml-rs`
-validation and crypto policy. Read the
+Read the
 [saml-rs security notes](https://github.com/salasebas/saml-rs/blob/main/README.md#security)
 before production use. This crate has not had an external security audit.
 
