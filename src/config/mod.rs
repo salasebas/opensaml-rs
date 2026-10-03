@@ -20,5 +20,5 @@ pub use policies::{
     AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
     AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, IdpValidationPolicy, LogoutPolicy,
     LogoutSignaturePolicy, NameIdCreationPolicy, ResponseSignaturePolicy, SpValidationPolicy,
-    TemplatePolicy, XmlEncryptionPolicy, XmlPolicy,
+    TemplatePolicy, XmlEncryptionPolicy, XmlPolicy, XmlSignatureProfile,
 };

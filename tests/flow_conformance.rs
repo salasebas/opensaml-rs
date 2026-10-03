@@ -470,6 +470,7 @@ fn flow_conformance_login_request_redirect_signed_unencrypted_pkcs8(
     )
 }
 #[test]
+#[cfg(feature = "crypto-rustcrypto")]
 fn flow_conformance_login_request_redirect_signed_encrypted_pkcs8(
 ) -> Result<(), Box<dyn std::error::Error>> {
     signed_request_with_key(

@@ -26,6 +26,8 @@ pub use logout::{LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject};
 pub use received::Received;
 pub use relay::{RelayState, RelayStateParam, MAX_RELAY_STATE_BYTES};
 pub use session::AuthnSession;
-pub use sso::{Assertion, SsoResponse, SsoSession};
+pub use sso::{
+    Assertion, SsoResponse, SsoSession, VerifiedXmlSignature, VerifiedXmlSignatureCoverage,
+};
 pub use subject::{NameId, NameIdCreationRequest, NameIdPolicy, Subject, SubjectConfirmation};
 pub use validation::{ClockSkew, ReplayCache, ReplayKey, ReplayPolicy, SamlValidationContext};

@@ -52,6 +52,9 @@ pub struct EntitySetting {
     pub validate_audience: bool,
     /// SP: requires signed messages.
     pub want_message_signed: bool,
+    /// Typed SP: enforce the strict RSA-SHA2 profile on embedded signatures that
+    /// authenticate accepted SSO and Single Logout messages.
+    pub(crate) strict_xml_signature_profile: bool,
     /// Typed SP: requires outer integrity for CBC-encrypted Assertions.
     pub(crate) want_encrypted_cbc_response_signed: bool,
     /// IdP: requires signed AuthnRequests.
@@ -142,6 +145,10 @@ impl fmt::Debug for EntitySetting {
             .field("want_assertions_signed", &self.want_assertions_signed)
             .field("validate_audience", &self.validate_audience)
             .field("want_message_signed", &self.want_message_signed)
+            .field(
+                "strict_xml_signature_profile",
+                &self.strict_xml_signature_profile,
+            )
             .field(
                 "want_encrypted_cbc_response_signed",
                 &self.want_encrypted_cbc_response_signed,
@@ -246,6 +253,7 @@ impl Default for EntitySetting {
             want_assertions_signed: false,
             validate_audience: true,
             want_message_signed: false,
+            strict_xml_signature_profile: false,
             want_encrypted_cbc_response_signed: false,
             want_authn_requests_signed: false,
             want_logout_request_signed: true,
