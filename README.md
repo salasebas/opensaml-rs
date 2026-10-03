@@ -214,7 +214,9 @@ keep resolving:
 | [`samlet`](https://crates.io/crates/samlet) | `samlet` | [docs](https://docs.rs/samlet) |
 
 `opensaml` still exports the deprecated `OpenSamlError` alias of `SamlError`.
-These packages are maintained with `saml-rs`. They are separate from
+`opensaml`, `samlify`, and `samlet` are maintained with `saml-rs`.
+`rustsaml` will no longer be maintained. Please use `saml-rs`.
+They are separate from
 Shibboleth OpenSAML and from the Node.js samlify project.
 [`samael`](https://crates.io/crates/samael) is the other established Rust SAML
 crate; it commonly uses the native `xmlsec` stack.
