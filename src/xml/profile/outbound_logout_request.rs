@@ -67,7 +67,7 @@ fn validate_root(
     element_namespace: NamespaceKind,
     expectation: &OutboundLogoutRequestExpectation<'_>,
 ) -> Result<(), SamlError> {
-    if element.local_name().as_ref() != b"LogoutRequest"
+    if element.local_name().into_inner().as_bytes() != b"LogoutRequest"
         || element_namespace != NamespaceKind::Protocol
     {
         return Err(profile_error(format!(
@@ -270,7 +270,7 @@ fn validate_start(
     }
 
     match (
-        element.local_name().as_ref(),
+        element.local_name().into_inner().as_bytes(),
         element_namespace,
         &state.root_stage,
     ) {
@@ -417,13 +417,10 @@ fn validate_stream(
                 finish_element(&current)?;
             }
             Event::Text(text) => {
-                let text = text
-                    .decode()
-                    .map_err(|error| SamlError::Xml(error.to_string()))?;
                 validate_structural_text(stack.last(), text.as_bytes())?;
             }
             Event::CData(text) => {
-                validate_structural_text(stack.last(), text.as_ref())?;
+                validate_structural_text(stack.last(), text.as_bytes())?;
             }
             Event::GeneralRef(reference) => {
                 validate_structural_reference(stack.last(), &reference)?;

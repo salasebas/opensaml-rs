@@ -153,7 +153,7 @@ fn validate_outbound_logout_root(
     expectation: &OutboundLogoutExpectation<'_>,
     state: &mut OutboundLogoutState,
 ) -> Result<(), SamlError> {
-    if element.local_name().as_ref() != b"LogoutResponse"
+    if element.local_name().into_inner().as_bytes() != b"LogoutResponse"
         || element_namespace != NamespaceKind::Protocol
     {
         return Err(profile_error(format!(
@@ -325,7 +325,7 @@ fn validate_outbound_root_child(
     state: &mut OutboundLogoutState,
 ) -> Result<OutboundLogoutElement, SamlError> {
     let local = element.local_name();
-    match (local.as_ref(), element_namespace, &state.root_stage) {
+    match (local.into_inner().as_bytes(), element_namespace, &state.root_stage) {
         (b"Issuer", NamespaceKind::Assertion, RootStage::ExpectIssuer) => {
             validate_outbound_issuer(reader, element, element_namespace)?;
             state.root_stage = RootStage::AfterIssuer;
@@ -375,7 +375,11 @@ fn validate_outbound_status_child(
     state: &mut OutboundLogoutState,
 ) -> Result<OutboundLogoutElement, SamlError> {
     let local = element.local_name();
-    match (local.as_ref(), element_namespace, &state.status_stage) {
+    match (
+        local.into_inner().as_bytes(),
+        element_namespace,
+        &state.status_stage,
+    ) {
         (
             b"StatusCode",
             NamespaceKind::Protocol,
@@ -434,7 +438,7 @@ fn validate_outbound_logout_start(
         }
         OutboundLogoutElement::StatusCode { child_seen } => {
             if *child_seen
-                || element.local_name().as_ref() != b"StatusCode"
+                || element.local_name().into_inner().as_bytes() != b"StatusCode"
                 || element_namespace != NamespaceKind::Protocol
             {
                 return Err(profile_error(
@@ -581,13 +585,10 @@ fn validate_outbound_logout_stream(
                 finish_outbound_logout_element(&current, &state)?;
             }
             Event::Text(text) => {
-                let text = text
-                    .decode()
-                    .map_err(|error| SamlError::Xml(error.to_string()))?;
                 validate_structural_text(stack.last(), text.as_bytes())?;
             }
             Event::CData(text) => {
-                validate_structural_text(stack.last(), text.as_ref())?;
+                validate_structural_text(stack.last(), text.as_bytes())?;
             }
             Event::GeneralRef(reference) => {
                 validate_structural_reference(stack.last(), &reference)?;

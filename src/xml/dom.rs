@@ -111,7 +111,7 @@ pub struct Document {
 }
 
 fn local_name_str(name: QName) -> String {
-    String::from_utf8_lossy(name.local_name().as_ref()).into_owned()
+    name.local_name().into_inner().to_owned()
 }
 
 fn limit_exceeded(limit: &str, max: usize) -> SamlError {
@@ -166,7 +166,7 @@ fn read_attrs(
         let attr = attr.map_err(|err| SamlError::Xml(err.to_string()))?;
         let key = local_name_str(attr.key);
         let value = attr
-            .decoded_and_normalized_value(XmlVersion::Implicit1_0, e.decoder())
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|err| SamlError::Xml(err.to_string()))?
             .into_owned();
         if value.len() > limits.max_attribute_value_bytes {
@@ -225,8 +225,8 @@ fn push_general_ref(node: &mut Node, e: BytesRef, limits: XmlLimits) -> Result<(
         return Ok(());
     }
 
-    let entity = e.decode().map_err(|err| SamlError::Xml(err.to_string()))?;
-    let resolved = resolve_predefined_entity(&entity)
+    let entity = e.as_ref();
+    let resolved = resolve_predefined_entity(entity)
         .ok_or_else(|| SamlError::Xml(format!("unrecognized entity `{entity}`")))?;
     checked_append_text(&mut node.text, resolved, limits)?;
     Ok(())
@@ -313,18 +313,15 @@ fn parse_roots_inner(
                 }
             }
             Event::Text(e) => {
-                let text = e.decode().map_err(|err| SamlError::Xml(err.to_string()))?;
                 if let Some(top) = stack.last_mut() {
-                    checked_append_text(&mut top.text, &text, limits)?;
-                } else if !is_xml_whitespace(&text) {
+                    checked_append_text(&mut top.text, e.as_ref(), limits)?;
+                } else if !is_xml_whitespace(e.as_ref()) {
                     reject_non_document_content(mode)?;
                 }
             }
             Event::CData(e) => {
                 if let Some(top) = stack.last_mut() {
-                    let inner = e.into_inner();
-                    let text = String::from_utf8_lossy(&inner);
-                    checked_append_text(&mut top.text, &text, limits)?;
+                    checked_append_text(&mut top.text, e.as_ref(), limits)?;
                 } else {
                     reject_non_document_content(mode)?;
                 }

@@ -15,7 +15,7 @@ pub(crate) use outbound_logout_request::{
     OutboundLogoutRequestValidation,
 };
 
-const XML_ENCRYPTION_NS: &[u8] = b"http://www.w3.org/2001/04/xmlenc#";
+const XML_ENCRYPTION_NS: &str = "http://www.w3.org/2001/04/xmlenc#";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NamespaceKind {
@@ -42,16 +42,14 @@ impl ExpandedName {
 
 fn classify_namespace(resolved: ResolveResult<'_>) -> NamespaceKind {
     match resolved {
-        ResolveResult::Bound(value) if value.as_ref() == namespace::PROTOCOL.as_bytes() => {
+        ResolveResult::Bound(value) if value.into_inner() == namespace::PROTOCOL => {
             NamespaceKind::Protocol
         }
-        ResolveResult::Bound(value) if value.as_ref() == namespace::ASSERTION.as_bytes() => {
+        ResolveResult::Bound(value) if value.into_inner() == namespace::ASSERTION => {
             NamespaceKind::Assertion
         }
-        ResolveResult::Bound(value) if value.as_ref() == namespace::DSIG.as_bytes() => {
-            NamespaceKind::Dsig
-        }
-        ResolveResult::Bound(value) if value.as_ref() == XML_ENCRYPTION_NS => {
+        ResolveResult::Bound(value) if value.into_inner() == namespace::DSIG => NamespaceKind::Dsig,
+        ResolveResult::Bound(value) if value.into_inner() == XML_ENCRYPTION_NS => {
             NamespaceKind::XmlEncryption
         }
         ResolveResult::Bound(_) => NamespaceKind::Other,
@@ -74,7 +72,7 @@ fn parser_root(parser_type: ParserType) -> &'static [u8] {
 }
 
 fn element_label(element: &BytesStart<'_>) -> String {
-    String::from_utf8_lossy(element.local_name().as_ref()).into_owned()
+    element.local_name().into_inner().to_owned()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -97,11 +95,11 @@ fn validate_attributes(
             continue;
         }
         let (resolved, local) = reader.resolver().resolve_attribute(attribute.key);
-        if !consumed.contains(&local.as_ref()) {
+        if !consumed.contains(&local.into_inner().as_bytes()) {
             if matches!(unexpected, UnexpectedAttributePolicy::Reject) {
                 return Err(profile_error(format!(
                     "unexpected attribute {} on {}",
-                    String::from_utf8_lossy(attribute.key.as_ref()),
+                    attribute.key.into_inner(),
                     element_label(element),
                 )));
             }
@@ -110,15 +108,15 @@ fn validate_attributes(
         if !matches!(resolved, ResolveResult::Unbound) {
             return Err(profile_error(format!(
                 "attribute {} on {} must be unqualified",
-                String::from_utf8_lossy(local.as_ref()),
+                local.into_inner(),
                 element_label(element),
             )));
         }
         let value = attribute
-            .decoded_and_normalized_value(XmlVersion::Implicit1_0, element.decoder())
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|error| SamlError::Xml(error.to_string()))?
             .into_owned();
-        values.push((local.as_ref().to_vec(), value));
+        values.push((local.into_inner().as_bytes().to_vec(), value));
     }
 
     for required_name in required {
@@ -261,7 +259,9 @@ fn validate_root(
     parser_type: ParserType,
 ) -> Result<(), SamlError> {
     let expected = parser_root(parser_type);
-    if element.local_name().as_ref() != expected || element_namespace != NamespaceKind::Protocol {
+    if element.local_name().into_inner().as_bytes() != expected
+        || element_namespace != NamespaceKind::Protocol
+    {
         return Err(profile_error(format!(
             "expected root {{{}}}{}, got {}",
             namespace::PROTOCOL,
@@ -409,7 +409,7 @@ fn validate_element(
     }
 
     let local = element.local_name();
-    let expected_namespace = expected_child_namespace(stack, local.as_ref());
+    let expected_namespace = expected_child_namespace(stack, local.into_inner().as_bytes());
     if let Some(expected) = expected_namespace {
         if element_namespace != expected {
             return Err(profile_error(format!(
@@ -423,7 +423,7 @@ fn validate_element(
     }
 
     let expanded = ExpandedName {
-        local: local.as_ref().to_vec(),
+        local: local.into_inner().as_bytes().to_vec(),
         namespace: element_namespace,
     };
     let consumed = consumed_attributes(&expanded);
@@ -449,9 +449,11 @@ pub(crate) fn validate_protocol_profile(
 ) -> Result<(), SamlError> {
     limits.check_input_bytes(xml.len())?;
     let mut reader = NsReader::from_str(xml);
+    // quick-xml 0.42 caps bindings currently in scope, not declarations on one
+    // element. The configured attribute budget remains that cap.
     reader
         .resolver_mut()
-        .set_max_declarations_per_element(limits.max_attributes_per_element);
+        .set_max_namespace_bindings(limits.max_attributes_per_element);
     let mut stack = Vec::new();
     let mut saw_root = false;
 
@@ -465,7 +467,7 @@ pub(crate) fn validate_protocol_profile(
                 validate_element(&reader, &element, element_namespace, &stack, parser_type)?;
                 saw_root = true;
                 stack.push(ExpandedName {
-                    local: element.local_name().as_ref().to_vec(),
+                    local: element.local_name().into_inner().as_bytes().to_vec(),
                     namespace: element_namespace,
                 });
             }

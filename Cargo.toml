@@ -58,7 +58,7 @@ crypto-pkcs11 = ["bergshamra?/pkcs11"]
 [dependencies]
 base64 = "0.23"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-quick-xml = "0.41"
+quick-xml = "0.42"
 thiserror = "2"
 time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 url = "2"
