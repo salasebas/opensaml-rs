@@ -108,6 +108,8 @@ pub struct FlowOptions<'a> {
     pub xml_limits: XmlLimits,
     /// Whether to require and verify a signature.
     pub check_signature: bool,
+    /// Whether embedded SAML signatures must satisfy the strict RSA-SHA2 profile.
+    pub strict_xml_signature_profile: bool,
     /// Expected issuer (peer `entityID`).
     pub from_issuer: Option<&'a str>,
     /// Peer signing certificate(s) for verification.
@@ -142,6 +144,7 @@ impl<'a> Default for FlowOptions<'a> {
             redirect_inflate_max_bytes: MAX_DEFLATE_RAW_DECODE_BYTES,
             xml_limits: XmlLimits::default(),
             check_signature: false,
+            strict_xml_signature_profile: false,
             from_issuer: None,
             signing_certs: &[],
             decrypt_key: None,
@@ -182,6 +185,28 @@ struct PreparedMessage {
     saml_content: String,
     assertion: Option<String>,
     response_authenticated: bool,
+    verified_xml_signatures: Vec<VerifiedXmlSignatureEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VerifiedXmlSignatureEvidence {
+    algorithm_uri: String,
+    assertion_directly_covered: bool,
+    response_covered: bool,
+}
+
+impl VerifiedXmlSignatureEvidence {
+    pub(crate) fn algorithm_uri(&self) -> &str {
+        &self.algorithm_uri
+    }
+
+    pub(crate) fn assertion_directly_covered(&self) -> bool {
+        self.assertion_directly_covered
+    }
+
+    pub(crate) fn response_covered(&self) -> bool {
+        self.response_covered
+    }
 }
 
 #[cfg(any(
@@ -195,6 +220,7 @@ struct EmbeddedSignatureEvidence {
     verified_node: Option<String>,
     assertion_directly_covered: bool,
     response_covered: bool,
+    verified_xml_signatures: Vec<VerifiedXmlSignatureEvidence>,
 }
 
 /// Result of a successful flow.
@@ -206,6 +232,26 @@ pub struct FlowResult {
     pub extract: Value,
     /// Verified signature algorithm, if a signature was checked.
     pub sig_alg: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FlowResultWithSignatureEvidence {
+    flow_result: FlowResult,
+    verified_xml_signatures: Vec<VerifiedXmlSignatureEvidence>,
+}
+
+impl FlowResultWithSignatureEvidence {
+    pub(crate) fn into_parts(self) -> (FlowResult, Vec<VerifiedXmlSignatureEvidence>) {
+        (self.flow_result, self.verified_xml_signatures)
+    }
+
+    fn into_flow_result(self) -> FlowResult {
+        self.flow_result
+    }
+
+    pub(crate) fn extract(&self) -> &Value {
+        &self.flow_result.extract
+    }
 }
 
 fn default_fields(
@@ -449,16 +495,27 @@ fn verify_embedded_signature(
     xml: &str,
     opts: &FlowOptions<'_>,
 ) -> Result<EmbeddedSignatureEvidence, SamlError> {
-    let verification = crate::crypto::verify::verify_signatures_detailed_with_limits(
+    let verification = crate::crypto::verify::verify_signatures_detailed_with_profile(
         xml,
         opts.signing_certs,
         opts.xml_limits,
+        opts.strict_xml_signature_profile,
     )?;
+    let verified_xml_signatures = verification
+        .verified_embedded_signatures()
+        .iter()
+        .map(|signature| VerifiedXmlSignatureEvidence {
+            algorithm_uri: signature.algorithm_uri().to_string(),
+            assertion_directly_covered: signature.assertion_directly_covered(),
+            response_covered: signature.response_covered(),
+        })
+        .collect();
     Ok(EmbeddedSignatureEvidence {
         verified: verification.verified(),
         assertion_directly_covered: verification.assertion_directly_covered(),
         response_covered: verification.response_covered(),
         verified_node: verification.into_signed_content(),
+        verified_xml_signatures,
     })
 }
 
@@ -582,6 +639,7 @@ fn verify_and_prepare(
 
     if decrypt_required && evidence.verified && parser_type == ParserType::SamlResponse {
         if let Some(node) = evidence.verified_node.as_deref() {
+            let mut verified_xml_signatures = evidence.verified_xml_signatures.clone();
             // signed-then-encrypted: the verified content is a Response carrying
             // an EncryptedAssertion.
             let (content, assertion) = decrypt_assertion_with_limits(
@@ -603,11 +661,13 @@ fn verify_and_prepare(
                     assertion_signature,
                     decrypted_evidence.assertion_directly_covered,
                 )?;
+                verified_xml_signatures.extend(decrypted_evidence.verified_xml_signatures);
             }
             return Ok(PreparedMessage {
                 saml_content: content,
                 assertion: Some(assertion),
                 response_authenticated: evidence.response_covered,
+                verified_xml_signatures,
             });
         }
     }
@@ -639,6 +699,7 @@ fn verify_and_prepare(
                 saml_content: content,
                 assertion: verified_assertion,
                 response_authenticated: false,
+                verified_xml_signatures: re_evidence.verified_xml_signatures,
             })
         } else {
             Err(required_xml_signature_failed(signature_present))
@@ -660,12 +721,14 @@ fn verify_and_prepare(
                 saml_content: content,
                 assertion: None,
                 response_authenticated: evidence.response_covered,
+                verified_xml_signatures: evidence.verified_xml_signatures,
             });
         }
         return Ok(PreparedMessage {
             saml_content: xml.to_string(),
             assertion: evidence.verified_node,
             response_authenticated: evidence.response_covered,
+            verified_xml_signatures: evidence.verified_xml_signatures,
         });
     }
     Err(required_xml_signature_failed(signature_present))
@@ -1005,7 +1068,7 @@ fn flow_inner(
     expected_recipient: Option<&str>,
     assertion_signature: AssertionSignatureRequirement,
     response_signature: ResponseSignatureRequirement,
-) -> Result<FlowResult, SamlError> {
+) -> Result<FlowResultWithSignatureEvidence, SamlError> {
     let binding = opts
         .binding
         .ok_or_else(|| missing_binding_parameter("binding"))?;
@@ -1024,63 +1087,67 @@ fn flow_inner(
     validate_protocol_profile(&xml, parser_type, opts.xml_limits)?;
     check_status_with_limits(&xml, parser_type, opts.xml_limits)?;
 
-    let (saml_content, assertion, sig_alg, response_authenticated) = if opts.check_signature {
-        match binding {
-            Binding::Redirect | Binding::SimpleSign => {
-                let sig_alg = verify_detached(binding, parser_type, request, opts, &xml)?;
-                let prepared = if parser_type == ParserType::SamlResponse
-                    && assertion_signature == AssertionSignatureRequirement::Direct
-                {
-                    verify_and_prepare(
+    let (saml_content, assertion, sig_alg, response_authenticated, verified_xml_signatures) =
+        if opts.check_signature {
+            match binding {
+                Binding::Redirect | Binding::SimpleSign => {
+                    let sig_alg = verify_detached(binding, parser_type, request, opts, &xml)?;
+                    let prepared = if parser_type == ParserType::SamlResponse
+                        && assertion_signature == AssertionSignatureRequirement::Direct
+                    {
+                        verify_and_prepare(
+                            &xml,
+                            parser_type,
+                            opts,
+                            assertion_signature,
+                            ResponseSignatureRequirement::Optional,
+                        )?
+                    } else {
+                        let assertion = if parser_type == ParserType::SamlResponse {
+                            assertion_shortcut(&xml, opts.xml_limits)?
+                        } else {
+                            None
+                        };
+                        PreparedMessage {
+                            saml_content: xml,
+                            assertion,
+                            response_authenticated: false,
+                            verified_xml_signatures: Vec::new(),
+                        }
+                    };
+                    (
+                        prepared.saml_content,
+                        prepared.assertion,
+                        Some(sig_alg),
+                        true,
+                        prepared.verified_xml_signatures,
+                    )
+                }
+                _ => {
+                    let prepared = verify_and_prepare(
                         &xml,
                         parser_type,
                         opts,
                         assertion_signature,
-                        ResponseSignatureRequirement::Optional,
-                    )?
-                } else {
-                    let assertion = if parser_type == ParserType::SamlResponse {
-                        assertion_shortcut(&xml, opts.xml_limits)?
-                    } else {
-                        None
-                    };
-                    PreparedMessage {
-                        saml_content: xml,
-                        assertion,
-                        response_authenticated: false,
-                    }
-                };
-                (
-                    prepared.saml_content,
-                    prepared.assertion,
-                    Some(sig_alg),
-                    true,
-                )
+                        response_signature,
+                    )?;
+                    (
+                        prepared.saml_content,
+                        prepared.assertion,
+                        None,
+                        prepared.response_authenticated,
+                        prepared.verified_xml_signatures,
+                    )
+                }
             }
-            _ => {
-                let prepared = verify_and_prepare(
-                    &xml,
-                    parser_type,
-                    opts,
-                    assertion_signature,
-                    response_signature,
-                )?;
-                (
-                    prepared.saml_content,
-                    prepared.assertion,
-                    None,
-                    prepared.response_authenticated,
-                )
-            }
-        }
-    } else {
-        let assertion = if parser_type == ParserType::SamlResponse {
-            assertion_shortcut(&xml, opts.xml_limits)?
         } else {
-            None
+            let assertion = if parser_type == ParserType::SamlResponse {
+                assertion_shortcut(&xml, opts.xml_limits)?
+            } else {
+                None
+            };
+            (xml, assertion, None, false, Vec::new())
         };
-        (xml, assertion, None, false)
-    };
 
     let fields = default_fields(parser_type, assertion.as_deref())?;
     let extracted = extract_with_limits(&saml_content, &fields, opts.xml_limits)?;
@@ -1093,31 +1160,35 @@ fn flow_inner(
         response_authenticated,
     )?;
 
-    Ok(FlowResult {
-        saml_content,
-        extract: extracted,
-        sig_alg,
+    Ok(FlowResultWithSignatureEvidence {
+        flow_result: FlowResult {
+            saml_content,
+            extract: extracted,
+            sig_alg,
+        },
+        verified_xml_signatures,
     })
 }
 
 /// Run the inbound flow described by `opts` against `request`.
 pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult, SamlError> {
-    flow_inner(
+    Ok(flow_inner(
         opts,
         request,
         None,
         AssertionSignatureRequirement::Compatible,
         ResponseSignatureRequirement::Optional,
-    )
+    )?
+    .into_flow_result())
 }
 
-pub(crate) fn flow_with_expected_recipient(
+pub(crate) fn flow_with_expected_recipient_and_signature_evidence(
     opts: &FlowOptions<'_>,
     request: &HttpRequest,
     expected_recipient: &str,
     assertion_signature: AssertionSignatureRequirement,
     response_signature: ResponseSignatureRequirement,
-) -> Result<FlowResult, SamlError> {
+) -> Result<FlowResultWithSignatureEvidence, SamlError> {
     flow_inner(
         opts,
         request,

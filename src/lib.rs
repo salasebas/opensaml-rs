@@ -79,6 +79,14 @@
 //! # Ok(()) }
 //! ```
 //!
+//! [`SsoSession::verified_xml_signatures`] preserves structured evidence for
+//! each successfully verified embedded XML signature that covers the Response
+//! root or consumed Assertion. Its exact algorithm URI comes from the same
+//! verifier-owned signature node as the successful verdict. This is separate
+//! from [`SsoSession::sig_alg`], which retains its singular detached
+//! HTTP-Redirect or HTTP-POST-SimpleSign meaning; neither accessor imposes an
+//! application algorithm allowlist.
+//!
 //! # IdP-initiated SSO
 //!
 //! Use [`Saml<Sp>::accept_unsolicited_sso`] for IdP-initiated responses. This
@@ -349,7 +357,7 @@ pub use config::{
     LogoutSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase,
     PrivateKeyPem, ResponseSignaturePolicy, SignatureAlgorithm, SpConfig, SpConfigBuilder,
     SpDescriptor, SpMetadataConfig, SpValidationPolicy, TemplatePolicy, TransformAlgorithm,
-    XmlEncryptionPolicy, XmlPolicy,
+    XmlEncryptionPolicy, XmlPolicy, XmlSignatureProfile,
 };
 #[cfg(any(
     feature = "crypto-rustcrypto",
@@ -375,7 +383,8 @@ pub use model::{
     ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, MessageId, NameId,
     NameIdCreationRequest, NameIdPolicy, Received, RelayState, RelayStateParam, ReplayCache,
     ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex, SsoResponse,
-    SsoSession, Subject, SubjectConfirmation, MAX_RELAY_STATE_BYTES,
+    SsoSession, Subject, SubjectConfirmation, VerifiedXmlSignature, VerifiedXmlSignatureCoverage,
+    MAX_RELAY_STATE_BYTES,
 };
 #[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;

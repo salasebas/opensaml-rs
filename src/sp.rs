@@ -7,8 +7,9 @@ use crate::entity::{
 };
 use crate::error::SamlError;
 use crate::flow::{
-    flow_with_expected_recipient, AssertionSignatureRequirement, FlowOptions, FlowResult,
-    HttpRequest, ResponseSignatureRequirement,
+    flow_with_expected_recipient_and_signature_evidence, AssertionSignatureRequirement,
+    FlowOptions, FlowResult, FlowResultWithSignatureEvidence, HttpRequest,
+    ResponseSignatureRequirement,
 };
 use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
@@ -555,8 +556,8 @@ impl ServiceProvider {
         request: &HttpRequest,
         now: SystemTime,
         clock_drifts: (i64, i64),
-    ) -> Result<FlowResult, SamlError> {
-        self.parse_login_response_inner(
+    ) -> Result<FlowResultWithSignatureEvidence, SamlError> {
+        self.parse_login_response_inner_with_signature_evidence(
             idp,
             binding,
             request,
@@ -607,11 +608,11 @@ impl ServiceProvider {
         request: &HttpRequest,
         request_id: &str,
         options: LoginResponseParseOptions<'_>,
-    ) -> Result<FlowResult, SamlError> {
+    ) -> Result<FlowResultWithSignatureEvidence, SamlError> {
         if request_id.is_empty() {
             return Err(SamlError::InvalidInResponseTo);
         }
-        self.parse_login_response_inner(
+        self.parse_login_response_inner_with_signature_evidence(
             idp,
             binding,
             request,
@@ -628,6 +629,24 @@ impl ServiceProvider {
         correlation: LoginResponseCorrelation<'_>,
         options: LoginResponseParseOptions<'_>,
     ) -> Result<FlowResult, SamlError> {
+        let result = self.parse_login_response_inner_with_signature_evidence(
+            idp,
+            binding,
+            request,
+            correlation,
+            options,
+        )?;
+        Ok(result.into_parts().0)
+    }
+
+    fn parse_login_response_inner_with_signature_evidence(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        request: &HttpRequest,
+        correlation: LoginResponseCorrelation<'_>,
+        options: LoginResponseParseOptions<'_>,
+    ) -> Result<FlowResultWithSignatureEvidence, SamlError> {
         let signing_certs = idp.metadata.x509_certificates(CertUse::Signing);
         let decrypt_key = if self.setting.is_assertion_encrypted {
             self.setting.enc_private_key.as_deref()
@@ -646,11 +665,12 @@ impl ServiceProvider {
                 .get_assertion_consumer_service(binding)
                 .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?,
         };
-        let result = flow_with_expected_recipient(
+        let result = flow_with_expected_recipient_and_signature_evidence(
             &FlowOptions {
                 binding: Some(binding),
                 parser_type: Some(ParserType::SamlResponse),
                 check_signature: true,
+                strict_xml_signature_profile: self.setting.strict_xml_signature_profile,
                 from_issuer: idp.metadata.get_entity_id(),
                 signing_certs: &signing_certs,
                 decrypt_key,
@@ -682,18 +702,18 @@ impl ServiceProvider {
         )?;
         if matches!(correlation, LoginResponseCorrelation::Unsolicited)
             && result
-                .extract
+                .extract()
                 .get_str("response.inResponseTo")
                 .is_some_and(|actual| !actual.is_empty())
         {
             return Err(SamlError::in_response_to_mismatch(
                 None,
-                result.extract.get_str("response.inResponseTo"),
+                result.extract().get_str("response.inResponseTo"),
             ));
         }
         if matches!(correlation, LoginResponseCorrelation::Unsolicited) {
             reject_unsolicited_request_bound_bearer_confirmations(
-                &result.extract,
+                result.extract(),
                 self.setting.xml_limits,
             )?;
         }

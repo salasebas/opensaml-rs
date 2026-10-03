@@ -664,6 +664,10 @@ impl TryFrom<&SpConfig> for EntitySetting {
         setting.want_assertions_signed = assertion_signature_required(config.validation.assertions);
         setting.validate_audience = audience_validation_enabled(config.validation.audience);
         setting.want_message_signed = response_signature_required(config.validation.responses);
+        setting.strict_xml_signature_profile = matches!(
+            config.validation.xml_signatures,
+            super::XmlSignatureProfile::StrictRsaSha2
+        );
         setting.want_encrypted_cbc_response_signed =
             encrypted_cbc_response_signature_required(config.validation.responses);
         setting.want_logout_request_signed =
