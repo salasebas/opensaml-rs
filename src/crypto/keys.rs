@@ -11,7 +11,8 @@ fn crypto_err(err: impl std::fmt::Display) -> SamlError {
     SamlError::Crypto(err.to_string())
 }
 
-/// Load a private key from PEM (PKCS#1/PKCS#8, optionally passphrase-protected).
+/// Load a private key from PEM using the formats supported by the selected
+/// crypto provider.
 pub fn load_private_key(pem: &str, password: Option<&str>) -> Result<Key, SamlError> {
     super::provider::ensure_crypto_provider_initialized()?;
     load_pem_auto(pem.as_bytes(), password).map_err(crypto_err)
@@ -52,10 +53,17 @@ mod tests {
     use super::*;
 
     const SP_PRIVKEY: &str = include_str!("../../tests/fixtures/key/sp_privkey.pem");
+    // RustCrypto decrypts this PEM. AWS-LC and FIPS reject it.
+    #[cfg(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))]
     const SP_PRIVKEY_ENC: &str = include_str!("../../tests/fixtures/key/sp_privkey_enc.pem");
     const SP_CERT: &str = include_str!("../../tests/fixtures/key/sp_cert.cer");
     const IDP_CERT: &str = include_str!("../../tests/fixtures/key/idp_cert.cer");
-    // SP signing passphrase from upstream test/key/keypass.txt
+    // SP signing passphrase from upstream test/key/keypass.txt.
+    #[cfg(feature = "crypto-rustcrypto")]
     const SP_PASS: &str = "VHOSp5RUiBcrsjrcAuXFwU1NKCkGA8px";
 
     #[test]
@@ -67,10 +75,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "crypto-rustcrypto")]
     fn loads_encrypted_private_key_with_passphrase() -> Result<(), Box<dyn std::error::Error>> {
         let key = load_private_key(SP_PRIVKEY_ENC, Some(SP_PASS))?;
         assert!(key.has_private_key());
         Ok(())
+    }
+
+    #[test]
+    #[cfg(all(
+        any(feature = "crypto-aws-lc", feature = "crypto-fips"),
+        not(feature = "crypto-rustcrypto")
+    ))]
+    fn rejects_encrypted_private_key_when_provider_does_not_support_it() {
+        assert!(load_private_key(SP_PRIVKEY_ENC, Some("unused")).is_err());
     }
 
     #[test]
