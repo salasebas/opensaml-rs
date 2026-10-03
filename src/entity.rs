@@ -52,7 +52,8 @@ pub struct EntitySetting {
     pub validate_audience: bool,
     /// SP: requires signed messages.
     pub want_message_signed: bool,
-    /// Typed SP: enforce the strict RSA-SHA2 embedded XML-signature profile.
+    /// Typed SP: enforce the strict RSA-SHA2 profile on embedded signatures that
+    /// authenticate accepted SSO and Single Logout messages.
     pub(crate) strict_xml_signature_profile: bool,
     /// Typed SP: requires outer integrity for CBC-encrypted Assertions.
     pub(crate) want_encrypted_cbc_response_signed: bool,
