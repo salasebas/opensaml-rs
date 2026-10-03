@@ -9,6 +9,19 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.5.1](https://github.com/salasebas/saml-rs/compare/v0.5.0...v0.5.1) - 2026-10-03
+
+### Fixed
+
+- *(deps)* bump transitive cryptoki to 0.12.1 ([#128](https://github.com/salasebas/saml-rs/pull/128))
+- *(deps)* upgrade quick-xml to 0.42 ([#124](https://github.com/salasebas/saml-rs/pull/124))
+
+### Other
+
+- *(deps)* bump the cargo-maintenance group across 1 directory with 3 updates ([#123](https://github.com/salasebas/saml-rs/pull/123))
+- point package pages at the saml-rs repository ([#126](https://github.com/salasebas/saml-rs/pull/126))
+- *(deps)* bump bergshamra in the cargo-xml-crypto group ([#119](https://github.com/salasebas/saml-rs/pull/119))
+
 ## [0.5.0](https://github.com/salasebas/opensaml-rs/compare/v0.4.0...v0.5.0) - 2026-08-13
 
 ### Added
