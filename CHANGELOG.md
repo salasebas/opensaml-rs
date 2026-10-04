@@ -9,6 +9,16 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.5.2](https://github.com/salasebas/saml-rs/compare/v0.5.1...v0.5.2) - 2026-10-04
+
+### Added
+
+- *(api)* expose verified XML signature evidence and strict profile ([#122](https://github.com/salasebas/saml-rs/pull/122))
+
+### Other
+
+- *(rustsaml)* mark the crate as no longer maintained ([#130](https://github.com/salasebas/saml-rs/pull/130))
+
 ## [0.5.1](https://github.com/salasebas/saml-rs/compare/v0.5.0...v0.5.1) - 2026-10-03
 
 ### Fixed
