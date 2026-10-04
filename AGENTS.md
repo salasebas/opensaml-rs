@@ -98,6 +98,9 @@ job in `.github/workflows/ci.yml`.
 - When possible, make `match` statements exhaustive and avoid wildcard arms.
 - New traits should include doc comments explaining their role and how
   implementations are expected to use them.
+- Comments describe behavior and API usage. Never justify why an implementation
+  was chosen; that comment freezes the choice against later changes. Normative
+  provenance still follows `docs/standards-conformance.md`.
 - Use inline format arguments, collapse nested `if` statements when clear, and
   prefer method references over redundant closures.
 - In tests, return `Result<(), Box<dyn std::error::Error>>` and use `?` instead
