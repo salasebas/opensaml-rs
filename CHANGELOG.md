@@ -9,6 +9,16 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.5.3](https://github.com/salasebas/saml-rs/compare/v0.5.2...v0.5.3) - 2026-10-04
+
+### Fixed
+
+- *(slo)* validate Destination at typed receivers ([#97](https://github.com/salasebas/saml-rs/pull/97))
+
+### Other
+
+- rewrite upgrade guides and record them in AGENTS.md ([#132](https://github.com/salasebas/saml-rs/pull/132))
+
 ## [0.5.2](https://github.com/salasebas/saml-rs/compare/v0.5.1...v0.5.2) - 2026-10-04
 
 ### Added
