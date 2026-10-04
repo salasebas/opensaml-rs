@@ -1,4 +1,8 @@
-## Support the use case of rolling certificate
+# IdP fixture keys
 
-* `privkey1.pem` - password protected `q9ALNhGT5EhfcRmp8Pg7e9zTQeP2x1bW`, it generates `cert.cer`
-* `privkey2.pem` - no password protected, it generates `cert2.cer`
+These keys support the rolling-certificate fixtures.
+
+| File | Password | Certificate |
+| --- | --- | --- |
+| `privkey1.pem` | `q9ALNhGT5EhfcRmp8Pg7e9zTQeP2x1bW` | `cert.cer` |
+| `privkey2.pem` | none | `cert2.cer` |

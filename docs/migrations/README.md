@@ -1,19 +1,24 @@
-# Migration guides
+# How to upgrade saml-rs
 
-These guides describe the changes consumers need to make when upgrading
-between breaking pre-1.0 releases of `saml-rs`. The
-[changelog](../../CHANGELOG.md) remains the complete record of changes in each
-release.
+Apply every guide from the minor version you run today up to the version you
+are installing. Each guide is the work an existing integration must do. The
+[changelog](../../CHANGELOG.md) lists the rest of the release, including
+compatible additions.
 
-## Available guides
+## Guides
 
-- [`0.2` to `0.3`](0.2-to-0.3.md)
-- [`0.3` to `0.4`](0.3-to-0.4.md)
-- [`0.4` to `0.5`](0.4-to-0.5.md)
+- [How to upgrade from 0.2 to 0.3](0.2-to-0.3.md)
+- [How to upgrade from 0.3 to 0.4](0.3-to-0.4.md)
+- [How to upgrade from 0.4 to 0.5](0.4-to-0.5.md)
 
-## Adding a guide
+## How to add a guide
 
-Name each guide after its version boundary, such as `0.2-to-0.3.md`. Cover
-upgrades from the latest patch of the source minor release to the target minor
-release, and focus on required code changes, changed runtime behavior, feature
-flags, and MSRV changes.
+This section is for the person shipping the change, not for someone upgrading.
+
+Add a guide in the same change that forces consumers to change code, runtime
+behaviour, feature flags, or the minimum supported Rust version. Name the file
+after that boundary, such as `0.2-to-0.3.md`, and cover the move from the
+latest patch of the source minor release.
+
+In the guide, state what breaks, who must change, and the steps to upgrade.
+Leave compatible features out; the changelog records those.
