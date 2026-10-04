@@ -133,6 +133,9 @@ Add regression tests for security fixes.
 - The published crate is `saml-rs`, and Rust imports use `saml_rs`.
 - Do not edit `CHANGELOG.md` by hand. release-plz writes it from Conventional
   Commits on the release PR.
+- A breaking change updates `docs/migrations/` in the same change: what breaks,
+  who must change, and how to upgrade. Follow `docs/migrations/README.md`.
+  Compatible features are recorded by their Conventional Commit.
 
 ## Agent skills
 
