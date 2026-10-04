@@ -184,7 +184,7 @@ pub(crate) enum ResponseSignatureRequirement {
 struct PreparedMessage {
     saml_content: String,
     assertion: Option<String>,
-    response_authenticated: bool,
+    message_authenticated: bool,
     verified_xml_signatures: Vec<VerifiedXmlSignatureEvidence>,
 }
 
@@ -223,7 +223,12 @@ struct EmbeddedSignatureEvidence {
     verified_xml_signatures: Vec<VerifiedXmlSignatureEvidence>,
 }
 
-/// Result of a successful flow.
+/// Result of a successful low-level flow.
+///
+/// This records only validation supported by the supplied flow context. The
+/// public raw flow has no actual receiving endpoint, so success does not imply
+/// that a message `Destination` was compared with that endpoint. Typed
+/// receivers supply the additional context before exposing this result.
 #[derive(Debug, Clone)]
 pub struct FlowResult {
     /// The decoded (and, when verified, authenticated) SAML XML.
@@ -666,7 +671,7 @@ fn verify_and_prepare(
             return Ok(PreparedMessage {
                 saml_content: content,
                 assertion: Some(assertion),
-                response_authenticated: evidence.response_covered,
+                message_authenticated: evidence.response_covered,
                 verified_xml_signatures,
             });
         }
@@ -698,7 +703,7 @@ fn verify_and_prepare(
             Ok(PreparedMessage {
                 saml_content: content,
                 assertion: verified_assertion,
-                response_authenticated: false,
+                message_authenticated: false,
                 verified_xml_signatures: re_evidence.verified_xml_signatures,
             })
         } else {
@@ -720,14 +725,14 @@ fn verify_and_prepare(
             return Ok(PreparedMessage {
                 saml_content: content,
                 assertion: None,
-                response_authenticated: evidence.response_covered,
+                message_authenticated: true,
                 verified_xml_signatures: evidence.verified_xml_signatures,
             });
         }
         return Ok(PreparedMessage {
             saml_content: xml.to_string(),
             assertion: evidence.verified_node,
-            response_authenticated: evidence.response_covered,
+            message_authenticated: evidence.response_covered,
             verified_xml_signatures: evidence.verified_xml_signatures,
         });
     }
@@ -962,18 +967,29 @@ fn validate_subject_confirmation(
     })
 }
 
-fn validate_response_destination(
+fn validate_message_destination(
+    parser_type: ParserType,
     extracted: &Value,
     expected_recipient: Option<&str>,
-    response_authenticated: bool,
+    message_authenticated: bool,
 ) -> Result<(), SamlError> {
     let Some(expected) = expected_recipient else {
         return Ok(());
     };
-    let destination = extracted.get_str("response.destination");
-    if response_authenticated && destination.is_none() {
+    let destination = match parser_type {
+        ParserType::SamlResponse | ParserType::LogoutResponse => {
+            extracted.get_str("response.destination")
+        }
+        ParserType::LogoutRequest => extracted.get_str("request.destination"),
+        ParserType::SamlRequest => return Ok(()),
+    };
+    // SAML Bindings 2.0 §§3.4.5.2 and 3.5.5.2, and SimpleSign §2.4,
+    // require Destination on a signed message received through these bindings.
+    if message_authenticated && destination.is_none() {
         return Err(SamlError::destination_mismatch(expected, None));
     }
+    // SAML Core 2.0 §§3.2.1 and 3.2.2 require the actual recipient to discard
+    // any protocol message whose present Destination does not match itself.
     if destination.is_some_and(|destination| destination != expected) {
         return Err(SamlError::destination_mismatch(expected, destination));
     }
@@ -986,7 +1002,7 @@ fn validate_context(
     extracted: &Value,
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
-    response_authenticated: bool,
+    message_authenticated: bool,
 ) -> Result<(), SamlError> {
     let should_validate_issuer = matches!(
         parser_type,
@@ -1015,8 +1031,13 @@ fn validate_context(
             }
         }
     }
+    validate_message_destination(
+        parser_type,
+        extracted,
+        expected_recipient,
+        message_authenticated,
+    )?;
     if parser_type == ParserType::SamlResponse {
-        validate_response_destination(extracted, expected_recipient, response_authenticated)?;
         validate_subject_confirmation(extracted, opts, expected_recipient)?;
         if let Some(expected) = opts.expected_audience {
             if !audience_restrictions_contain(assertion, expected, opts.xml_limits)? {
@@ -1087,7 +1108,7 @@ fn flow_inner(
     validate_protocol_profile(&xml, parser_type, opts.xml_limits)?;
     check_status_with_limits(&xml, parser_type, opts.xml_limits)?;
 
-    let (saml_content, assertion, sig_alg, response_authenticated, verified_xml_signatures) =
+    let (saml_content, assertion, sig_alg, message_authenticated, verified_xml_signatures) =
         if opts.check_signature {
             match binding {
                 Binding::Redirect | Binding::SimpleSign => {
@@ -1111,7 +1132,7 @@ fn flow_inner(
                         PreparedMessage {
                             saml_content: xml,
                             assertion,
-                            response_authenticated: false,
+                            message_authenticated: false,
                             verified_xml_signatures: Vec::new(),
                         }
                     };
@@ -1135,7 +1156,7 @@ fn flow_inner(
                         prepared.saml_content,
                         prepared.assertion,
                         None,
-                        prepared.response_authenticated,
+                        prepared.message_authenticated,
                         prepared.verified_xml_signatures,
                     )
                 }
@@ -1157,7 +1178,7 @@ fn flow_inner(
         &extracted,
         opts,
         expected_recipient,
-        response_authenticated,
+        message_authenticated,
     )?;
 
     Ok(FlowResultWithSignatureEvidence {
