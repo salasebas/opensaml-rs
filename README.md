@@ -5,21 +5,21 @@
 [![MIT licensed](https://img.shields.io/crates/l/saml-rs)](https://github.com/salasebas/saml-rs/blob/main/LICENSE)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success)](#security)
 
-Pure-Rust SAML 2.0 Service Provider and Identity Provider support. Use it when
-an application needs browser Web SSO, metadata, and Single Logout without
-`libxml2`, `xmlsec1`, or an OpenSSL build chain. XML-DSig, XML-Enc, C14N, and
-detached message signatures go through
-[`bergshamra`](https://crates.io/crates/bergshamra).
+Pure-Rust SAML 2.0 service provider and identity provider support for browser
+Web SSO, metadata, and Single Logout. XML-DSig, XML-Enc, C14N, and detached
+message signatures go through
+[`bergshamra`](https://crates.io/crates/bergshamra). The crate does not need
+`libxml2`, `xmlsec1`, or an OpenSSL build chain.
 
 The Cargo package is `saml-rs`. The Rust import path is `saml_rs`. Source and
 issues live in [salasebas/saml-rs](https://github.com/salasebas/saml-rs).
 
-**Status:** pre-1.0. Minor releases can change the API or runtime behavior.
+**Status:** pre-1.0. A minor release can change the API or runtime behaviour.
 There has been no external security audit. Review the crate, your
 configuration, and the peer metadata trust model before production use.
 
 **Help:** [open an issue](https://github.com/salasebas/saml-rs/issues).
-Before a minor upgrade, read the
+Before a minor upgrade, follow the
 [migration guides](docs/migrations/README.md).
 
 ## Install
@@ -34,24 +34,11 @@ saml-rs = "0.5"
 
 Rust 1.88 or newer is required.
 
-## Get started
+## How to add service-provider SSO
 
-The typed `Saml` facade is the API for new browser SSO and SLO integrations.
-Build local state with `SpConfig::builder` or `IdpConfig::builder`, import the
-peer from metadata, and store the returned `Pending<_>` value with the browser
-session until the round trip finishes.
-
-A signed SP to IdP to SP round trip:
-
-```sh
-cargo run -p saml-rs --example sso
-```
-
-Source: [`examples/sso.rs`](examples/sso.rs). Single Logout is
-[`examples/slo.rs`](examples/slo.rs). The low-level compatibility path is
-[`examples/raw_compat.rs`](examples/raw_compat.rs).
-
-Service Provider SSO:
+Use the typed `Saml` facade for a new browser integration. Build local state
+with `SpConfig::builder`, import the peer from metadata, and keep the returned
+`Pending<_>` value with the browser session until the round trip finishes.
 
 1. Build `SpConfig` and call `Saml::sp`.
 2. Import peer IdP metadata into `IdpDescriptor`.
@@ -59,27 +46,43 @@ Service Provider SSO:
 4. In the assertion consumer service, pass the posted fields and that pending
    value to `sp.finish_sso(...)`.
 
-The returned `SsoSession::verified_xml_signatures()` view preserves one evidence
-item per successfully verified embedded XML signature that covers the Response
-root or consumed Assertion. Each item reports the exact
-`SignatureMethod@Algorithm` URI and its verified coverage. This differs from
-`SsoSession::sig_alg()`, which remains the singular detached `SigAlg` from a
-verified HTTP-Redirect or HTTP-POST-SimpleSign signature. Reporting an embedded
-algorithm does not itself apply an application algorithm allowlist.
+Run that SP to IdP to SP round trip:
 
-The same shape, checked by `cargo test --doc`, is in the
+```sh
+cargo run -p saml-rs --example sso
+```
+
+Source: [`examples/sso.rs`](examples/sso.rs). The same calls, checked by
+`cargo test --doc`, are in the
 [crate-root SSO example](https://docs.rs/saml-rs/latest/saml_rs/#sp-initiated-sso).
-Identity Provider receive-and-respond is in
+
+Those snippets use `ReplayPolicy::DisabledForCompatibility` and, where noted,
+unsigned metadata so they compile alone. For production inbound validation, use
+`ReplayPolicy::RequireCache` with a caller-owned replay cache.
+`MetadataTrustPolicy::UnsignedForCompatibility` is a legacy interoperability
+choice. Choose either policy in
+[metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and
+[`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html).
+
+`finish_sso` returns an `SsoSession`. Read embedded XML signature evidence from
+`verified_xml_signatures()`: one item per verified signature over the Response
+root or the consumed Assertion, including its `SignatureMethod@Algorithm` URI.
+`sig_alg()` is only the detached `SigAlg` from HTTP-Redirect or
+HTTP-POST-SimpleSign. Neither value applies an application algorithm allowlist.
+
+To receive and respond as an identity provider, follow
 [`examples/sso.rs`](examples/sso.rs) and the
-[Identity Provider flows](https://docs.rs/saml-rs/latest/saml_rs/#identity-provider-flows)
-section. Logout is in [`examples/slo.rs`](examples/slo.rs) and the
-[Single Logout](https://docs.rs/saml-rs/latest/saml_rs/#single-logout) section.
+[Identity Provider flows](https://docs.rs/saml-rs/latest/saml_rs/#identity-provider-flows).
+For logout, follow [`examples/slo.rs`](examples/slo.rs) and
+[Single Logout](https://docs.rs/saml-rs/latest/saml_rs/#single-logout).
+Issuance lifetime and Session Authority logout expiration are on
+[`Saml<Idp>::start_slo`](https://docs.rs/saml-rs/latest/saml_rs/struct.Saml.html#method.start_slo).
 
-Callers that still need `ServiceProvider`, `IdentityProvider`, `HttpRequest`,
-or `BindingContext` can use `saml_rs::raw`. New integrations should start with
-`Saml`.
+If you still need `ServiceProvider`, `IdentityProvider`, `HttpRequest`, or
+`BindingContext`, use `saml_rs::raw`
+([`examples/raw_compat.rs`](examples/raw_compat.rs)).
 
-## What you can do
+## What the typed API covers
 
 | Area | Support |
 | --- | --- |
@@ -99,21 +102,10 @@ minimal expected flow if you need one of them.
 
 | Need | Start here |
 | --- | --- |
-| Learn a full flow | [`examples/sso.rs`](examples/sso.rs) and [`examples/slo.rs`](examples/slo.rs) |
+| Run a full flow | [`examples/sso.rs`](examples/sso.rs) and [`examples/slo.rs`](examples/slo.rs) |
 | Change an existing integration | [Migration guides](docs/migrations/README.md) |
 | Look up a type or method | [docs.rs](https://docs.rs/saml-rs/latest/saml_rs/) |
 | Choose metadata trust or replay policy | [Metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and [`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html) |
-
-The compact rustdoc snippets use `ReplayPolicy::DisabledForCompatibility` and,
-where noted, unsigned metadata so the examples stay dependency-free. Production
-inbound validation should use `ReplayPolicy::RequireCache` with a caller-owned
-replay cache. `MetadataTrustPolicy::UnsignedForCompatibility` is a legacy
-interoperability choice.
-
-`IdpConfig` issuance lifetime, Session Authority logout expiration, and inbound
-`IssueInstant` / `NotOnOrAfter` rules are documented on the methods that apply
-them, including
-[`Saml<Idp>::start_slo`](https://docs.rs/saml-rs/latest/saml_rs/struct.Saml.html#method.start_slo).
 
 ## Features
 
@@ -143,9 +135,9 @@ provider. The default `crypto-bergshamra` feature enables those capabilities
 together with RustCrypto.
 
 Bergshamra supports AWS-LC and FIPS on Linux x86_64 and aarch64. This
-repository's provider matrix currently runs on Linux x86_64. `saml-rs`
-initializes Bergshamra before the first crypto operation. Applications can
-fail early at startup:
+repository's provider tests run on Linux x86_64. `saml-rs` initialises
+Bergshamra before the first crypto operation. To surface that failure at
+startup:
 
 ```rust
 fn startup() -> Result<(), saml_rs::SamlError> {
@@ -158,16 +150,15 @@ fn startup() -> Result<(), saml_rs::SamlError> {
 }
 ```
 
-Initialization, attestation, unsupported-algorithm, and key-import failures
+Initialisation, attestation, unsupported-algorithm, and key-import failures
 map to `SamlError::Crypto`. `crypto-fips` means the selected AWS-LC provider
-attested FIPS mode. It does not mean the consuming binary or deployment is
-FIPS certified. FIPS policy rejects algorithms outside its approved set,
-including SHA-1 `RSA_OAEP_MGF1P` key transport and both signing and verifying
-`RSA_SHA1`. Non-FIPS AWS-LC still verifies inbound RSA-SHA1 Redirect and
-XML-DSig signatures. AWS-LC has a narrower algorithm set than RustCrypto; see
-Bergshamra's
-[provider capabilities](https://github.com/kushaldas/bergshamra/blob/v0.9.0/docs/provider-capabilities.md)
-before enabling a custom algorithm URI.
+attested FIPS mode. It does not certify the consuming binary or deployment.
+FIPS policy rejects algorithms outside its approved set, including SHA-1
+`RSA_OAEP_MGF1P` key transport and both signing and verifying `RSA_SHA1`.
+Non-FIPS AWS-LC still verifies inbound RSA-SHA1 Redirect and XML-DSig
+signatures. AWS-LC has a narrower algorithm set than RustCrypto. Custom
+algorithm URIs are listed in Bergshamra's
+[provider capabilities](https://github.com/kushaldas/bergshamra/blob/v0.9.0/docs/provider-capabilities.md).
 
 With `crypto-bergshamra` enabled:
 
@@ -197,14 +188,13 @@ With `crypto-bergshamra` enabled:
   because that backend, reached through `bergshamra` and `kryptering`, is
   affected by RUSTSEC-2023-0071. AWS-LC and FIPS do not use that gate.
 
-Schema validation is optional defense in depth through
+Schema validation is optional defence in depth through
 `context::set_schema_validator`.
 
 ## Compatibility crates
 
-Depend on `saml-rs` for new code. This repository also publishes four
-compatibility packages that re-export the same API, so existing dependencies
-keep resolving:
+New code depends on `saml-rs`. This repository also publishes four
+compatibility packages that re-export the same API:
 
 | Package | Import | docs.rs |
 | --- | --- | --- |
@@ -215,13 +205,12 @@ keep resolving:
 
 `opensaml` still exports the deprecated `OpenSamlError` alias of `SamlError`.
 `opensaml`, `samlify`, and `samlet` are maintained with `saml-rs`.
-`rustsaml` will no longer be maintained. Please use `saml-rs`.
-They are separate from
+`rustsaml` is no longer maintained. These packages are separate from
 Shibboleth OpenSAML and from the Node.js samlify project.
 [`samael`](https://crates.io/crates/samael) is the other established Rust SAML
 crate; it commonly uses the native `xmlsec` stack.
 
-## Development
+## How to check a change
 
 ```sh
 cargo fmt --all --check
