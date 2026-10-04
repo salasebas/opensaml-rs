@@ -120,10 +120,14 @@ replay-sensitive logout request validation.
 
 The typed receiver resolves its actual local SingleLogoutService endpoint from
 metadata using the inbound binding. A present `Destination` must equal that
-endpoint. Once the HTTP binding or root XML signature authenticates the
-message, `Destination` is also required. These checks run before replay state
-is written. Raw logout parsers cannot perform the same endpoint comparison
-because they are not given the local receiving endpoint.
+endpoint, and a mismatch is rejected even when the message is unsigned. Once
+the HTTP binding or root XML signature authenticates the message,
+`Destination` is also required. An absent `Destination` on an unauthenticated
+message is accepted only under `SpValidationPolicy::compatibility()` or
+`IdpValidationPolicy::compatibility()`, and only for a binding that permits
+unsigned logout input. These checks run before replay state is written. Raw
+logout parsers cannot perform the same endpoint comparison because they are
+not given the local receiving endpoint.
 
 Inbound LogoutRequest profile checks require an unqualified UTC
 `IssueInstant`. They deliberately do not infer a maximum age from it.
