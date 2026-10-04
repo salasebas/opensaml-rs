@@ -13,6 +13,8 @@ compatible additions.
 
 ## How to add a guide
 
+This section is for the person shipping the change, not for someone upgrading.
+
 Add a guide in the same change that forces consumers to change code, runtime
 behaviour, feature flags, or the minimum supported Rust version. Name the file
 after that boundary, such as `0.2-to-0.3.md`, and cover the move from the

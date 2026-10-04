@@ -1,42 +1,43 @@
-# Typed API Architecture
+# Typed API architecture
 
-This directory captures maintainer notes for the typed public API. Keep these
-files aligned with the implemented facade rather than treating them as a
-separate future design.
+Maintainer notes for the typed public API, matched to the facade that is
+implemented now. The package is `saml-rs`. Rust imports it as `saml_rs`. The
+low-level flow API stays available as raw compatibility.
 
-The current crate package is `saml-rs`; Rust users import it as `saml_rs`.
-The current low-level flow API stays supported as raw compatibility while the
-new typed API becomes the recommended path.
+## Which note to read
 
-## Documents
+- Names that are canonical, and names that were rejected:
+  [001-naming.md](001-naming.md).
+- Root exports, modules, and the current-to-new API map:
+  [002-public-api-map.md](002-public-api-map.md).
+- SP and IdP browser SSO: [003-web-sso-api.md](003-web-sso-api.md).
+- Typed Single Logout: [004-single-logout-api.md](004-single-logout-api.md).
+- Config, policies, credentials, descriptors, and metadata trust:
+  [005-config-and-metadata.md](005-config-and-metadata.md).
+- `SamlError`, validation context, clock, replay, RelayState, and metadata
+  signature trust: [006-errors-and-validation.md](006-errors-and-validation.md).
+- How `flow`, `ServiceProvider`, and `IdentityProvider` stay available:
+  [007-raw-compatibility.md](007-raw-compatibility.md).
 
-- [001-naming.md](001-naming.md): canonical names and rejected names.
-- [002-public-api-map.md](002-public-api-map.md): root exports, modules, and
-  current-to-new API mapping.
-- [003-web-sso-api.md](003-web-sso-api.md): SP and IdP browser SSO flow.
-- [004-single-logout-api.md](004-single-logout-api.md): typed SLO flow.
-- [005-config-and-metadata.md](005-config-and-metadata.md): config, policies,
-  credentials, descriptors, and metadata trust.
-- [006-errors-and-validation.md](006-errors-and-validation.md): `SamlError`,
-  validation context, clock, replay, RelayState, and metadata signature trust.
-- [007-raw-compatibility.md](007-raw-compatibility.md): how the current
-  `flow`/`ServiceProvider`/`IdentityProvider` API remains available.
+## Design goals
 
-## Design Goals
+- Normal SP and IdP browser flows start from `Saml<Sp>` and `Saml<Idp>`.
+- Raw flow APIs stay available for migration and advanced interop.
+- Local active roles stay separate from peer metadata descriptors.
+- Illegal SAML Web SSO binding combinations cannot be represented.
+- Request correlation, RelayState, clock, replay, and metadata trust appear
+  in function signatures.
+- XML security stays in `bergshamra`. This tree does not implement XML-DSig,
+  canonicalisation, or XML-Enc.
+- Artifact resolution, SOAP and other back-channel profiles, ECP/PAOS, SAML
+  queries, NameID management, and metadata federation stay outside the
+  high-level typed API.
 
-- Make normal SP/IdP browser flows start from `Saml<Sp>` and `Saml<Idp>`.
-- Keep current raw flow APIs available for migration and advanced interop.
-- Separate local active roles from peer metadata descriptors.
-- Make illegal SAML Web SSO binding combinations unrepresentable in typed API.
-- Make request correlation, RelayState, clock, replay, and metadata trust
-  visible in function signatures.
-- Keep XML security delegated to `bergshamra`; do not add in-tree XML-DSig,
-  canonicalization, or XML-Enc implementations.
-- Keep unsupported profiles out of the high-level typed API for now: Artifact
-  resolution, SOAP/back-channel profiles, ECP/PAOS, SAML queries, NameID
-  management, and metadata federation remain raw compatibility or future work.
+## Shape of an SP round trip
 
-## High-Level Shape
+This is the shape of the typed calls. It is not a complete program.
+`sp_config`, the metadata, the clock, and the replay cache come from the
+application.
 
 ```rust
 use saml_rs::{

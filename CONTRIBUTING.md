@@ -26,6 +26,7 @@ RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps
 cargo test -p saml-rs --doc --no-default-features
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps --no-default-features
 cargo check -p saml-rs --no-default-features
+cargo nextest run -p saml-rs --no-default-features --features crypto-rustcrypto
 ```
 
 Do not use `--all-features`. Document-crypto providers are mutually exclusive.

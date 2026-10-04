@@ -212,19 +212,7 @@ crate; it commonly uses the native `xmlsec` stack.
 
 ## How to check a change
 
-```sh
-cargo fmt --all --check
-cargo clippy -p saml-rs --all-targets -- -D warnings
-cargo nextest run -p saml-rs
-cargo test -p saml-rs --doc
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p saml-rs --lib --no-deps
-cargo test -p saml-rs --doc --no-default-features
-cargo check -p saml-rs --no-default-features
-cargo nextest run -p saml-rs --no-default-features --features crypto-rustcrypto
-```
-
-AWS-LC and FIPS checks run on supported Linux runners. See
-[`.github/workflows/ci.yml`](https://github.com/salasebas/saml-rs/blob/main/.github/workflows/ci.yml).
+Follow [Contributing](CONTRIBUTING.md).
 
 ## License
 
