@@ -173,11 +173,42 @@ pub trait ReplayCache {
 }
 
 /// Replay behavior for typed inbound browser flows.
+///
+/// This is a caller argument on [`SamlValidationContext::new`]. It is not a
+/// field of [`crate::SpValidationPolicy`] or [`crate::IdpValidationPolicy`],
+/// and there is no `recommended()` constructor. The Web Browser SSO and Single
+/// Logout field combinations do not store identifiers and do not create a
+/// cache.
+///
+/// # Replay
+///
+/// The full record is `docs/conformance/metadata-and-replay.md`.
+///
+/// - HTTP POST bearer assertions must not be replayed. Actor: accepting
+///   service provider. Direction: inbound `finish_sso` and
+///   `accept_unsolicited_sso`. Level: mandatory (Profiles §4.1.4.5; Errata 05
+///   E26 does not replace this paragraph). [`Self::RequireCache`] is how the
+///   caller supplies the cache. [`Self::DisabledForCompatibility`] is the
+///   samlify-port hatch for that mandatory rule, not a recommendation
+///   relaxation.
+/// - Remembering an `AuthnRequest` identifier, a logout message identifier, or
+///   a Response identifier, and expiring an SSO entry before
+///   `SubjectConfirmationData@NotOnOrAfter`, are library policy. They run only
+///   when the caller supplies a cache.
+/// - `<OneTimeUse>` is not this cache. Core §2.5.1.5 tells a relying party
+///   that retains an assertion not to reuse it. Typed SSO does not retain the
+///   assertion and does not add a field for the element.
 #[non_exhaustive]
 pub enum ReplayPolicy<'a> {
     /// Skip replay checks. The raw API and the samlify port have no replay cache.
+    ///
+    /// Samlify-port hatch for the HTTP POST bearer replay duty. The Web
+    /// Browser SSO accept combination does not select a cache in its place.
     DisabledForCompatibility,
     /// Require the caller to provide replay storage.
+    ///
+    /// Nothing is stored unless this variant is passed. The cache is the
+    /// caller's; the field combination does not allocate one.
     RequireCache(&'a mut dyn ReplayCache),
 }
 

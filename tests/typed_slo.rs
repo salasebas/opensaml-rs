@@ -25,12 +25,12 @@ use saml_rs::util::Value;
 use saml_rs::xml::dom::parse;
 use saml_rs::{
     AcsEndpoint, BrowserInput, CertificatePem, ClockSkew, Credentials, EntityId, FormField,
-    IdpConfig, IdpDescriptor, IdpValidationPolicy, LogoutBinding, LogoutCompleted, LogoutRequest,
-    LogoutResponse, LogoutSigning, LogoutSubject, MetadataTrustPolicy, NameId, NameIdFormat,
-    Outbound, PendingLogoutRequest, PendingSnapshot, PrivateKeyPem, Received, RelayStateParam,
-    ReplayCache, ReplayKey, ReplayPolicy, RespondSlo, RespondSso, Saml, SamlError,
-    SamlValidationContext, SessionIndex, SloEndpoint, SpConfig, SpDescriptor, SpValidationPolicy,
-    SsoEndpoint, SsoSession, StartSlo, Subject, TemplatePolicy,
+    IdpConfig, IdpDescriptor, IdpValidationPolicy, LogoutBinding, LogoutCompleted, LogoutPolicy,
+    LogoutRequest, LogoutResponse, LogoutSignaturePolicy, LogoutSigning, LogoutSubject,
+    MetadataTrustPolicy, NameId, NameIdFormat, Outbound, PendingLogoutRequest, PendingSnapshot,
+    PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSlo,
+    RespondSso, Saml, SamlError, SamlValidationContext, SessionIndex, SloEndpoint, SpConfig,
+    SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoSession, StartSlo, Subject, TemplatePolicy,
 };
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -1493,6 +1493,109 @@ fn typed_facade_receive_slo_requires_replay_retention_for_logout_request(
             Ok(())
         }
         other => Err(format!("expected ReplayExpiration error, got {other:?}").into()),
+    }
+}
+
+fn recommended_logout_accept() -> LogoutPolicy {
+    LogoutPolicy {
+        requests: LogoutSignaturePolicy::RequireSigned,
+        responses: LogoutSignaturePolicy::RequireSigned,
+    }
+}
+
+#[test]
+fn recommended_slo_does_not_store_replay_without_a_caller_cache(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_config_with_validation(SpValidationPolicy {
+        logout: recommended_logout_accept(),
+        ..SpValidationPolicy::compatibility()
+    })?)?;
+    let idp = Saml::idp(idp_config_with_validation(IdpValidationPolicy {
+        logout: recommended_logout_accept(),
+        ..IdpValidationPolicy::compatibility()
+    })?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    assert!(!sp_descriptor.was_verified_with_pinned_certificates());
+    assert!(!idp_descriptor.was_verified_with_pinned_certificates());
+
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let request_fields = post_fields(&started.outbound)?;
+    idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields.clone()),
+        validation(),
+    )?;
+    idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields.clone()),
+        validation(),
+    )?;
+
+    let mut request_cache = MemoryReplayCache::default();
+    let received = idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields.clone()),
+        validation_with_cache(&mut request_cache),
+    )?;
+    let request_key = format!("logout_request_id:{}", received.message().id().as_str());
+    assert!(request_cache.seen.contains_key(&request_key));
+    match idp.receive_slo(
+        &sp_descriptor,
+        BrowserInput::<LogoutRequest>::post(request_fields),
+        validation_with_cache(&mut request_cache),
+    ) {
+        Err(SamlError::ReplayDetected { key }) => assert_eq!(key, request_key),
+        other => {
+            return Err(format!(
+                "expected LogoutRequest ReplayDetected from the caller cache, got {other:?}"
+            )
+            .into());
+        }
+    }
+
+    let response = idp.respond_slo(&sp_descriptor, &received, RespondSlo::post())?;
+    let response_fields = post_fields(&response)?;
+    sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<LogoutResponse>::post(response_fields.clone()),
+        validation(),
+    )?;
+    sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<LogoutResponse>::post(response_fields.clone()),
+        validation(),
+    )?;
+
+    let mut response_cache = MemoryReplayCache::default();
+    let completed = sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<LogoutResponse>::post(response_fields.clone()),
+        validation_with_cache(&mut response_cache),
+    )?;
+    let response_id = completed
+        .response()
+        .ok_or("missing logout response")?
+        .id()
+        .as_str();
+    let response_key = format!("logout_response_id:{response_id}");
+    assert!(response_cache.seen.contains_key(&response_key));
+    match sp.finish_slo(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<LogoutResponse>::post(response_fields),
+        validation_with_cache(&mut response_cache),
+    ) {
+        Err(SamlError::ReplayDetected { key }) => {
+            assert_eq!(key, response_key);
+            Ok(())
+        }
+        other => Err(format!(
+            "expected LogoutResponse ReplayDetected from the caller cache, got {other:?}"
+        )
+        .into()),
     }
 }
 
