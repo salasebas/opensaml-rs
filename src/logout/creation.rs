@@ -115,6 +115,8 @@ pub(crate) struct LogoutRequestSessionIndexes<'a> {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LogoutRequestValidation {
     Compatibility,
+    /// Session participant producer rules. `NotOnOrAfter` stays optional.
+    SessionParticipant,
     SessionAuthority,
 }
 
@@ -193,6 +195,13 @@ fn create_logout_request_for_subject_inner(
         validation,
     } = input;
 
+    if matches!(validation, LogoutRequestValidation::SessionParticipant)
+        && subject.session_indexes.is_empty()
+    {
+        return Err(SamlError::ProtocolProfile(
+            "a session participant LogoutRequest must include at least one SessionIndex".into(),
+        ));
+    }
     let destination = target_meta
         .get_single_logout_service(binding)
         .ok_or_else(|| SamlError::MissingMetadata("SingleLogoutService".into()))?;
@@ -250,6 +259,16 @@ fn create_logout_request_for_subject_inner(
     let session_indexes = subject.session_indexes.as_slice();
     let expectation = match validation {
         LogoutRequestValidation::Compatibility => None,
+        LogoutRequestValidation::SessionParticipant => Some(OutboundLogoutRequestExpectation {
+            id: &id,
+            issue_instant,
+            destination: &destination,
+            issuer: &issuer,
+            expiration: None,
+            name_id: subject.name_id,
+            name_id_format,
+            session_indexes,
+        }),
         LogoutRequestValidation::SessionAuthority => {
             let expiration = not_on_or_after.ok_or_else(|| {
                 SamlError::Invalid(
@@ -261,7 +280,7 @@ fn create_logout_request_for_subject_inner(
                 issue_instant,
                 destination: &destination,
                 issuer: &issuer,
-                expiration,
+                expiration: Some(expiration),
                 name_id: subject.name_id,
                 name_id_format,
                 session_indexes,

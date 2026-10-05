@@ -205,12 +205,34 @@ pub enum LogoutSigning {
     DoNotSignForCompatibility,
 }
 
+/// Whether typed Single Logout generation follows producer rules.
+///
+/// [`Self::Compatibility`] is the historical typed output. [`Self::Follow`]
+/// applies the producer obligations recorded for this flow. It is not a
+/// validation preset and it does not publish `recommended()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum SingleLogoutGeneration {
+    /// Keep today's typed generation.
+    #[default]
+    Compatibility,
+    /// Emit the producer obligations for this flow.
+    Follow,
+}
+
+impl SingleLogoutGeneration {
+    fn follows(self) -> bool {
+        matches!(self, Self::Follow)
+    }
+}
+
 /// Options for issuing a LogoutRequest.
 #[derive(Debug, Clone)]
 pub struct StartSlo {
     pub(super) binding: LogoutBinding,
     pub(super) relay_state: RelayStateParam,
     pub(super) signing: LogoutSigning,
+    generation: SingleLogoutGeneration,
+    allow_cleartext: bool,
 }
 
 impl StartSlo {
@@ -234,6 +256,8 @@ impl StartSlo {
             binding,
             relay_state: RelayStateParam::absent(),
             signing: LogoutSigning::FollowLocalPolicy,
+            generation: SingleLogoutGeneration::Compatibility,
+            allow_cleartext: false,
         }
     }
 
@@ -248,6 +272,43 @@ impl StartSlo {
         self.signing = signing;
         self
     }
+
+    /// Apply Single Logout generation rules to this LogoutRequest.
+    ///
+    /// [`Self::redirect`], [`Self::post`], and [`Self::simple_sign`] leave this
+    /// off, so existing generation is unchanged. When enabled, HTTP-Redirect,
+    /// HTTP-POST, and HTTP-POST-SimpleSign requests are signed.
+    /// [`LogoutSigning::DoNotSignForCompatibility`] is rejected.
+    /// A service provider, acting as a session participant, includes at least
+    /// one `SessionIndex` and sends the user agent to an `https`
+    /// `SingleLogoutService` unless
+    /// [`Self::allow_cleartext_single_logout_for_compatibility`] is selected.
+    /// An identity provider, acting as a session authority, still emits
+    /// `NotOnOrAfter` and may omit `SessionIndex`. The `https` recommendation
+    /// is not applied to that role.
+    pub fn apply_single_logout_generation_rules(mut self) -> Self {
+        self.generation = SingleLogoutGeneration::Follow;
+        self
+    }
+
+    /// Allow a session participant to deliver this LogoutRequest to an `http`
+    /// endpoint.
+    ///
+    /// This relaxes the Single Logout recommendation to protect the HTTP
+    /// exchange with TLS. It does not remove `SessionIndex`, the request
+    /// signature, or session-authority `NotOnOrAfter`.
+    pub fn allow_cleartext_single_logout_for_compatibility(mut self) -> Self {
+        self.allow_cleartext = true;
+        self
+    }
+
+    pub(super) fn follows_generation_rules(&self) -> bool {
+        self.generation.follows()
+    }
+
+    pub(super) fn allows_cleartext(&self) -> bool {
+        self.allow_cleartext
+    }
 }
 
 /// Options for issuing a LogoutResponse.
@@ -255,6 +316,8 @@ impl StartSlo {
 pub struct RespondSlo {
     pub(super) binding: LogoutBinding,
     pub(super) relay_state: Option<RelayStateParam>,
+    generation: SingleLogoutGeneration,
+    allow_cleartext: bool,
 }
 
 impl RespondSlo {
@@ -277,6 +340,8 @@ impl RespondSlo {
         Self {
             binding,
             relay_state: None,
+            generation: SingleLogoutGeneration::Compatibility,
+            allow_cleartext: false,
         }
     }
 
@@ -287,5 +352,36 @@ impl RespondSlo {
     pub fn relay_state(mut self, relay_state: RelayStateParam) -> Self {
         self.relay_state = Some(relay_state);
         self
+    }
+
+    /// Apply Single Logout generation rules to this LogoutResponse.
+    ///
+    /// [`Self::redirect`], [`Self::post`], and [`Self::simple_sign`] leave this
+    /// off. Typed responses are already signed. When a service provider
+    /// selects these rules, the response is delivered to an `https`
+    /// `SingleLogoutService` unless
+    /// [`Self::allow_cleartext_single_logout_for_compatibility`] is selected.
+    /// An identity provider response does not gain that transport check.
+    pub fn apply_single_logout_generation_rules(mut self) -> Self {
+        self.generation = SingleLogoutGeneration::Follow;
+        self
+    }
+
+    /// Allow a service provider to deliver this LogoutResponse to an `http`
+    /// endpoint.
+    ///
+    /// This relaxes the Single Logout recommendation to protect that HTTP
+    /// exchange with TLS. The response remains signed.
+    pub fn allow_cleartext_single_logout_for_compatibility(mut self) -> Self {
+        self.allow_cleartext = true;
+        self
+    }
+
+    pub(super) fn follows_generation_rules(&self) -> bool {
+        self.generation.follows()
+    }
+
+    pub(super) fn allows_cleartext(&self) -> bool {
+        self.allow_cleartext
     }
 }

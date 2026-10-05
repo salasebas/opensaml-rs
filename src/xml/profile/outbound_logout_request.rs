@@ -20,7 +20,9 @@ pub(crate) struct OutboundLogoutRequestExpectation<'a> {
     pub(crate) issue_instant: &'a str,
     pub(crate) destination: &'a str,
     pub(crate) issuer: &'a str,
-    pub(crate) expiration: &'a str,
+    /// `Some` requires `NotOnOrAfter` to equal that instant. `None` leaves the
+    /// attribute optional.
+    pub(crate) expiration: Option<&'a str>,
     pub(crate) name_id: &'a str,
     pub(crate) name_id_format: &'a str,
     pub(crate) session_indexes: &'a [&'a str],
@@ -129,11 +131,12 @@ fn validate_root(
             "LogoutRequest NotOnOrAfter must use the SAML-conformant UTC xs:dateTime form ending in Z",
         ));
     }
-    if expiration != Some(expectation.expiration) {
-        return Err(profile_error(format!(
-            "Session Authority LogoutRequest NotOnOrAfter must equal the generated expiration {}",
-            expectation.expiration,
-        )));
+    if let Some(expected) = expectation.expiration {
+        if expiration != Some(expected) {
+            return Err(profile_error(format!(
+                "Session Authority LogoutRequest NotOnOrAfter must equal the generated expiration {expected}",
+            )));
+        }
     }
     Ok(())
 }

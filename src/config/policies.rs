@@ -199,7 +199,8 @@ pub enum NameIdCreationPolicy {
 /// `finish_sso` and `accept_unsolicited_sso` read these fields. There is no
 /// `recommended()` constructor. The accept combination for that profile is
 /// the fields below; outbound AuthnRequest signing, identifier creation, and
-/// logout are not part of this accept classification.
+/// logout are not part of this accept classification. Single Logout acceptance
+/// is classified on [`LogoutPolicy`].
 ///
 /// - `assertions`: [`AssertionSignaturePolicy::AllowUnsignedForCompatibility`].
 ///   Actor: accepting service provider. Direction: inbound. Level: library
@@ -307,7 +308,8 @@ impl Default for SpValidationPolicy {
 /// [`AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent`].
 /// Requiring a signature is optional and stays off. Verifying a signature
 /// that is present is mandatory (Core §3.2.1). Logout is not part of this
-/// accept classification.
+/// accept classification. Single Logout acceptance is classified on
+/// [`LogoutPolicy`].
 ///
 /// These inbound rules have no field and no off switch:
 ///
@@ -355,6 +357,53 @@ impl Default for IdpValidationPolicy {
 }
 
 /// Logout request and response signature policy.
+///
+/// # Single Logout acceptance
+///
+/// `finish_slo` reads `responses`. `receive_slo` reads `requests`. There is
+/// no `recommended()` constructor. The accept combination is
+/// [`LogoutSignaturePolicy::RequireSigned`] for both fields. Callers select
+/// it by setting those fields. [`Self::compatibility`] leaves both at
+/// [`LogoutSignaturePolicy::AllowUnsignedForCompatibility`]. [`Self::strict`]
+/// is unchanged and already uses [`LogoutSignaturePolicy::RequireSigned`].
+///
+/// - `requests`: [`LogoutSignaturePolicy::RequireSigned`]. Actor: the
+///   recipient of a `LogoutRequest` (session participant or session
+///   authority). Direction: inbound. Level: mandatory for HTTP-Redirect,
+///   HTTP-POST, and HTTP-POST-SimpleSign (Profiles §4.4.3.1, §4.4.4.1, and
+///   Core §3.7.3.1 / §3.7.3.2).
+///   [`LogoutSignaturePolicy::AllowUnsignedForCompatibility`] is the
+///   compatibility hatch, not a named relaxation of a recommendation.
+/// - `responses`: [`LogoutSignaturePolicy::RequireSigned`]. Actor: the
+///   recipient of a `LogoutResponse`. Direction: inbound. Level: mandatory
+///   for those same bindings (Profiles §4.4.3.4 and §4.4.4.2). The
+///   compatibility hatch is the same unsigned variant.
+///
+/// These inbound rules have no field and no off switch:
+///
+/// - UTC `IssueInstant`. Actor: the logout recipient. Direction: inbound.
+///   Level: mandatory (protocol schema; Core §1.3.3). An inbound leap-second
+///   value stays accepted. Core §1.3.3 forbids a producer from generating
+///   one and does not require the recipient to reject it.
+/// - A present `Destination` identifies the actual recipient. Actor: the
+///   logout recipient. Direction: inbound. Level: mandatory (Core §3.2.1 and
+///   §3.2.2). A signed HTTP-Redirect, HTTP-POST, or HTTP-POST-SimpleSign
+///   message carries `Destination`, and the recipient verifies it. Level:
+///   mandatory when the message is signed.
+/// - `InResponseTo` on a typed `LogoutResponse` matches the pending
+///   `LogoutRequest`. Actor: the original requester. Direction: inbound.
+///   Level: mandatory for this typed exchange (Core §3.2.2).
+///
+/// Rejecting an expired `LogoutRequest@NotOnOrAfter` stays library policy.
+/// Core permits a recipient to discard the message after that instant and
+/// does not require rejection. The direct XML-signature profile stays
+/// library hardening and is not selected by this combination.
+///
+/// Producer rules for `start_slo` and `respond_slo` are selected with
+/// [`crate::StartSlo::apply_single_logout_generation_rules`] and
+/// [`crate::RespondSlo::apply_single_logout_generation_rules`]. They are not
+/// fields of this policy. Requiring a logout signature here does not come
+/// from the producer's TLS recommendation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LogoutPolicy {
     /// LogoutRequest signature behavior.
