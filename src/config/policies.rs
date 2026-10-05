@@ -46,10 +46,9 @@ pub enum AssertionSignaturePolicy {
 /// [`Self::RequireForEncryptedCbc`] follows it.
 /// [`Self::AllowUnsignedEncryptedCbc`] relaxes that recommendation alone.
 /// The name is the E93 relaxation, not the Compatibility preset.
-/// [`SpValidationPolicy::compatibility`] still selects it because the samlify
-/// port did not require the signature. It does not remove the HTTP POST rule
-/// that each assertion must be protected by a signature on the Assertion or
-/// the Response.
+/// [`SpValidationPolicy::compatibility`] still selects it. It does not remove
+/// the HTTP POST rule that each assertion must be protected by a signature on
+/// the Assertion or the Response.
 ///
 /// [`Self::RequireSigned`] requires a Response signature on every response.
 /// The profile allows an Assertion signature instead, so this variant is
@@ -104,7 +103,7 @@ pub enum XmlSignatureProfile {
 pub enum AuthnRequestSigningPolicy {
     /// Sign outgoing AuthnRequests.
     Sign,
-    /// Send unsigned AuthnRequests, preserving the samlify port.
+    /// Send unsigned AuthnRequests for legacy interoperability.
     #[default]
     DoNotSignForCompatibility,
 }
@@ -134,10 +133,7 @@ pub enum AuthnRequestValidationPolicy {
     /// Accept unsigned AuthnRequests without verifying a signature that is
     /// present.
     ///
-    /// Samlify-port hatch for the mandatory present-signature check.
-    ///
-    /// A caller leaving the raw API keeps this behavior through
-    /// [`IdpValidationPolicy::compatibility`].
+    /// Compatibility hatch for the mandatory present-signature check.
     #[default]
     AllowUnsignedForCompatibility,
 }
@@ -148,7 +144,9 @@ pub enum LogoutSignaturePolicy {
     /// Reject unsigned logout messages.
     #[default]
     RequireSigned,
-    /// Accept unsigned logout messages, preserving the samlify port.
+    /// Accept unsigned logout messages.
+    ///
+    /// Raw settings still require logout signatures.
     AllowUnsignedForCompatibility,
 }
 
@@ -165,7 +163,7 @@ pub enum LogoutSignaturePolicy {
 /// element. Errata 05 E26 (Profiles §4.1.4.2) requires the identity provider
 /// to include one. Core condition processing does not make that omission
 /// Invalid, so the extra rejection is library hardening.
-/// [`Self::SkipForCompatibility`] skips the check. It is the samlify-port
+/// [`Self::SkipForCompatibility`] skips the check. It is the compatibility
 /// hatch, not the named relaxation of a recommendation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AudienceValidationPolicy {
@@ -182,10 +180,10 @@ pub enum AudienceValidationPolicy {
     /// restriction is present (Core §2.5.1.1 and §2.5.1.4, Errata 05 E46).
     /// A bearer assertion that omits the element is not rejected.
     EvaluatePresentRestrictions,
-    /// Skip audience evaluation, preserving the samlify port.
+    /// Skip audience evaluation.
     ///
-    /// Samlify-port hatch for the mandatory audience check. A caller leaving
-    /// the raw API keeps this through [`SpValidationPolicy::compatibility`].
+    /// Compatibility hatch for the mandatory audience check. Raw settings
+    /// still validate audience by default.
     SkipForCompatibility,
 }
 
@@ -286,10 +284,10 @@ impl SpValidationPolicy {
         }
     }
 
-    /// Samlify-port policy kept for a caller leaving the raw API.
+    /// Typed permissive preset with unsigned choices made explicit.
     ///
-    /// Unsigned choices stay explicit. This preset does not name an OASIS
-    /// recommendation relaxation.
+    /// This preset is not the raw API's defaults, and it does not name an
+    /// OASIS recommendation relaxation.
     pub fn compatibility() -> Self {
         Self {
             assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
@@ -351,10 +349,10 @@ impl IdpValidationPolicy {
         }
     }
 
-    /// Samlify-port policy kept for a caller leaving the raw API.
+    /// Typed permissive preset with unsigned choices made explicit.
     ///
-    /// Unsigned choices stay explicit. This preset does not name an OASIS
-    /// recommendation relaxation.
+    /// This preset is not the raw API's defaults, and it does not name an
+    /// OASIS recommendation relaxation.
     pub fn compatibility() -> Self {
         Self {
             authn_requests: AuthnRequestValidationPolicy::AllowUnsignedForCompatibility,
@@ -386,11 +384,11 @@ impl Default for IdpValidationPolicy {
 ///   HTTP-POST, and HTTP-POST-SimpleSign (Profiles §4.4.3.1, §4.4.4.1, and
 ///   Core §3.7.3.1 / §3.7.3.2).
 ///   [`LogoutSignaturePolicy::AllowUnsignedForCompatibility`] is the
-///   samlify-port hatch, not a named relaxation of a recommendation.
+///   compatibility hatch, not a named relaxation of a recommendation.
 /// - `responses`: [`LogoutSignaturePolicy::RequireSigned`]. Actor: the
 ///   recipient of a `LogoutResponse`. Direction: inbound. Level: mandatory
 ///   for those same bindings (Profiles §4.4.3.4 and §4.4.4.2). The
-///   samlify-port hatch is the same unsigned variant.
+///   compatibility hatch is the same unsigned variant.
 ///
 /// These inbound rules have no field and no off switch:
 ///
@@ -434,7 +432,9 @@ impl LogoutPolicy {
         }
     }
 
-    /// Accept unsigned logout requests and responses, preserving the samlify port.
+    /// Accept unsigned logout requests and responses.
+    ///
+    /// Raw settings still require logout signatures.
     pub fn compatibility() -> Self {
         Self {
             requests: LogoutSignaturePolicy::AllowUnsignedForCompatibility,
@@ -607,7 +607,7 @@ pub struct TemplatePolicy {
     ///
     /// Typed Session Authority generation requires a complete unqualified
     /// `NotOnOrAfter="{NotOnOrAfter}"` root attribute. Typed SP and raw
-    /// samlify-port generation do not synthesize the attribute.
+    /// compatibility generation do not synthesize the attribute.
     pub logout_request_template: Option<String>,
     /// Logout response template.
     ///

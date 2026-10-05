@@ -95,7 +95,7 @@ Rules:
   response binding.
 - `finish_sso` must match RelayState exactly: absent, present empty, and
   present value are distinct. If pending expects absent and the inbound message
-  carries RelayState, fail unless the samlify-port Compatibility preset permits it.
+  carries RelayState, fail unless an explicit compatibility policy permits it.
 - `finish_sso` must use caller-owned `now`, clock skew, and replay policy.
 - `finish_sso` must not accept unsolicited responses.
 

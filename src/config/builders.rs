@@ -77,7 +77,7 @@ impl SpConfig {
         }
     }
 
-    /// Validate and create SP configuration with samlify-port Compatibility defaults.
+    /// Validate and create SP configuration with compatibility defaults.
     ///
     /// # Errors
     ///
@@ -213,7 +213,7 @@ impl SpConfigBuilder {
 /// # Examples
 ///
 /// The builder starts with strict validation defaults. Use
-/// [`IdpValidationPolicy::compatibility`] to keep the samlify-port behavior,
+/// [`IdpValidationPolicy::compatibility`] for the typed permissive preset,
 /// including when compiling or testing without the default crypto feature.
 ///
 /// ```
@@ -273,7 +273,7 @@ impl IdpConfig {
         }
     }
 
-    /// Validate and create IdP configuration with samlify-port Compatibility defaults.
+    /// Validate and create IdP configuration with compatibility defaults.
     ///
     /// # Errors
     ///

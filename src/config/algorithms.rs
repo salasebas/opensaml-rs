@@ -38,7 +38,7 @@ impl SignatureAlgorithm {
 /// still fail at runtime when unsupported by that backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DigestAlgorithm {
-    /// SHA-1 digest preserved from the samlify port.
+    /// SHA-1 digest for legacy interoperability.
     Sha1ForCompatibility,
     /// Deprecated alias for [`Self::Sha1ForCompatibility`].
     #[deprecated(note = "use DigestAlgorithm::Sha1ForCompatibility")]
@@ -57,7 +57,7 @@ impl DigestAlgorithm {
     /// Return the XML digest algorithm URI.
     #[expect(
         deprecated,
-        reason = "deprecated algorithm aliases remain mapped for the samlify port"
+        reason = "deprecated algorithm aliases remain mapped for compatibility"
     )]
     pub fn as_uri(&self) -> &str {
         match self {
@@ -81,7 +81,7 @@ pub enum DataEncryptionAlgorithm {
     /// AES-256-CBC.
     #[default]
     Aes256,
-    /// Triple DES CBC preserved from the samlify port.
+    /// Triple DES CBC for legacy interoperability.
     TripleDesForCompatibility,
     /// Deprecated alias for [`Self::TripleDesForCompatibility`].
     #[deprecated(note = "use DataEncryptionAlgorithm::TripleDesForCompatibility")]
@@ -96,7 +96,7 @@ impl DataEncryptionAlgorithm {
     /// Return the XML-Enc algorithm URI.
     #[expect(
         deprecated,
-        reason = "deprecated algorithm aliases remain mapped for the samlify port"
+        reason = "deprecated algorithm aliases remain mapped for compatibility"
     )]
     pub fn as_uri(&self) -> &str {
         match self {
@@ -120,7 +120,7 @@ pub enum KeyEncryptionAlgorithm {
     /// RSA-OAEP-MGF1P.
     #[default]
     RsaOaepMgf1p,
-    /// RSAES-PKCS1-v1_5 preserved from the samlify port.
+    /// RSAES-PKCS1-v1_5 for legacy interoperability.
     Rsa15ForCompatibility,
     /// Deprecated alias for [`Self::Rsa15ForCompatibility`].
     #[deprecated(note = "use KeyEncryptionAlgorithm::Rsa15ForCompatibility")]
@@ -133,7 +133,7 @@ impl KeyEncryptionAlgorithm {
     /// Return the XML-Enc key transport algorithm URI.
     #[expect(
         deprecated,
-        reason = "deprecated algorithm aliases remain mapped for the samlify port"
+        reason = "deprecated algorithm aliases remain mapped for compatibility"
     )]
     pub fn as_uri(&self) -> &str {
         match self {

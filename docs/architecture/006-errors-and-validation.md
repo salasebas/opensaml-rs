@@ -123,7 +123,7 @@ pub trait ReplayCache {
 }
 ```
 
-The raw samlify-port API can keep today's hidden process-clock behavior. Typed browser
+Raw compatibility can keep today's hidden process-clock behavior. Typed browser
 flows should not. Use `SamlValidationContext` in `finish_sso`,
 `accept_unsolicited_sso`, `receive_sso`, `receive_slo`, `finish_slo`, and any
 other inbound signed, timed, or replay-sensitive browser-message validation.
@@ -153,8 +153,8 @@ pub enum RelayStateParam {
 ```
 
 For SP-initiated SSO/SLO, if pending state expects `Absent` and the inbound
-message carries any RelayState, fail with `RelayStateMismatch` unless the
-samlify-port Compatibility preset permits the extra parameter.
+message carries any RelayState, fail with `RelayStateMismatch` unless an
+explicit compatibility policy permits the extra parameter.
 
 ## Validation Order For SP SSO Response
 

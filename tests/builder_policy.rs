@@ -1,5 +1,3 @@
-//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
-
 use std::{str::FromStr, time::Duration};
 
 use saml_rs::{

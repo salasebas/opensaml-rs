@@ -1,11 +1,10 @@
 # Keep two validation presets and retire the strict bundle
 
 saml-rs keeps two validation presets, Compatibility and Recommended.
-Compatibility is the samlify-port behavior kept for callers leaving the raw
-API. It can still relax a mandatory requirement where that port did, and it
-does not claim standards conformance. It does not name a relaxation of an
-OASIS recommendation. Raw settings keep their own historical defaults and are
-not rewritten to match it. Recommended applies only to SAML features the crate
+Compatibility stays the current typed permissive behavior, including where a
+mandatory requirement can be relaxed, and it does not claim standards
+conformance. It does not name a relaxation of an OASIS recommendation. Raw
+settings keep their own historical defaults and are not rewritten to match it. Recommended applies only to SAML features the crate
 already implements: for the obligated actor, mandatory requirements stay in
 force, and recommendations start enabled and can be relaxed only by an
 explicit named option. A producer recommendation does not by itself become a

@@ -199,9 +199,9 @@ requirements:
   turning them into inbound rejection rules;
 - keep the conformant default visible in API documentation and tests.
 
-Compatibility is the samlify-port behavior kept for callers leaving the raw
-API. It is not an alternate interpretation of OASIS, and a recommendation
-relaxation does not use that name.
+Compatibility policies are exceptions, not alternate interpretations of
+OASIS. Their names and documentation should make the deviation clear. A
+recommendation relaxation does not use the Compatibility name.
 
 ### Optional Capabilities
 
