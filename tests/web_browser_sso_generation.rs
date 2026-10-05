@@ -265,7 +265,7 @@ fn typed_sso_session_index_is_present_only_when_single_logout_is_supported(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sp = sp_with(SpValidationPolicy::strict())?;
     let idp = idp_with(IdpValidationPolicy::strict(), true)?;
-    let (sp_descriptor, _) = descriptors(&sp, &idp)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let response = idp.initiate_sso(
         &sp_descriptor,
         subject(),
@@ -282,6 +282,21 @@ fn typed_sso_session_index_is_present_only_when_single_logout_is_supported(
         .and_then(|value| value.split('"').next())
         .ok_or("missing assertion ID")?;
     assert!(assertion.contains(&format!("SessionIndex=\"{assertion_id}\"")));
+
+    let session = sp.accept_unsolicited_sso(
+        &idp_descriptor,
+        BrowserInput::<SsoResponse>::post(response.post_form()?.fields().to_vec()),
+        validation(),
+    )?;
+    let logout_subject = session
+        .logout_subject()
+        .ok_or("accepted session is missing a logout subject")?;
+    let session_index = logout_subject
+        .session_indexes()
+        .first()
+        .ok_or("accepted session dropped SessionIndex")?;
+    assert_eq!(session_index.as_str(), session.assertion_id().as_str());
+    assert_eq!(session_index.as_str(), assertion_id);
 
     let idp_without_logout = idp_with(IdpValidationPolicy::strict(), false)?;
     let (sp_descriptor, _) = descriptors(&sp, &idp_without_logout)?;
@@ -430,7 +445,7 @@ fn typed_cbc_response_signature_stays_recommended_and_relaxes_alone(
     let sp = Saml::sp(
         SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
             .acs_endpoint(AcsEndpoint::post(SP_ACS)?.mark_default())
-            .credentials(encrypted_credentials)
+            .credentials(encrypted_credentials.clone())
             .validation(SpValidationPolicy::strict())
             .xml(encryption)
             .build()?,
@@ -479,15 +494,33 @@ fn typed_cbc_response_signature_stays_recommended_and_relaxes_alone(
     let unsigned_xml = response_xml(&unsigned)?;
     assert!(!unsigned_xml.contains("<ds:Signature"));
     assert!(unsigned_xml.contains("EncryptedAssertion"));
+    let unsigned_fields = unsigned.post_form()?.fields().to_vec();
     match sp.finish_sso(
         &idp_descriptor,
         &started.pending,
-        BrowserInput::<SsoResponse>::post(unsigned.post_form()?.fields().to_vec()),
+        BrowserInput::<SsoResponse>::post(unsigned_fields.clone()),
         validation(),
     ) {
-        Err(SamlError::SignatureMissing) => Ok(()),
-        other => Err(format!("expected SignatureMissing, got {other:?}").into()),
+        Err(SamlError::SignatureMissing) => {}
+        other => return Err(format!("expected SignatureMissing, got {other:?}").into()),
     }
+
+    let permissive = Saml::sp(
+        SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+            .acs_endpoint(AcsEndpoint::post(SP_ACS)?.mark_default())
+            .credentials(encrypted_credentials)
+            .validation(SpValidationPolicy::compatibility())
+            .xml(encryption)
+            .build()?,
+    )?;
+    let session = permissive.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::post(unsigned_fields),
+        validation(),
+    )?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    Ok(())
 }
 
 #[test]
