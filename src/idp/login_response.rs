@@ -7,6 +7,12 @@ const VERSION: &str = "2.0";
 const XMLNS_XS: &str = "http://www.w3.org/2001/XMLSchema";
 const XMLNS_XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
 const BEARER_CONFIRMATION: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
+const UNSPECIFIED_AUTHN_CONTEXT: &str = "urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified";
+
+pub(super) struct AuthnStatementXml<'a> {
+    pub(super) authn_instant: &'a str,
+    pub(super) session_index: Option<&'a str>,
+}
 
 pub(super) struct LoginResponseXml<'a> {
     pub(super) protocol_prefix: &'a str,
@@ -24,7 +30,8 @@ pub(super) struct LoginResponseXml<'a> {
     pub(super) audience: &'a str,
     pub(super) name_id_format: &'a str,
     pub(super) name_id: &'a str,
-    pub(super) in_response_to: &'a str,
+    pub(super) in_response_to: Option<&'a str>,
+    pub(super) authn_statement: Option<AuthnStatementXml<'a>>,
     pub(super) attributes: &'a [LoginResponseAttribute],
     pub(super) user_attributes: &'a [(String, String)],
 }
@@ -37,19 +44,20 @@ pub(super) fn render_default_login_response(
     let assertion_xmlns = format!("xmlns:{}", input.assertion_prefix);
     let assertion_name = qname(input.assertion_prefix, "Assertion");
 
+    let mut response_attrs = vec![
+        (protocol_xmlns.as_str(), namespace::PROTOCOL),
+        (assertion_xmlns.as_str(), namespace::ASSERTION),
+        ("ID", input.response_id),
+        ("Version", VERSION),
+        ("IssueInstant", input.issue_instant),
+        ("Destination", input.destination),
+    ];
+    if let Some(in_response_to) = input.in_response_to {
+        response_attrs.push(("InResponseTo", in_response_to));
+    }
+
     let mut writer = XmlWriter::new();
-    writer.start(
-        &response_name,
-        &[
-            (protocol_xmlns.as_str(), namespace::PROTOCOL),
-            (assertion_xmlns.as_str(), namespace::ASSERTION),
-            ("ID", input.response_id),
-            ("Version", VERSION),
-            ("IssueInstant", input.issue_instant),
-            ("Destination", input.destination),
-            ("InResponseTo", input.in_response_to),
-        ],
-    );
+    writer.start(&response_name, &response_attrs);
     writer.text_element(&qname(input.assertion_prefix, "Issuer"), &[], input.issuer);
     writer.start(&qname(input.protocol_prefix, "Status"), &[]);
     writer.empty(
@@ -80,13 +88,16 @@ pub(super) fn render_default_login_response(
         &qname(input.assertion_prefix, "SubjectConfirmation"),
         &[("Method", BEARER_CONFIRMATION)],
     );
+    let mut confirmation_attrs = vec![
+        ("NotOnOrAfter", input.subject_confirmation_not_on_or_after),
+        ("Recipient", input.subject_recipient),
+    ];
+    if let Some(in_response_to) = input.in_response_to {
+        confirmation_attrs.push(("InResponseTo", in_response_to));
+    }
     writer.empty(
         &qname(input.assertion_prefix, "SubjectConfirmationData"),
-        &[
-            ("NotOnOrAfter", input.subject_confirmation_not_on_or_after),
-            ("Recipient", input.subject_recipient),
-            ("InResponseTo", input.in_response_to),
-        ],
+        &confirmation_attrs,
     );
     writer.end(&qname(input.assertion_prefix, "SubjectConfirmation"));
     writer.end(&qname(input.assertion_prefix, "Subject"));
@@ -105,6 +116,9 @@ pub(super) fn render_default_login_response(
     );
     writer.end(&qname(input.assertion_prefix, "AudienceRestriction"));
     writer.end(&qname(input.assertion_prefix, "Conditions"));
+    if let Some(statement) = input.authn_statement.as_ref() {
+        write_authn_statement(&mut writer, input.assertion_prefix, statement);
+    }
     write_login_response_attribute_statement(
         &mut writer,
         input.attributes,
@@ -114,6 +128,23 @@ pub(super) fn render_default_login_response(
     writer.end(&assertion_name);
     writer.end(&response_name);
     Ok(writer.finish())
+}
+
+fn write_authn_statement(writer: &mut XmlWriter, prefix: &str, statement: &AuthnStatementXml<'_>) {
+    let name = qname(prefix, "AuthnStatement");
+    let mut attrs = vec![("AuthnInstant", statement.authn_instant)];
+    if let Some(session_index) = statement.session_index {
+        attrs.push(("SessionIndex", session_index));
+    }
+    writer.start(&name, &attrs);
+    writer.start(&qname(prefix, "AuthnContext"), &[]);
+    writer.text_element(
+        &qname(prefix, "AuthnContextClassRef"),
+        &[],
+        UNSPECIFIED_AUTHN_CONTEXT,
+    );
+    writer.end(&qname(prefix, "AuthnContext"));
+    writer.end(&name);
 }
 
 fn qname(prefix: &str, local_name: &str) -> String {

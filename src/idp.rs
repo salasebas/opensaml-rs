@@ -40,6 +40,7 @@ pub(crate) struct LoginResponseOverrides<'a> {
     pub(crate) acs: Option<&'a str>,
     pub(crate) name_id_format: Option<&'a str>,
     pub(crate) issuance_lifetime: Option<time::Duration>,
+    pub(crate) follow_web_browser_sso_producer: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -47,6 +48,7 @@ struct LoginResponseRendering<'a> {
     name_id_format: Option<&'a str>,
     custom: Option<CustomTagReplacement<'a>>,
     issuance_lifetime: time::Duration,
+    follow_web_browser_sso_producer: bool,
 }
 
 /// A SAML 2.0 Identity Provider: runtime [`EntitySetting`] plus parsed [`IdpMetadata`].
@@ -130,6 +132,14 @@ impl IdentityProvider {
         let tmpl = self.setting.login_response_template.as_ref();
         let attributes = tmpl.map(|t| t.attributes.as_slice()).unwrap_or(&[]);
         let has_custom_context = tmpl.and_then(|t| t.context.as_ref()).is_some();
+        if rendering.follow_web_browser_sso_producer
+            && (rendering.custom.is_some() || has_custom_context)
+        {
+            return Err(SamlError::Invalid(
+                "Web Browser SSO producer rules require the built-in login response renderer"
+                    .into(),
+            ));
+        }
         if rendering.custom.is_none() && !has_custom_context {
             let window = capture_idp_issuance_window(rendering.issuance_lifetime)?;
             let default_name_id_format = self
@@ -145,7 +155,17 @@ impl IdentityProvider {
             let assertion_id = generate_id();
             let audience = sp.metadata.get_entity_id().unwrap_or_default().to_string();
             let issuer = self.entity_id();
-            let in_response_to = in_response_to.unwrap_or_default();
+            let raw_in_response_to = in_response_to.unwrap_or_default();
+            let emitted_in_response_to =
+                if rendering.follow_web_browser_sso_producer && raw_in_response_to.is_empty() {
+                    None
+                } else {
+                    Some(raw_in_response_to)
+                };
+            let supports_single_logout = !self.metadata.get_support_bindings().is_empty();
+            let session_index = (rendering.follow_web_browser_sso_producer
+                && supports_single_logout)
+                .then_some(assertion_id.as_str());
             let xml = render_default_login_response(&LoginResponseXml {
                 protocol_prefix: &self.setting.tag_prefix_protocol,
                 assertion_prefix: &self.setting.tag_prefix_assertion,
@@ -162,7 +182,13 @@ impl IdentityProvider {
                 audience: &audience,
                 name_id_format,
                 name_id: &user.name_id,
-                in_response_to,
+                in_response_to: emitted_in_response_to,
+                authn_statement: rendering.follow_web_browser_sso_producer.then_some(
+                    login_response::AuthnStatementXml {
+                        authn_instant: &window.issue_instant,
+                        session_index,
+                    },
+                ),
                 attributes,
                 user_attributes: &user.attributes,
             })?;
@@ -312,6 +338,7 @@ impl IdentityProvider {
                 issuance_lifetime: overrides
                     .issuance_lifetime
                     .unwrap_or(time::Duration::seconds(300)),
+                follow_web_browser_sso_producer: overrides.follow_web_browser_sso_producer,
             },
         )?;
         let signed = self.finalize_login_response(sp, binding, &raw, options.encrypt_then_sign)?;

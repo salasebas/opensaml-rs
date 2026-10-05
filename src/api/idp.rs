@@ -104,7 +104,8 @@ impl Saml<Idp> {
     /// descriptor, relay state is invalid, the request ACS selection conflicts
     /// with the response binding or SP metadata, required metadata or signing
     /// keys are missing, the configured issuance expiration overflows the
-    /// supported timestamp range, or response creation fails.
+    /// supported timestamp range, producer rules are combined with a custom
+    /// login response template, or response creation fails.
     pub fn respond_sso(
         &self,
         sp: &SpDescriptor,
@@ -123,7 +124,8 @@ impl Saml<Idp> {
     /// Returns [`SamlError`] when relay state is invalid, SP metadata cannot be
     /// parsed, a compatible ACS endpoint or signing key is missing, the
     /// selected binding is unsupported, the configured issuance expiration
-    /// overflows the supported timestamp range, or response creation fails.
+    /// overflows the supported timestamp range, producer rules are combined
+    /// with a custom login response template, or response creation fails.
     ///
     /// # Examples
     ///
@@ -213,6 +215,7 @@ impl Saml<Idp> {
                     acs: explicit_acs.as_deref(),
                     name_id_format: name_id_format.as_deref(),
                     issuance_lifetime: Some(self.0.issuance_lifetime),
+                    follow_web_browser_sso_producer: options.follow_web_browser_sso_producer,
                 },
             )?;
         Outbound::<SsoResponse>::try_from(context)
