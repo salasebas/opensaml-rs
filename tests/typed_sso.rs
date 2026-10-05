@@ -1735,7 +1735,7 @@ fn assert_response_root_signature(
 }
 
 #[test]
-fn recommended_sso_accept_rejects_signed_metadata_without_pinned_certificates(
+fn recommended_sso_trusts_signed_metadata_only_with_pinned_certificates(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sp = Saml::sp(sp_with_validation(recommended_sso_accept_validation())?)?;
     let signed = signed_idp_metadata()?;

@@ -23,8 +23,10 @@ use super::descriptors::EntityId;
 /// This is a caller argument on descriptor import. It is not a field of
 /// [`crate::SpValidationPolicy`] or [`crate::IdpValidationPolicy`], and there
 /// is no `recommended()` constructor. The Web Browser SSO and Single Logout
-/// field combinations do not select it, invent trust anchors, or accept a
-/// signature that was not verified with pinned certificates.
+/// field combinations do not select it or invent trust anchors.
+/// [`Self::RequireSignature`] rejects a document that no pinned certificate
+/// verifies. [`Self::UnsignedForCompatibility`] may parse a signed document
+/// and does not record that signature as verified.
 ///
 /// SAML metadata trust is caller-pinned. This type does not use a public web
 /// PKI CA store, `ds:KeyInfo`, or a metadata `KeyDescriptor` as a trust anchor.

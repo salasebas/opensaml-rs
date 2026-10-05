@@ -191,10 +191,14 @@ pub trait ReplayCache {
 ///   caller supplies the cache. [`Self::DisabledForCompatibility`] is the
 ///   samlify-port hatch for that mandatory rule, not a recommendation
 ///   relaxation.
-/// - Remembering an `AuthnRequest` identifier, a logout message identifier, or
-///   a Response identifier, and expiring an SSO entry before
-///   `SubjectConfirmationData@NotOnOrAfter`, are library policy. They run only
-///   when the caller supplies a cache.
+/// - Remembering an `AuthnRequest` identifier, a `LogoutResponse` identifier,
+///   or a Response identifier is library policy. Those paths run only when the
+///   caller supplies a cache, and `receive_sso` and `finish_slo` then require
+///   [`SamlValidationContext::with_replay_retention`]. A `LogoutRequest`
+///   identifier is also library policy: `receive_slo` uses `NotOnOrAfter`
+///   when it is present and otherwise requires that retention. Expiring an
+///   SSO cache entry before `SubjectConfirmationData@NotOnOrAfter` is library
+///   policy too.
 /// - `<OneTimeUse>` is not this cache. Core §2.5.1.5 tells a relying party
 ///   that retains an assertion not to reuse it. Typed SSO does not retain the
 ///   assertion and does not add a field for the element.
