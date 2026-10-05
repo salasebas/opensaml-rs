@@ -35,8 +35,9 @@ config.validate()?;
 
 Builders keep large setup ergonomic while still returning `Result`. Builders use
 strict typed defaults; `SpConfig::new` / `IdpConfig::new`, `try_new`, and public
-`Default` policy values preserve compatibility defaults so callers do not
-silently opt into signature requirements SAML does not universally require.
+`Default` policy values preserve the samlify-port Compatibility defaults so
+callers leaving the raw API do not silently opt into signature requirements
+SAML does not universally require.
 
 ```rust
 let config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
@@ -156,7 +157,7 @@ Rules:
 - Map known variants to existing constants.
 - Keep custom URI constructors simple; backend support is still checked at
   runtime.
-- Risky compatibility options must be visible in names. An OASIS recommendation relaxation is named for the recommendation it relaxes.
+- Risky samlify-port options must be visible in names. An OASIS recommendation relaxation is named for the recommendation it relaxes.
 
 ## XML and Validation Policy
 
@@ -229,15 +230,15 @@ stricter than the profile baseline and aligns with the separate
 The top-level Response remains optional for plaintext Assertions, but Errata 05
 E93 recommends outer integrity protection before processing an
 `EncryptedAssertion` that uses CBC. Strict policy therefore uses
-`ResponseSignaturePolicy::RequireForEncryptedCbc`; compatibility policy
-selects the E93 relaxation `AllowUnsignedEncryptedCbc`. That name is not
-Compatibility. Typed IdPs sign CBC-encrypted
+`ResponseSignaturePolicy::RequireForEncryptedCbc`; the samlify-port preset
+selects the E93 relaxation
+`AllowUnsignedEncryptedCbc`. That name is not Compatibility. Typed IdPs sign CBC-encrypted
 Responses by default. Callers can require Response authentication for every
 response with `ResponseSignaturePolicy::RequireSigned` and force producer-side
 HTTP-POST signing with `RespondSso::post().sign_response()`.
 
 Avoid bare boolean names for signature requirements and avoid names like
-`insecure(true)`. A compatibility exception keeps Compatibility in the name. An OASIS recommendation relaxation does not.
+`insecure(true)`. A samlify-port exception keeps Compatibility in the name. An OASIS recommendation relaxation does not.
 
 ## Descriptors
 

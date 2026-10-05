@@ -31,8 +31,8 @@ impl Saml<Sp> {
     /// selected binding is unsupported, or logout request creation fails.
     /// [`StartSlo::apply_single_logout_generation_rules`] also rejects a
     /// missing `SessionIndex`, an `http` peer endpoint unless
-    /// [`StartSlo::allow_http_single_logout`] is selected, and
-    /// [`LogoutSigning::DoNotSignForCompatibility`].
+    /// [`StartSlo::allow_http_single_logout`] is selected, and rejects the
+    /// samlify-port [`LogoutSigning::DoNotSignForCompatibility`].
     ///
     /// # Examples
     ///

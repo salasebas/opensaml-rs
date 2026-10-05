@@ -1,3 +1,5 @@
+//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
+
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",

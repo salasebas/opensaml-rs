@@ -66,12 +66,13 @@ enum AllowCreateAttribute {
 
 /// Whether typed Web Browser SSO generation follows producer rules.
 ///
-/// [`Self::Compatibility`] is the historical typed output. [`Self::Follow`]
-/// applies the producer obligations recorded for this flow. It is not a
-/// validation preset and it does not publish `recommended()`.
+/// [`Self::Compatibility`] is the samlify-port output kept for a caller
+/// leaving the raw API. [`Self::Follow`] applies the producer obligations
+/// recorded for this flow. It is not a validation preset and it does not
+/// publish `recommended()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum WebBrowserSsoProducer {
-    /// Keep today's typed generation.
+    /// Keep the samlify-port generation.
     #[default]
     Compatibility,
     /// Emit the producer obligations for this flow.

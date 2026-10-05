@@ -58,10 +58,10 @@ become a receiver rejection.
 _Avoid_: default, full SAML conformance, profile
 
 **Compatibility**:
-The validation preset that preserves the existing typed permissive behavior.
-It does not claim standards conformance, so a mandatory requirement may be
-relaxed there. It does not name a relaxation of an OASIS recommendation.
-_Avoid_: raw settings, samlify, default, OASIS relaxation
+The samlify-port behavior kept for a caller leaving the raw API, so the
+builders can preserve that configuration. It does not name a relaxation of an
+OASIS recommendation.
+_Avoid_: OASIS relaxation, recommended, default
 
 **Raw settings**:
 Historical configuration that predates the validation presets. Its defaults
