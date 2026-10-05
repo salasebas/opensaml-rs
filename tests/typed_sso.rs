@@ -17,13 +17,14 @@ use saml_rs::raw::Binding;
 use saml_rs::template::{LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
 use saml_rs::xml::dom::parse;
 use saml_rs::{
-    AcsEndpoint, AssertionSignaturePolicy, AuthnRequest, BrowserInput, CertificatePem, Credentials,
-    EntityId, ForceAuthn, FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy,
-    MetadataTrustPolicy, NameId, NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot,
-    PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso,
-    ResponseSignaturePolicy, Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor,
-    SpValidationPolicy, SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject,
-    TemplatePolicy, VerifiedXmlSignatureCoverage,
+    AcsEndpoint, AssertionSignaturePolicy, AudienceValidationPolicy, AuthnRequest,
+    AuthnRequestValidationPolicy, BrowserInput, CertificatePem, Credentials, EntityId, ForceAuthn,
+    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId,
+    NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
+    RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, ResponseSignaturePolicy,
+    Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
+    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject, TemplatePolicy,
+    VerifiedXmlSignatureCoverage, XmlSignatureProfile,
 };
 #[cfg(not(feature = "crypto-fips"))]
 use saml_rs::{XmlEncryptionPolicy, XmlPolicy};
@@ -147,6 +148,40 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
         .sso_endpoint(SsoEndpoint::simple_sign(IDP_SSO_SIMPLESIGN)?)
         .credentials(credentials())
         .validation(IdpValidationPolicy::strict())
+        .build()
+}
+
+// Web Browser SSO accept fields. `recommended()` is intentionally not a method.
+fn recommended_sso_accept_validation() -> SpValidationPolicy {
+    SpValidationPolicy {
+        assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
+        responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
+        xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
+        audience: AudienceValidationPolicy::Validate,
+        ..SpValidationPolicy::compatibility()
+    }
+}
+
+fn recommended_sso_accept_idp_validation() -> IdpValidationPolicy {
+    IdpValidationPolicy {
+        authn_requests: AuthnRequestValidationPolicy::AllowUnsignedForCompatibility,
+        ..IdpValidationPolicy::compatibility()
+    }
+}
+
+fn sp_with_validation(validation: SpValidationPolicy) -> Result<SpConfig, SamlError> {
+    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
+        .credentials(credentials())
+        .validation(validation)
+        .build()
+}
+
+fn idp_with_validation(validation: IdpValidationPolicy) -> Result<IdpConfig, SamlError> {
+    IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+        .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+        .credentials(credentials())
+        .validation(validation)
         .build()
 }
 
@@ -1610,5 +1645,502 @@ fn typed_idp_sso_reports_issuance_expiration_overflow() -> Result<(), Box<dyn st
             Ok(())
         }
         other => Err(format!("expected IdpIssuanceExpiration error, got {other:?}").into()),
+    }
+}
+
+fn strip_embedded_signatures(xml: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let mut rest = xml;
+    let mut stripped = String::new();
+    while let Some(start) = rest.find("<ds:Signature") {
+        stripped.push_str(&rest[..start]);
+        let after = &rest[start..];
+        let end = after
+            .find("</ds:Signature>")
+            .ok_or("unterminated XML signature")?;
+        rest = &after[end + "</ds:Signature>".len()..];
+    }
+    stripped.push_str(rest);
+    Ok(stripped)
+}
+
+fn resign_response(xml: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let key = load_private_key(PRIVKEY, None)?;
+    Ok(construct_saml_signature(
+        &strip_embedded_signatures(xml)?,
+        true,
+        &key,
+        CERT,
+        RSA_SHA256,
+        &[],
+        None,
+    )?)
+}
+
+fn recommended_post_exchange() -> Result<SsoExchange, Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_with_validation(recommended_sso_accept_validation())?)?;
+    let idp = Saml::idp(idp_with_validation(recommended_sso_accept_idp_validation())?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    )?;
+    let response = idp.respond_sso(&sp_descriptor, &received, subject(), RespondSso::post())?;
+    Ok(SsoExchange {
+        sp,
+        idp,
+        sp_descriptor,
+        idp_descriptor,
+        pending: started.pending,
+        received,
+        response_fields: post_fields(&response)?,
+    })
+}
+
+fn assert_response_root_signature(
+    session: &saml_rs::SsoSession,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let [signature] = session.verified_xml_signatures() else {
+        return Err("expected one verified embedded XML signature".into());
+    };
+    if signature.algorithm_uri() != RSA_SHA256
+        || signature.coverage() != VerifiedXmlSignatureCoverage::ResponseRoot
+    {
+        return Err("expected a response signature and no direct assertion signature".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn recommended_sso_accept_accepts_response_signature_without_assertion_signature(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = recommended_post_exchange()?;
+    let xml = response_xml_from_fields(&exchange.response_fields)?;
+    if xml.matches("</ds:Signature>").count() != 1 {
+        return Err("expected the response signature to be the only embedded signature".into());
+    }
+
+    let session = exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(exchange.response_fields.clone()),
+        validation(),
+    )?;
+    assert_response_root_signature(&session)?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+
+    let unsolicited =
+        exchange
+            .idp
+            .initiate_sso(&exchange.sp_descriptor, subject(), RespondSso::post())?;
+    let unsolicited_fields = post_fields(&unsolicited)?;
+    let unsolicited_xml = response_xml_from_fields(&unsolicited_fields)?;
+    if unsolicited_xml.matches("</ds:Signature>").count() != 1 {
+        return Err("expected an unsolicited response signed only on the Response".into());
+    }
+    let session = exchange.sp.accept_unsolicited_sso(
+        &exchange.idp_descriptor,
+        BrowserInput::<SsoResponse>::post(unsolicited_fields),
+        validation(),
+    )?;
+    assert_response_root_signature(&session)?;
+    assert_eq!(session.in_response_to(), None);
+    Ok(())
+}
+
+#[test]
+fn recommended_sso_accept_rejects_response_only_signature_only_with_assertion_hardening(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = recommended_post_exchange()?;
+    let fields = exchange.response_fields;
+    let hardening = Saml::sp(sp_with_validation(SpValidationPolicy {
+        assertions: AssertionSignaturePolicy::RequireSigned,
+        ..recommended_sso_accept_validation()
+    })?)?;
+    match hardening.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields.clone()),
+        validation(),
+    ) {
+        Err(SamlError::AssertionSignatureRequired) => {}
+        other => {
+            return Err(format!(
+                "expected AssertionSignatureRequired for assertion hardening, got {other:?}"
+            )
+            .into());
+        }
+    }
+
+    let sha2_only = Saml::sp(sp_with_validation(SpValidationPolicy {
+        xml_signatures: XmlSignatureProfile::StrictRsaSha2,
+        ..recommended_sso_accept_validation()
+    })?)?;
+    let session = sha2_only.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields),
+        validation(),
+    )?;
+    assert_response_root_signature(&session)?;
+    Ok(())
+}
+
+#[test]
+fn recommended_sso_accept_rejects_messages_a_receiver_must_reject(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let first = recommended_post_exchange()?;
+    let second = recommended_post_exchange()?;
+    match first.sp.finish_sso(
+        &first.idp_descriptor,
+        &second.pending,
+        BrowserInput::<SsoResponse>::post(first.response_fields.clone()),
+        validation(),
+    ) {
+        Err(SamlError::InResponseToMismatch { .. }) => {}
+        other => {
+            return Err(
+                format!("expected InResponseToMismatch from finish_sso, got {other:?}").into(),
+            );
+        }
+    }
+
+    match first.sp.accept_unsolicited_sso(
+        &first.idp_descriptor,
+        BrowserInput::<SsoResponse>::post(first.response_fields.clone()),
+        validation(),
+    ) {
+        Err(SamlError::InResponseToMismatch { .. }) => {}
+        other => {
+            return Err(format!(
+                "expected InResponseToMismatch from accept_unsolicited_sso, got {other:?}"
+            )
+            .into());
+        }
+    }
+
+    let xml = response_xml_from_fields(&first.response_fields)?;
+    let wrong_audience = resign_response(&xml.replace(
+        &format!("<saml:Audience>{SP_ENTITY_ID}</saml:Audience>"),
+        "<saml:Audience>https://other.example/metadata</saml:Audience>",
+    ))?;
+    if !xml.contains(&format!("<saml:Audience>{SP_ENTITY_ID}</saml:Audience>")) {
+        return Err("expected the bearer assertion to name the service provider".into());
+    }
+    match first.sp.finish_sso(
+        &first.idp_descriptor,
+        &first.pending,
+        BrowserInput::<SsoResponse>::post(response_fields_with_xml(
+            first.response_fields,
+            &wrong_audience,
+        )?),
+        validation(),
+    ) {
+        Err(SamlError::AudienceMismatch { .. }) => {}
+        other => return Err(format!("expected AudienceMismatch, got {other:?}").into()),
+    }
+
+    let started = first
+        .sp
+        .start_sso(&first.idp_descriptor, StartSso::post())?;
+    let request_xml = authn_request_xml(&started.outbound)?
+        .replace(IDP_SSO_POST, "https://idp.example.com/sso/wrong");
+    match first.idp.receive_sso(
+        &first.sp_descriptor,
+        post_authn_request_input_with_xml(&request_xml),
+        validation(),
+    ) {
+        Err(SamlError::DestinationMismatch { .. }) => Ok(()),
+        other => Err(format!("expected DestinationMismatch, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn recommended_sso_accept_requires_issue_instant_and_accepts_leap_seconds(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = recommended_post_exchange()?;
+    let missing = replace_element_issue_instant(
+        &response_xml_from_fields(&exchange.response_fields)?,
+        "<samlp:Response",
+        None,
+    )?;
+    match exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(response_fields_with_xml(
+            exchange.response_fields.clone(),
+            &missing,
+        )?),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message
+                .contains("Response is missing required unqualified attribute IssueInstant") => {}
+        other => {
+            return Err(format!("expected missing Response IssueInstant, got {other:?}").into());
+        }
+    }
+
+    let leap_second = "2016-12-31T23:59:60Z";
+    let leap_xml = resign_response(&replace_element_issue_instant(
+        &response_xml_from_fields(&exchange.response_fields)?,
+        "<samlp:Response",
+        Some(leap_second),
+    )?)?;
+    let session = exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(response_fields_with_xml(
+            exchange.response_fields,
+            &leap_xml,
+        )?),
+        validation(),
+    )?;
+    assert_eq!(session.response_issue_instant().as_str(), leap_second);
+
+    let unsolicited =
+        exchange
+            .idp
+            .initiate_sso(&exchange.sp_descriptor, subject(), RespondSso::post())?;
+    let unsolicited_fields = post_fields(&unsolicited)?;
+    let unsolicited_leap = resign_response(&replace_element_issue_instant(
+        &response_xml_from_fields(&unsolicited_fields)?,
+        "<samlp:Response",
+        Some(leap_second),
+    )?)?;
+    let session = exchange.sp.accept_unsolicited_sso(
+        &exchange.idp_descriptor,
+        BrowserInput::<SsoResponse>::post(response_fields_with_xml(
+            unsolicited_fields,
+            &unsolicited_leap,
+        )?),
+        validation(),
+    )?;
+    assert_eq!(session.response_issue_instant().as_str(), leap_second);
+
+    let started = exchange
+        .sp
+        .start_sso(&exchange.idp_descriptor, StartSso::post())?;
+    let missing_request = replace_issue_instant(&authn_request_xml(&started.outbound)?, None)?;
+    match exchange.idp.receive_sso(
+        &exchange.sp_descriptor,
+        post_authn_request_input_with_xml(&missing_request),
+        validation(),
+    ) {
+        Err(SamlError::ProtocolProfile(message))
+            if message.contains("missing required unqualified attribute IssueInstant") => {}
+        other => {
+            return Err(
+                format!("expected missing AuthnRequest IssueInstant, got {other:?}").into(),
+            );
+        }
+    }
+    let leap_request =
+        replace_issue_instant(&authn_request_xml(&started.outbound)?, Some(leap_second))?;
+    let received = exchange.idp.receive_sso(
+        &exchange.sp_descriptor,
+        post_authn_request_input_with_xml(&leap_request),
+        validation(),
+    )?;
+    assert_eq!(received.message().issue_instant().as_str(), leap_second);
+    Ok(())
+}
+
+#[test]
+fn cbc_relaxation_does_not_disable_other_accept_rules() -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = recommended_post_exchange()?;
+    let relaxed = Saml::sp(sp_with_validation(SpValidationPolicy {
+        responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility,
+        ..recommended_sso_accept_validation()
+    })?)?;
+    let unsigned =
+        strip_embedded_signatures(&response_xml_from_fields(&exchange.response_fields)?)?;
+    match relaxed.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(response_fields_with_xml(
+            exchange.response_fields.clone(),
+            &unsigned,
+        )?),
+        validation(),
+    ) {
+        Err(SamlError::SignatureMissing) => {}
+        other => {
+            return Err(format!(
+                "expected SignatureMissing for an unsigned POST response, got {other:?}"
+            )
+            .into());
+        }
+    }
+
+    let wrong_audience = resign_response(
+        &response_xml_from_fields(&exchange.response_fields)?.replace(
+            &format!("<saml:Audience>{SP_ENTITY_ID}</saml:Audience>"),
+            "<saml:Audience>https://other.example/metadata</saml:Audience>",
+        ),
+    )?;
+    match relaxed.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(response_fields_with_xml(
+            exchange.response_fields,
+            &wrong_audience,
+        )?),
+        validation(),
+    ) {
+        Err(SamlError::AudienceMismatch { .. }) => Ok(()),
+        other => Err(format!(
+            "expected AudienceMismatch after relaxing only the CBC recommendation, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[cfg(not(feature = "crypto-fips"))]
+#[test]
+fn recommended_sso_accept_rejects_unsigned_cbc_response_unless_relaxed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let accepting = Saml::sp(sp_with_validation_and_xml(
+        recommended_sso_accept_validation(),
+    )?)?;
+    let relaxed = Saml::sp(sp_with_validation_and_xml(SpValidationPolicy {
+        responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility,
+        ..recommended_sso_accept_validation()
+    })?)?;
+    let assertion_signed = Saml::sp(sp_with_validation_and_xml(SpValidationPolicy {
+        assertions: AssertionSignaturePolicy::RequireSigned,
+        ..recommended_sso_accept_validation()
+    })?)?;
+    let idp = Saml::idp(idp_with_validation_and_xml(
+        recommended_sso_accept_idp_validation(),
+    )?)?;
+    let (assertion_signed_descriptor, idp_descriptor) = descriptors(&assertion_signed, &idp)?;
+    let started = accepting.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = idp.receive_sso(
+        &assertion_signed_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    )?;
+    let response = idp.respond_sso(
+        &assertion_signed_descriptor,
+        &received,
+        subject(),
+        RespondSso::post().allow_unsigned_encrypted_cbc_for_compatibility(),
+    )?;
+    let fields = post_fields(&response)?;
+
+    match accepting.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::post(fields.clone()),
+        validation(),
+    ) {
+        Err(SamlError::SignatureMissing) => {}
+        other => {
+            return Err(format!(
+                "expected SignatureMissing for an unsigned CBC response, got {other:?}"
+            )
+            .into());
+        }
+    }
+
+    let session = relaxed.finish_sso(
+        &idp_descriptor,
+        &started.pending,
+        BrowserInput::<SsoResponse>::post(fields),
+        validation(),
+    )?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    Ok(())
+}
+
+#[cfg(not(feature = "crypto-fips"))]
+fn sp_with_validation_and_xml(validation: SpValidationPolicy) -> Result<SpConfig, SamlError> {
+    SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+        .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
+        .credentials(encryption_credentials())
+        .validation(validation)
+        .xml(encrypted_xml_policy())
+        .build()
+}
+
+#[cfg(not(feature = "crypto-fips"))]
+fn idp_with_validation_and_xml(validation: IdpValidationPolicy) -> Result<IdpConfig, SamlError> {
+    IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+        .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+        .credentials(credentials())
+        .validation(validation)
+        .xml(encrypted_xml_policy())
+        .build()
+}
+
+#[test]
+fn compatibility_sso_accept_keeps_unsigned_request_and_response_signature_outcomes(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = recommended_post_exchange()?;
+    let compatibility = Saml::sp(sp_with_validation(SpValidationPolicy::compatibility())?)?;
+    let session = compatibility.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(exchange.response_fields.clone()),
+        validation(),
+    )?;
+    assert_response_root_signature(&session)?;
+
+    let wrong_audience = resign_response(
+        &response_xml_from_fields(&exchange.response_fields)?.replace(
+            &format!("<saml:Audience>{SP_ENTITY_ID}</saml:Audience>"),
+            "<saml:Audience>https://other.example/metadata</saml:Audience>",
+        ),
+    )?;
+    let session = compatibility.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(response_fields_with_xml(
+            exchange.response_fields,
+            &wrong_audience,
+        )?),
+        validation(),
+    )?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+
+    let (compatibility_sp, compatibility_idp) = compatibility_facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&compatibility_sp, &compatibility_idp)?;
+    let started = compatibility_sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = compatibility_idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    )?;
+    assert_eq!(received.message().id(), started.pending.request_id());
+
+    let wrong_destination = authn_request_xml(&started.outbound)?
+        .replace(IDP_SSO_POST, "https://idp.example.com/sso/wrong");
+    match compatibility_idp.receive_sso(
+        &sp_descriptor,
+        post_authn_request_input_with_xml(&wrong_destination),
+        validation(),
+    ) {
+        Err(SamlError::DestinationMismatch { .. }) => {}
+        other => {
+            return Err(format!(
+                "expected DestinationMismatch from compatibility receive, got {other:?}"
+            )
+            .into());
+        }
+    }
+
+    let strict_idp = Saml::idp(idp_config()?)?;
+    match strict_idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(post_fields(&started.outbound)?),
+        validation(),
+    ) {
+        Err(SamlError::SignatureMissing) => Ok(()),
+        other => Err(format!(
+            "expected strict receive to keep rejecting an unsigned AuthnRequest, got {other:?}"
+        )
+        .into()),
     }
 }
