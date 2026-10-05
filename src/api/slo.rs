@@ -426,14 +426,13 @@ fn start_slo_impl(
             "a LogoutRequest signature cannot be disabled for HTTP-Redirect, HTTP-POST, or HTTP-POST-SimpleSign when Single Logout generation rules are selected".into(),
         ));
     }
-    if follows_rules
-        && matches!(role, StartSloRole::SessionParticipant)
-        && !options.allows_cleartext()
-    {
-        let destination = peer_metadata
-            .get_single_logout_service(options.binding.as_binding())
-            .ok_or_else(|| Error::MissingMetadata("SingleLogoutService".into()))?;
-        require_https_logout_endpoint(&destination)?;
+    if matches!(role, StartSloRole::SessionParticipant) {
+        enforce_participant_https(
+            peer_metadata,
+            options.binding.as_binding(),
+            follows_rules,
+            options.allows_cleartext(),
+        )?;
     }
     let (issue_instant, not_on_or_after, request_validation) = match role {
         StartSloRole::SessionParticipant => (
@@ -534,14 +533,13 @@ fn respond_slo_impl(
     options: RespondSlo,
     transport: LogoutResponseTransport,
 ) -> Result<Outbound<LogoutResponse>, SamlError> {
-    if options.follows_generation_rules()
-        && !options.allows_cleartext()
-        && matches!(transport, LogoutResponseTransport::SessionParticipant)
-    {
-        let destination = peer_metadata
-            .get_single_logout_service(options.binding.as_binding())
-            .ok_or_else(|| Error::MissingMetadata("SingleLogoutService".into()))?;
-        require_https_logout_endpoint(&destination)?;
+    if matches!(transport, LogoutResponseTransport::SessionParticipant) {
+        enforce_participant_https(
+            peer_metadata,
+            options.binding.as_binding(),
+            options.follows_generation_rules(),
+            options.allows_cleartext(),
+        )?;
     }
     let relay_state = options
         .relay_state
@@ -600,6 +598,21 @@ fn finish_slo_impl(
 enum LogoutResponseTransport {
     SessionParticipant,
     SessionAuthority,
+}
+
+fn enforce_participant_https(
+    peer_metadata: &Metadata,
+    binding: Binding,
+    follows_rules: bool,
+    allow_cleartext: bool,
+) -> Result<(), SamlError> {
+    if !follows_rules || allow_cleartext {
+        return Ok(());
+    }
+    let destination = peer_metadata
+        .get_single_logout_service(binding)
+        .ok_or_else(|| Error::MissingMetadata("SingleLogoutService".into()))?;
+    require_https_logout_endpoint(&destination)
 }
 
 fn require_https_logout_endpoint(endpoint: &str) -> Result<(), SamlError> {

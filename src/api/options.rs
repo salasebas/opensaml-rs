@@ -225,14 +225,53 @@ impl SingleLogoutGeneration {
     }
 }
 
+/// HTTPS recommendation for a session participant's logout exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ParticipantLogoutTransport {
+    /// Send the user agent to an `https` `SingleLogoutService`.
+    #[default]
+    RequireHttps,
+    /// Allow an `http` `SingleLogoutService`.
+    AllowCleartextForCompatibility,
+}
+
+/// Producer-rule selection shared by logout requests and responses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct SingleLogoutRules {
+    generation: SingleLogoutGeneration,
+    transport: ParticipantLogoutTransport,
+}
+
+impl SingleLogoutRules {
+    fn apply_generation_rules(mut self) -> Self {
+        self.generation = SingleLogoutGeneration::Follow;
+        self
+    }
+
+    fn allow_cleartext(mut self) -> Self {
+        self.transport = ParticipantLogoutTransport::AllowCleartextForCompatibility;
+        self
+    }
+
+    fn follows(self) -> bool {
+        self.generation.follows()
+    }
+
+    fn allows_cleartext(self) -> bool {
+        matches!(
+            self.transport,
+            ParticipantLogoutTransport::AllowCleartextForCompatibility
+        )
+    }
+}
+
 /// Options for issuing a LogoutRequest.
 #[derive(Debug, Clone)]
 pub struct StartSlo {
     pub(super) binding: LogoutBinding,
     pub(super) relay_state: RelayStateParam,
     pub(super) signing: LogoutSigning,
-    generation: SingleLogoutGeneration,
-    allow_cleartext: bool,
+    rules: SingleLogoutRules,
 }
 
 impl StartSlo {
@@ -256,8 +295,7 @@ impl StartSlo {
             binding,
             relay_state: RelayStateParam::absent(),
             signing: LogoutSigning::FollowLocalPolicy,
-            generation: SingleLogoutGeneration::Compatibility,
-            allow_cleartext: false,
+            rules: SingleLogoutRules::default(),
         }
     }
 
@@ -287,7 +325,7 @@ impl StartSlo {
     /// `NotOnOrAfter` and may omit `SessionIndex`. The `https` recommendation
     /// is not applied to that role.
     pub fn apply_single_logout_generation_rules(mut self) -> Self {
-        self.generation = SingleLogoutGeneration::Follow;
+        self.rules = self.rules.apply_generation_rules();
         self
     }
 
@@ -298,16 +336,16 @@ impl StartSlo {
     /// exchange with TLS. It does not remove `SessionIndex`, the request
     /// signature, or session-authority `NotOnOrAfter`.
     pub fn allow_cleartext_single_logout_for_compatibility(mut self) -> Self {
-        self.allow_cleartext = true;
+        self.rules = self.rules.allow_cleartext();
         self
     }
 
     pub(super) fn follows_generation_rules(&self) -> bool {
-        self.generation.follows()
+        self.rules.follows()
     }
 
     pub(super) fn allows_cleartext(&self) -> bool {
-        self.allow_cleartext
+        self.rules.allows_cleartext()
     }
 }
 
@@ -316,8 +354,7 @@ impl StartSlo {
 pub struct RespondSlo {
     pub(super) binding: LogoutBinding,
     pub(super) relay_state: Option<RelayStateParam>,
-    generation: SingleLogoutGeneration,
-    allow_cleartext: bool,
+    rules: SingleLogoutRules,
 }
 
 impl RespondSlo {
@@ -340,8 +377,7 @@ impl RespondSlo {
         Self {
             binding,
             relay_state: None,
-            generation: SingleLogoutGeneration::Compatibility,
-            allow_cleartext: false,
+            rules: SingleLogoutRules::default(),
         }
     }
 
@@ -363,7 +399,7 @@ impl RespondSlo {
     /// [`Self::allow_cleartext_single_logout_for_compatibility`] is selected.
     /// An identity provider response does not gain that transport check.
     pub fn apply_single_logout_generation_rules(mut self) -> Self {
-        self.generation = SingleLogoutGeneration::Follow;
+        self.rules = self.rules.apply_generation_rules();
         self
     }
 
@@ -373,15 +409,15 @@ impl RespondSlo {
     /// This relaxes the Single Logout recommendation to protect that HTTP
     /// exchange with TLS. The response remains signed.
     pub fn allow_cleartext_single_logout_for_compatibility(mut self) -> Self {
-        self.allow_cleartext = true;
+        self.rules = self.rules.allow_cleartext();
         self
     }
 
     pub(super) fn follows_generation_rules(&self) -> bool {
-        self.generation.follows()
+        self.rules.follows()
     }
 
     pub(super) fn allows_cleartext(&self) -> bool {
-        self.allow_cleartext
+        self.rules.allows_cleartext()
     }
 }

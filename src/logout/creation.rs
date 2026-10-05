@@ -257,36 +257,30 @@ fn create_logout_request_for_subject_inner(
         )?
     };
     let session_indexes = subject.session_indexes.as_slice();
-    let expectation = match validation {
+    // `None` skips outbound checks. `Some(None)` checks a participant request
+    // and leaves `NotOnOrAfter` optional. `Some(Some(_))` requires the
+    // session-authority instant.
+    let expiration = match validation {
         LogoutRequestValidation::Compatibility => None,
-        LogoutRequestValidation::SessionParticipant => Some(OutboundLogoutRequestExpectation {
-            id: &id,
-            issue_instant,
-            destination: &destination,
-            issuer: &issuer,
-            expiration: None,
-            name_id: subject.name_id,
-            name_id_format,
-            session_indexes,
-        }),
+        LogoutRequestValidation::SessionParticipant => Some(None),
         LogoutRequestValidation::SessionAuthority => {
-            let expiration = not_on_or_after.ok_or_else(|| {
+            Some(Some(not_on_or_after.ok_or_else(|| {
                 SamlError::Invalid(
                     "Session Authority LogoutRequest is missing its generated expiration".into(),
                 )
-            })?;
-            Some(OutboundLogoutRequestExpectation {
-                id: &id,
-                issue_instant,
-                destination: &destination,
-                issuer: &issuer,
-                expiration: Some(expiration),
-                name_id: subject.name_id,
-                name_id_format,
-                session_indexes,
-            })
+            })?))
         }
     };
+    let expectation = expiration.map(|expiration| OutboundLogoutRequestExpectation {
+        id: &id,
+        issue_instant,
+        destination: &destination,
+        issuer: &issuer,
+        expiration,
+        name_id: subject.name_id,
+        name_id_format,
+        session_indexes,
+    });
     if let Some(expectation) = expectation.as_ref() {
         validate_logout_request_outbound(
             &xml,
