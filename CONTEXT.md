@@ -34,3 +34,36 @@ _Avoid_: Typed parser, checked raw parser
 The protocol participant operating the endpoint at which a SAML message was
 received.
 _Avoid_: Parser, XML consumer
+
+**Validation preset**:
+A named bundle of validation choices. The presets are Compatibility and
+Recommended.
+_Avoid_: profile, strict
+
+**Library hardening**:
+An extra rejection the SAML specifications do not require, selected by name
+on top of a validation preset.
+_Avoid_: strict, profile
+
+**Claimed feature**:
+A SAML behavior saml-rs already implements, bounded by role, direction,
+profile or flow, and binding.
+_Avoid_: SAML V2.0 as a whole
+
+**Recommended**:
+The validation preset for claimed features. For the obligated actor, mandatory
+requirements stay in force. Recommendations start enabled and can be relaxed
+only by an explicit named option. A producer recommendation does not by itself
+become a receiver rejection.
+_Avoid_: default, full SAML conformance, profile
+
+**Compatibility**:
+The validation preset that preserves the existing typed permissive behavior.
+It does not claim standards conformance, so a mandatory requirement may be
+relaxed there.
+_Avoid_: raw settings, samlify, default
+
+**Raw settings**:
+Historical configuration that predates the validation presets. Its defaults
+are independent of Compatibility.
+_Avoid_: compatibility, recommended
