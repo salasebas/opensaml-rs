@@ -6,7 +6,7 @@ use crate::entity::{
     User,
 };
 use crate::error::SamlError;
-use crate::flow::{flow, FlowOptions, FlowResult, HttpRequest};
+use crate::flow::{FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::{try_generate_idp_metadata, IdpMetadata, IdpMetadataConfig};
 use crate::sp::ServiceProvider;
 use crate::template::{
@@ -523,7 +523,9 @@ impl IdentityProvider {
         binding: Binding,
         request: &HttpRequest,
     ) -> Result<FlowResult, SamlError> {
-        self.parse_login_request_at_inner(sp, binding, request, None, self.setting.clock_drifts)
+        Ok(self
+            .parse_login_request_at_inner(sp, binding, request, None, self.setting.clock_drifts)?
+            .0)
     }
 
     pub(crate) fn parse_login_request_at(
@@ -533,7 +535,7 @@ impl IdentityProvider {
         request: &HttpRequest,
         now: SystemTime,
         clock_drifts: (i64, i64),
-    ) -> Result<FlowResult, SamlError> {
+    ) -> Result<(FlowResult, bool), SamlError> {
         self.parse_login_request_at_inner(sp, binding, request, Some(now), clock_drifts)
     }
 
@@ -544,15 +546,17 @@ impl IdentityProvider {
         request: &HttpRequest,
         now: Option<SystemTime>,
         clock_drifts: (i64, i64),
-    ) -> Result<FlowResult, SamlError> {
+    ) -> Result<(FlowResult, bool), SamlError> {
         let signing_certs = sp
             .metadata
             .x509_certificates(crate::constants::CertUse::Signing);
-        flow(
+        crate::flow::flow_with_authentication(
             &FlowOptions {
                 binding: Some(binding),
                 parser_type: Some(ParserType::SamlRequest),
                 check_signature: self.metadata.is_want_authn_requests_signed(),
+                verify_signature_if_present: self.setting.verify_authn_request_signature_if_present,
+                require_audience_restriction: true,
                 strict_xml_signature_profile: false,
                 from_issuer: sp.metadata.get_entity_id(),
                 signing_certs: &signing_certs,

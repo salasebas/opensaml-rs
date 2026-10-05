@@ -9,47 +9,76 @@ use super::algorithms::{
     DataEncryptionAlgorithm, KeyEncryptionAlgorithm, SignatureAlgorithm, TransformAlgorithm,
 };
 
-/// Whether SPs require assertion-level signatures.
+/// Whether an accepting service provider requires a signature on the Assertion
+/// itself.
+///
+/// Web Browser SSO over HTTP POST requires each assertion to be protected by
+/// a digital signature on the `<Assertion>` or on the enclosing `<Response>`
+/// (SAML V2.0 Approved Errata 05 E26, Profiles §4.1.4.5). Errata 05 E93 says a
+/// deployment may also sign both, for non-repudiation, and places that outside
+/// SAML. [`Self::RequireSigned`] is that library hardening: inbound
+/// acceptance, selected by name, off unless the caller sets it.
+/// [`Self::AllowUnsignedForCompatibility`] leaves the hardening off and still
+/// accepts a standards-valid response signed only on the `<Response>`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AssertionSignaturePolicy {
-    /// Reject unsigned assertions.
+    /// Reject an assertion that is not directly signed.
+    ///
+    /// Library hardening for the accepting service provider. It does not
+    /// select [`XmlSignatureProfile::StrictRsaSha2`].
     RequireSigned,
-    /// Accept unsigned assertions for legacy interoperability.
+    /// Do not require a signature directly on the Assertion.
+    ///
+    /// HTTP POST still requires the assertion to be protected by an Assertion
+    /// signature or a Response signature.
     #[default]
     AllowUnsignedForCompatibility,
 }
 
-/// Whether SPs require trusted authentication of the SAML Response.
+/// Whether an accepting service provider requires authentication of the
+/// `<Response>`.
 ///
-/// The Web Browser SSO profile permits HTTP-POST assertions to be protected by
-/// signing either each Assertion or the enclosing Response. These variants are
-/// library policy choices layered on top of that profile rule. When Response
-/// authentication is required, HTTP-POST requires trusted XML-DSig coverage of
-/// the Response root; supported detached bindings use their binding-defined
-/// message signatures.
+/// Approved Errata 05 E93 replaces Core §6.2 and adds a note to Profiles
+/// §4.1.4.3: when CBC-mode encryption protects an `<EncryptedAssertion>`, the
+/// relying party should require integrity protection, and the `<Response>`
+/// should be signed, before the ciphertext is processed. That recommendation
+/// obligates the accepting service provider on inbound acceptance.
+/// [`Self::RequireForEncryptedCbc`] follows it.
+/// [`Self::AllowUnsignedEncryptedCbcForCompatibility`] relaxes that
+/// recommendation alone. It does not remove the HTTP POST rule that each
+/// assertion must be protected by a signature on the Assertion or the
+/// Response.
+///
+/// [`Self::RequireSigned`] requires a Response signature on every response.
+/// The profile allows an Assertion signature instead, so this variant is
+/// library hardening and is not part of the Web Browser SSO accept
+/// combination below.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ResponseSignaturePolicy {
-    /// Allow CBC-encrypted assertions without outer integrity protection for
-    /// legacy interoperability.
+    /// Do not apply the E93 Response-signature recommendation.
     ///
-    /// This explicitly relaxes the recommendation in SAML V2.0 Approved
-    /// Errata 05 E93.
+    /// Inbound acceptance, named relaxation of that recommendation.
     #[default]
     AllowUnsignedEncryptedCbcForCompatibility,
-    /// Require Response authentication when an `<EncryptedAssertion>` uses a
-    /// known CBC-mode data-encryption algorithm.
+    /// Require a signed Response when an `<EncryptedAssertion>` uses CBC.
+    ///
+    /// Inbound acceptance, recommendation, accepting service provider.
     RequireForEncryptedCbc,
-    /// Require trusted Response authentication through root-covering XML-DSig
-    /// or a supported binding-defined detached signature.
+    /// Require Response authentication for every response.
+    ///
+    /// Library hardening for the accepting service provider.
     RequireSigned,
 }
 
 /// Inbound embedded XML-signature algorithm and reference profile.
 ///
 /// The selected profile applies to every embedded signature that authenticates
-/// an accepted SSO or Single Logout message. [`Self::StrictRsaSha2`] is an
-/// explicit library policy. SAML does not require a receiver to reject other
-/// provider-supported algorithms, and [`SpValidationPolicy::strict`] keeps the
+/// an accepted SSO or Single Logout message. SAML V2.0 Conformance §4.1
+/// requires RSAwithSHA1, and Core §5.4.1 says processors should support
+/// `rsa-sha1`. Core §5.4.4 lets a verifier reject other transforms; it does
+/// not require that rejection. [`Self::StrictRsaSha2`] is therefore library
+/// hardening for the accepting party, inbound, and it is independent of
+/// [`AssertionSignaturePolicy`]. [`SpValidationPolicy::strict`] keeps the
 /// provider-supported profile.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum XmlSignatureProfile {
@@ -57,6 +86,9 @@ pub enum XmlSignatureProfile {
     /// digest, and exclusive canonicalization. Each transform element, when
     /// present, must belong to the XML-DSig namespace and use enveloped-signature
     /// or exclusive canonicalization.
+    ///
+    /// Library hardening. Selecting it does not require a signature directly
+    /// on the Assertion.
     StrictRsaSha2,
     /// Accept every algorithm and same-document reference shape supported by
     /// the selected cryptographic provider.
@@ -74,12 +106,32 @@ pub enum AuthnRequestSigningPolicy {
     DoNotSignForCompatibility,
 }
 
-/// Whether an IdP requires signed inbound AuthnRequests.
+/// Whether an identity provider requires a signed inbound `<AuthnRequest>`.
+///
+/// Web Browser SSO says the request may be signed (Profiles §4.1.4.1) and
+/// that `WantAuthnRequestsSigned` may document a requirement (Profiles
+/// §4.1.6). Requiring a signature is an optional inbound capability for the
+/// identity provider. It stays off unless the caller selects
+/// [`Self::RequireSigned`]. Core §3.2.1 requires the responder to verify a
+/// signature that is present. [`Self::AllowUnsignedVerifyIfPresent`] does
+/// that and still accepts an unsigned request.
+/// [`Self::AllowUnsignedForCompatibility`] does not verify a present
+/// signature.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AuthnRequestValidationPolicy {
     /// Reject unsigned AuthnRequests.
+    ///
+    /// Optional inbound capability for the identity provider.
     RequireSigned,
-    /// Accept unsigned AuthnRequests for legacy interoperability.
+    /// Accept an unsigned AuthnRequest and verify a signature that is present.
+    ///
+    /// Verifying a present signature is mandatory for the identity provider
+    /// (Core §3.2.1). Requiring a signature stays off.
+    AllowUnsignedVerifyIfPresent,
+    /// Accept unsigned AuthnRequests without verifying a signature that is
+    /// present.
+    ///
+    /// Compatibility hatch for the mandatory present-signature check.
     #[default]
     AllowUnsignedForCompatibility,
 }
@@ -94,13 +146,39 @@ pub enum LogoutSignaturePolicy {
     AllowUnsignedForCompatibility,
 }
 
-/// Whether an SP validates assertion audience restrictions.
+/// Whether an accepting service provider evaluates `<AudienceRestriction>`.
+///
+/// Core §2.5.1.4, as clarified by Approved Errata 05 E46, makes an audience
+/// restriction Valid only when the relying party is a member of one of its
+/// audiences, and multiple restrictions form a conjunction. Core §2.5.1.1
+/// says the relying party must reject an assertion whose conditions are
+/// Invalid or Indeterminate. That is a mandatory inbound rule for the
+/// accepting service provider when a restriction is present.
+/// [`Self::EvaluatePresentRestrictions`] enforces that rule.
+/// [`Self::Validate`] also rejects a bearer assertion that omits the
+/// element. Errata 05 E26 (Profiles §4.1.4.2) requires the identity provider
+/// to include one. Core condition processing does not make that omission
+/// Invalid, so the extra rejection is library hardening.
+/// [`Self::SkipForCompatibility`] skips the check. It is the compatibility
+/// hatch, not the named relaxation of a recommendation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AudienceValidationPolicy {
-    /// Require this SP's entity ID in assertion audiences.
+    /// Evaluate audience restrictions and reject a bearer assertion that
+    /// omits one.
+    ///
+    /// The present-restriction check is mandatory. Rejecting an omission is
+    /// library hardening. [`SpValidationPolicy::strict`] keeps this variant.
     #[default]
     Validate,
-    /// Skip audience validation for legacy interoperability.
+    /// Evaluate `<AudienceRestriction>` elements that are present.
+    ///
+    /// Mandatory inbound rule for the accepting service provider when a
+    /// restriction is present (Core §2.5.1.1 and §2.5.1.4, Errata 05 E46).
+    /// A bearer assertion that omits the element is not rejected.
+    EvaluatePresentRestrictions,
+    /// Skip audience evaluation for legacy interoperability.
+    ///
+    /// Compatibility hatch for the mandatory audience check.
     SkipForCompatibility,
 }
 
@@ -115,6 +193,59 @@ pub enum NameIdCreationPolicy {
 }
 
 /// SP-side validation and outbound signing policy.
+///
+/// # Web Browser SSO acceptance
+///
+/// `finish_sso` and `accept_unsolicited_sso` read these fields. There is no
+/// `recommended()` constructor. The accept combination for that profile is
+/// the fields below; outbound AuthnRequest signing, identifier creation, and
+/// logout are not part of this accept classification.
+///
+/// - `assertions`: [`AssertionSignaturePolicy::AllowUnsignedForCompatibility`].
+///   Actor: accepting service provider. Direction: inbound. Level: library
+///   hardening, off.
+/// - `responses`: [`ResponseSignaturePolicy::RequireForEncryptedCbc`].
+///   Actor: accepting service provider. Direction: inbound. Level:
+///   recommendation, on. Relax it with
+///   [`ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility`].
+/// - `xml_signatures`:
+///   [`XmlSignatureProfile::AllowProviderSupportedForCompatibility`].
+///   Actor: accepting service provider. Direction: inbound. Level: library
+///   hardening, off.
+/// - `audience`: [`AudienceValidationPolicy::EvaluatePresentRestrictions`].
+///   Actor: accepting service provider. Direction: inbound. Level: mandatory
+///   when an `<AudienceRestriction>` is present.
+///   [`AudienceValidationPolicy::Validate`] also rejects a missing
+///   restriction. Actor: accepting service provider. Direction: inbound.
+///   Level: library hardening, off in this combination. `strict()` keeps
+///   `Validate`.
+///
+/// These inbound rules have no field and no off switch:
+///
+/// - UTC `IssueInstant` on the Response and the Assertion. Actor: accepting
+///   service provider. Direction: inbound. Level: mandatory (assertion and
+///   protocol schemas; Core §1.3.3 and §3.2.2). Core §1.3.3 forbids a
+///   producer from generating a leap second. Actor: producer. Direction:
+///   outbound. Level: mandatory. It does not require the receiver to reject
+///   an inbound leap-second value.
+/// - HTTP POST protects each assertion with a signature on the Assertion or
+///   the Response. Actor: accepting service provider. Direction: inbound.
+///   Level: mandatory (Errata 05 E26, Profiles §4.1.4.5).
+/// - Bearer `Recipient`, `NotOnOrAfter`, and `InResponseTo`. Actor: accepting
+///   service provider. Direction: inbound. Level: mandatory (Errata 05 E26,
+///   Profiles §4.1.4.3). An unsolicited response must not carry
+///   `InResponseTo` (Profiles §4.1.4.3 and §4.1.5).
+/// - A present `Destination` identifies the actual recipient. Actor:
+///   accepting service provider. Direction: inbound. Level: mandatory (Core
+///   §3.2.2). A signed HTTP Redirect or HTTP POST message carries
+///   `Destination`, and the recipient verifies it (Bindings §3.4.5.2 and
+///   §3.5.5.2). Level: mandatory when the message is signed.
+///
+/// Checking the bearer `Address` stays off. Actor: accepting service
+/// provider. Direction: inbound. Level: optional (Profiles §4.1.4.3).
+/// HTTP POST replay is mandatory for the accepting service provider
+/// (Profiles §4.1.4.5) and remains a caller-supplied
+/// [`crate::ReplayPolicy`]. This combination does not enable it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpValidationPolicy {
     /// Assertion signature requirement.
@@ -168,6 +299,29 @@ impl Default for SpValidationPolicy {
 }
 
 /// IdP-side validation policy.
+///
+/// # Web Browser SSO acceptance
+///
+/// `receive_sso` reads `authn_requests`. There is no `recommended()`
+/// constructor. The accept combination uses
+/// [`AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent`].
+/// Requiring a signature is optional and stays off. Verifying a signature
+/// that is present is mandatory (Core §3.2.1). Logout is not part of this
+/// accept classification.
+///
+/// These inbound rules have no field and no off switch:
+///
+/// - UTC `IssueInstant`. Actor: identity provider. Direction: inbound.
+///   Level: mandatory (Core §1.3.3 and §3.2.1). An inbound leap-second value
+///   stays accepted.
+/// - A present `Destination` identifies this identity provider's SSO
+///   endpoint. Actor: identity provider. Direction: inbound. Level:
+///   mandatory (Core §3.2.1). The identity provider discards the request
+///   when it does not.
+/// - `AssertionConsumerServiceURL` or `AssertionConsumerServiceIndex`
+///   belongs to the service provider before the response is sent. Actor:
+///   identity provider. Direction: inbound. Level: mandatory (Profiles
+///   §4.1.4.1). The check runs when the response is issued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdpValidationPolicy {
     /// Inbound AuthnRequest signature requirement.
@@ -429,6 +583,13 @@ pub(super) fn authn_request_signature_required(policy: AuthnRequestValidationPol
     matches!(policy, AuthnRequestValidationPolicy::RequireSigned)
 }
 
+pub(super) fn verify_present_authn_request_signature(policy: AuthnRequestValidationPolicy) -> bool {
+    matches!(
+        policy,
+        AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent
+    )
+}
+
 pub(super) fn assertion_signature_required(policy: AssertionSignaturePolicy) -> bool {
     matches!(policy, AssertionSignaturePolicy::RequireSigned)
 }
@@ -452,5 +613,12 @@ pub(super) fn name_id_creation_allowed(policy: NameIdCreationPolicy) -> bool {
 }
 
 pub(super) fn audience_validation_enabled(policy: AudienceValidationPolicy) -> bool {
+    matches!(
+        policy,
+        AudienceValidationPolicy::Validate | AudienceValidationPolicy::EvaluatePresentRestrictions
+    )
+}
+
+pub(super) fn audience_restriction_required(policy: AudienceValidationPolicy) -> bool {
     matches!(policy, AudienceValidationPolicy::Validate)
 }

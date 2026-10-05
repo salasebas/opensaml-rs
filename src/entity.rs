@@ -50,6 +50,12 @@ pub struct EntitySetting {
     pub want_assertions_signed: bool,
     /// SP: reject a `<Response>` whose `<Audience>` is not this entity (default `true`).
     pub validate_audience: bool,
+    /// SP: reject a bearer assertion that omits `<AudienceRestriction>`.
+    ///
+    /// Applies only when `validate_audience` is set. Default `true` preserves
+    /// raw audience checking. Typed Web Browser SSO acceptance can evaluate
+    /// restrictions that are present without requiring the element.
+    pub(crate) require_audience_restriction: bool,
     /// SP: requires signed messages.
     pub want_message_signed: bool,
     /// Typed SP: enforce the strict RSA-SHA2 profile on embedded signatures that
@@ -59,6 +65,9 @@ pub struct EntitySetting {
     pub(crate) want_encrypted_cbc_response_signed: bool,
     /// IdP: requires signed AuthnRequests.
     pub want_authn_requests_signed: bool,
+    /// IdP: verify an AuthnRequest signature when one is present, without
+    /// requiring a signature.
+    pub(crate) verify_authn_request_signature_if_present: bool,
     /// Requires signed LogoutRequest (default `true`).
     pub want_logout_request_signed: bool,
     /// Requires signed LogoutResponse.
@@ -144,6 +153,10 @@ impl fmt::Debug for EntitySetting {
             .field("authn_requests_signed", &self.authn_requests_signed)
             .field("want_assertions_signed", &self.want_assertions_signed)
             .field("validate_audience", &self.validate_audience)
+            .field(
+                "require_audience_restriction",
+                &self.require_audience_restriction,
+            )
             .field("want_message_signed", &self.want_message_signed)
             .field(
                 "strict_xml_signature_profile",
@@ -156,6 +169,10 @@ impl fmt::Debug for EntitySetting {
             .field(
                 "want_authn_requests_signed",
                 &self.want_authn_requests_signed,
+            )
+            .field(
+                "verify_authn_request_signature_if_present",
+                &self.verify_authn_request_signature_if_present,
             )
             .field(
                 "want_logout_request_signed",
@@ -252,10 +269,12 @@ impl Default for EntitySetting {
             authn_requests_signed: false,
             want_assertions_signed: false,
             validate_audience: true,
+            require_audience_restriction: true,
             want_message_signed: false,
             strict_xml_signature_profile: false,
             want_encrypted_cbc_response_signed: false,
             want_authn_requests_signed: false,
+            verify_authn_request_signature_if_present: false,
             want_logout_request_signed: true,
             want_logout_response_signed: true,
             name_id_format: Vec::new(),
