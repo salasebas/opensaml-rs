@@ -143,9 +143,8 @@ Add regression tests for security fixes.
 
 ### Issue tracker
 
-Public requests and external collaboration use GitHub Issues. Private planning
-initiated by the maintainer uses the private `OpenSaml` Linear team. See
-`docs/agents/issue-tracker.md` for routing and privacy rules.
+Issues and specs live as GitHub issues in `salasebas/saml-rs`. See
+`docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
