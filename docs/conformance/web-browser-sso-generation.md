@@ -10,8 +10,8 @@ Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected
 by Approved Errata 05. Schema citations are the OASIS assertion and protocol
 schemas. A profile or binding rule is used when it narrows Core for this flow.
 
-`StartSso::follow_web_browser_sso_producer` and
-`RespondSso::follow_web_browser_sso_producer` select the producer rules below.
+`StartSso::apply_web_browser_sso_generation_rules` and
+`RespondSso::apply_web_browser_sso_generation_rules` select the producer rules below.
 The constructors `redirect`, `post`, and `simple_sign` leave that selection
 off, which is the compatibility generation behavior.
 

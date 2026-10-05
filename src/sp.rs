@@ -336,7 +336,8 @@ impl ServiceProvider {
         let custom_template = self.setting.login_request_template.as_deref();
         if producer.follows() && (options.custom.is_some() || custom_template.is_some()) {
             return Err(SamlError::Invalid(
-                "Web Browser SSO producer rules require the built-in AuthnRequest renderer".into(),
+                "Web Browser SSO generation rules require the built-in AuthnRequest renderer"
+                    .into(),
             ));
         }
         let template = custom_template.unwrap_or(LOGIN_REQUEST_TEMPLATE);

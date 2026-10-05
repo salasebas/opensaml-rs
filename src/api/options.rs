@@ -82,14 +82,14 @@ impl StartSso {
         self
     }
 
-    /// Follow Web Browser SSO producer requirements on this AuthnRequest.
+    /// Apply Web Browser SSO generation rules to this AuthnRequest.
     ///
     /// [`Self::redirect`], [`Self::post`], and [`Self::simple_sign`] leave this
     /// off, so existing generation is unchanged. When enabled, a transient
     /// `NameIDPolicy` omits `AllowCreate`. SAML Core forbids that attribute on
     /// a transient identifier request. Signing stays on
     /// [`crate::AuthnRequestSigningPolicy`] and is not turned on here.
-    pub fn follow_web_browser_sso_producer(mut self) -> Self {
+    pub fn apply_web_browser_sso_generation_rules(mut self) -> Self {
         self.web_browser_sso_producer = WebBrowserSsoProducer::Follow;
         self
     }
@@ -150,7 +150,7 @@ impl RespondSso {
         self
     }
 
-    /// Follow Web Browser SSO producer requirements on this response.
+    /// Apply Web Browser SSO generation rules to this response.
     ///
     /// [`Self::post`] and [`Self::simple_sign`] leave this off. When enabled, a
     /// successful response carries an authentication statement whose
@@ -164,7 +164,7 @@ impl RespondSso {
     /// bearer subject confirmation data. CBC response signing is unchanged: it
     /// stays on unless
     /// [`Self::allow_unsigned_encrypted_cbc_for_compatibility`] is selected.
-    pub fn follow_web_browser_sso_producer(mut self) -> Self {
+    pub fn apply_web_browser_sso_generation_rules(mut self) -> Self {
         self.web_browser_sso_producer = WebBrowserSsoProducer::Follow;
         self
     }

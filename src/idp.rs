@@ -136,7 +136,7 @@ impl IdentityProvider {
             && (rendering.custom.is_some() || has_custom_context)
         {
             return Err(SamlError::Invalid(
-                "Web Browser SSO producer rules require the built-in login response renderer"
+                "Web Browser SSO generation rules require the built-in login response renderer"
                     .into(),
             ));
         }

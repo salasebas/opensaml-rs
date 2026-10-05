@@ -168,7 +168,7 @@ fn typed_sso_response_carries_profile_authentication_statement(
         &sp_descriptor,
         &received,
         subject(),
-        RespondSso::post().follow_web_browser_sso_producer(),
+        RespondSso::post().apply_web_browser_sso_generation_rules(),
     )?;
     let xml = response_xml(&response)?;
 
@@ -219,7 +219,7 @@ fn typed_unsolicited_sso_omits_in_response_to_under_producer_rules(
     let response = idp.initiate_sso(
         &sp_descriptor,
         subject(),
-        RespondSso::post().follow_web_browser_sso_producer(),
+        RespondSso::post().apply_web_browser_sso_generation_rules(),
     )?;
     let xml = response_xml(&response)?;
 
@@ -269,7 +269,7 @@ fn typed_sso_session_index_is_present_only_when_single_logout_is_supported(
     let response = idp.initiate_sso(
         &sp_descriptor,
         subject(),
-        RespondSso::post().follow_web_browser_sso_producer(),
+        RespondSso::post().apply_web_browser_sso_generation_rules(),
     )?;
     let xml = response_xml(&response)?;
     let assertion = xml
@@ -288,7 +288,7 @@ fn typed_sso_session_index_is_present_only_when_single_logout_is_supported(
     let response = idp_without_logout.initiate_sso(
         &sp_descriptor,
         subject(),
-        RespondSso::post().follow_web_browser_sso_producer(),
+        RespondSso::post().apply_web_browser_sso_generation_rules(),
     )?;
     let xml = response_xml(&response)?;
     assert!(xml.contains("<saml:AuthnStatement "));
@@ -304,7 +304,7 @@ fn typed_sso_optional_generation_capabilities_stay_off_until_selected(
     let (_, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(
         &idp_descriptor,
-        StartSso::redirect().follow_web_browser_sso_producer(),
+        StartSso::redirect().apply_web_browser_sso_generation_rules(),
     )?;
     let request = authn_request_xml(&started.outbound)?;
     let redirect = started.outbound.redirect_url()?;
@@ -321,7 +321,7 @@ fn typed_sso_optional_generation_capabilities_stay_off_until_selected(
     let forced = sp.start_sso(
         &idp_descriptor,
         StartSso::redirect()
-            .follow_web_browser_sso_producer()
+            .apply_web_browser_sso_generation_rules()
             .force_authn(ForceAuthn::Required),
     )?;
     let forced_xml = authn_request_xml(&forced.outbound)?;
@@ -334,7 +334,7 @@ fn typed_sso_optional_generation_capabilities_stay_off_until_selected(
     let (_, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(
         &idp_descriptor,
-        StartSso::redirect().follow_web_browser_sso_producer(),
+        StartSso::redirect().apply_web_browser_sso_generation_rules(),
     )?;
     let request = authn_request_xml(&started.outbound)?;
     assert!(request.contains("AllowCreate=\"true\""));
@@ -364,7 +364,7 @@ fn typed_transient_name_id_omits_allow_create_under_producer_rules(
 
     let producer = sp.start_sso(
         &idp_descriptor,
-        StartSso::redirect().follow_web_browser_sso_producer(),
+        StartSso::redirect().apply_web_browser_sso_generation_rules(),
     )?;
     let producer_xml = authn_request_xml(&producer.outbound)?;
     assert!(!producer_xml.contains("AllowCreate="));
@@ -384,7 +384,7 @@ fn typed_authn_request_signing_stays_optional_and_does_not_reject_unsigned_reque
     let (_, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(
         &idp_descriptor,
-        StartSso::redirect().follow_web_browser_sso_producer(),
+        StartSso::redirect().apply_web_browser_sso_generation_rules(),
     )?;
     let redirect = started.outbound.redirect_url()?;
     let request = authn_request_xml(&started.outbound)?;
@@ -400,7 +400,7 @@ fn typed_authn_request_signing_stays_optional_and_does_not_reject_unsigned_reque
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(
         &idp_descriptor,
-        StartSso::redirect().follow_web_browser_sso_producer(),
+        StartSso::redirect().apply_web_browser_sso_generation_rules(),
     )?;
     assert!(!started.outbound.redirect_url()?.contains("Signature="));
     let url = Url::parse(started.outbound.redirect_url()?)?;
@@ -455,7 +455,7 @@ fn typed_cbc_response_signature_stays_recommended_and_relaxes_alone(
         &sp_descriptor,
         &received,
         subject(),
-        RespondSso::post().follow_web_browser_sso_producer(),
+        RespondSso::post().apply_web_browser_sso_generation_rules(),
     )?;
     let signed_xml = response_xml(&signed)?;
     assert!(signed_xml.contains("<ds:Signature"));
@@ -473,7 +473,7 @@ fn typed_cbc_response_signature_stays_recommended_and_relaxes_alone(
         &received,
         subject(),
         RespondSso::post()
-            .follow_web_browser_sso_producer()
+            .apply_web_browser_sso_generation_rules()
             .allow_unsigned_encrypted_cbc_for_compatibility(),
     )?;
     let unsigned_xml = response_xml(&unsigned)?;
@@ -503,7 +503,7 @@ fn typed_producer_rules_reject_custom_login_templates() -> Result<(), Box<dyn st
     let (_, idp_descriptor) = descriptors(&sp, &idp)?;
     match sp.start_sso(
         &idp_descriptor,
-        StartSso::redirect().follow_web_browser_sso_producer(),
+        StartSso::redirect().apply_web_browser_sso_generation_rules(),
     ) {
         Err(SamlError::Invalid(message)) if message.contains("built-in AuthnRequest renderer") => {}
         other => return Err(format!("expected built-in renderer error, got {other:?}").into()),
@@ -524,7 +524,7 @@ fn typed_producer_rules_reject_custom_login_templates() -> Result<(), Box<dyn st
     match idp.initiate_sso(
         &sp_descriptor,
         subject(),
-        RespondSso::post().follow_web_browser_sso_producer(),
+        RespondSso::post().apply_web_browser_sso_generation_rules(),
     ) {
         Err(SamlError::Invalid(message))
             if message.contains("built-in login response renderer") =>
