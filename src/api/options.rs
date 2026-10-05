@@ -1,5 +1,6 @@
 use crate::browser::{LogoutBinding, SsoRequestBinding, SsoResponseBinding};
 use crate::model::RelayStateParam;
+use crate::sp::WebBrowserSsoProducer;
 
 /// Explicit `ForceAuthn` value for outbound AuthnRequests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +28,7 @@ pub struct StartSso {
     pub(super) relay_state: RelayStateParam,
     pub(super) force_authn: Option<ForceAuthn>,
     pub(super) acs_index: Option<u16>,
+    pub(super) web_browser_sso_producer: WebBrowserSsoProducer,
 }
 
 impl StartSso {
@@ -52,6 +54,7 @@ impl StartSso {
             relay_state: RelayStateParam::absent(),
             force_authn: None,
             acs_index: None,
+            web_browser_sso_producer: WebBrowserSsoProducer::Compatibility,
         }
     }
 
@@ -78,6 +81,18 @@ impl StartSso {
         self.acs_index = Some(acs_index);
         self
     }
+
+    /// Apply Web Browser SSO generation rules to this AuthnRequest.
+    ///
+    /// [`Self::redirect`], [`Self::post`], and [`Self::simple_sign`] leave this
+    /// off, so existing generation is unchanged. When enabled, a transient
+    /// `NameIDPolicy` omits `AllowCreate`. SAML Core forbids that attribute on
+    /// a transient identifier request. Signing stays on
+    /// [`crate::AuthnRequestSigningPolicy`] and is not turned on here.
+    pub fn apply_web_browser_sso_generation_rules(mut self) -> Self {
+        self.web_browser_sso_producer = WebBrowserSsoProducer::Follow;
+        self
+    }
 }
 
 /// Options for issuing SAML Responses from an IdP.
@@ -86,6 +101,7 @@ pub struct RespondSso {
     pub(super) binding: SsoResponseBinding,
     pub(super) relay_state: Option<RelayStateParam>,
     response_signing: ResponseSigning,
+    pub(super) web_browser_sso_producer: WebBrowserSsoProducer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +127,7 @@ impl RespondSso {
             binding,
             relay_state: None,
             response_signing: ResponseSigning::FollowEncryptedCbcRecommendation,
+            web_browser_sso_producer: WebBrowserSsoProducer::Compatibility,
         }
     }
 
@@ -130,6 +147,25 @@ impl RespondSso {
     /// protected. By default, typed IdPs sign such Responses automatically.
     pub fn allow_unsigned_encrypted_cbc_for_compatibility(mut self) -> Self {
         self.response_signing = ResponseSigning::AllowUnsignedEncryptedCbcForCompatibility;
+        self
+    }
+
+    /// Apply Web Browser SSO generation rules to this response.
+    ///
+    /// [`Self::post`] and [`Self::simple_sign`] leave this off. When enabled, a
+    /// successful response carries an authentication statement whose
+    /// `AuthnInstant` is the assertion `IssueInstant` and whose
+    /// `AuthnContextClassRef` is
+    /// `urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified`. That class means
+    /// the authentication mechanism was not recorded. It is not evidence of a
+    /// particular authentication strength. When the identity provider metadata
+    /// advertises `SingleLogoutService`, `SessionIndex` is the assertion `ID`.
+    /// An unsolicited response omits `InResponseTo` on the response and on
+    /// bearer subject confirmation data. CBC response signing is unchanged: it
+    /// stays on unless
+    /// [`Self::allow_unsigned_encrypted_cbc_for_compatibility`] is selected.
+    pub fn apply_web_browser_sso_generation_rules(mut self) -> Self {
+        self.web_browser_sso_producer = WebBrowserSsoProducer::Follow;
         self
     }
 

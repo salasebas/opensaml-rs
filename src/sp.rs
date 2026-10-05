@@ -55,8 +55,33 @@ struct AuthnRequestXml<'a> {
     assertion_consumer_service_url: Option<&'a str>,
     assertion_consumer_service_index: Option<u16>,
     issuer: &'a str,
-    name_id_format: &'a str,
-    allow_create: bool,
+    name_id_format: Option<&'a str>,
+    allow_create: AllowCreateAttribute,
+}
+
+enum AllowCreateAttribute {
+    Include(bool),
+    Omit,
+}
+
+/// Whether typed Web Browser SSO generation follows producer rules.
+///
+/// [`Self::Compatibility`] is the historical typed output. [`Self::Follow`]
+/// applies the producer obligations recorded for this flow. It is not a
+/// validation preset and it does not publish `recommended()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum WebBrowserSsoProducer {
+    /// Keep today's typed generation.
+    #[default]
+    Compatibility,
+    /// Emit the producer obligations for this flow.
+    Follow,
+}
+
+impl WebBrowserSsoProducer {
+    pub(crate) fn follows(self) -> bool {
+        matches!(self, Self::Follow)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -99,7 +124,18 @@ fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
     let assertion_consumer_service_index = input
         .assertion_consumer_service_index
         .map(|value| value.to_string());
-    let allow_create = input.allow_create.to_string();
+    let allow_create = match input.allow_create {
+        AllowCreateAttribute::Include(true) => Some("true"),
+        AllowCreateAttribute::Include(false) => Some("false"),
+        AllowCreateAttribute::Omit => None,
+    };
+    let mut name_id_policy_attrs = Vec::new();
+    if let Some(format) = input.name_id_format {
+        name_id_policy_attrs.push(("Format", format));
+    }
+    if let Some(allow_create) = allow_create {
+        name_id_policy_attrs.push(("AllowCreate", allow_create));
+    }
 
     let mut attrs = Vec::with_capacity(8);
     attrs.push(("xmlns:samlp", namespace::PROTOCOL));
@@ -130,13 +166,7 @@ fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
     let mut writer = XmlWriter::new();
     writer.start("samlp:AuthnRequest", &attrs);
     writer.text_element("saml:Issuer", &[], input.issuer);
-    writer.empty(
-        "samlp:NameIDPolicy",
-        &[
-            ("Format", input.name_id_format),
-            ("AllowCreate", allow_create.as_str()),
-        ],
-    );
+    writer.empty("samlp:NameIDPolicy", &name_id_policy_attrs);
     writer.end("samlp:AuthnRequest");
     writer.finish()
 }
@@ -272,6 +302,26 @@ impl ServiceProvider {
         binding: Binding,
         options: &LoginRequestOptions<'_>,
     ) -> Result<BindingContext, SamlError> {
+        self.create_login_request_inner(idp, binding, options, WebBrowserSsoProducer::Compatibility)
+    }
+
+    pub(crate) fn create_typed_login_request(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        options: &LoginRequestOptions<'_>,
+        producer: WebBrowserSsoProducer,
+    ) -> Result<BindingContext, SamlError> {
+        self.create_login_request_inner(idp, binding, options, producer)
+    }
+
+    fn create_login_request_inner(
+        &self,
+        idp: &IdentityProvider,
+        binding: Binding,
+        options: &LoginRequestOptions<'_>,
+        producer: WebBrowserSsoProducer,
+    ) -> Result<BindingContext, SamlError> {
         if self.metadata.is_authn_request_signed() != idp.metadata.is_want_authn_requests_signed() {
             return Err(SamlError::Invalid(format!(
                 "ERR_METADATA_CONFLICT_REQUEST_SIGNED_FLAG: SP AuthnRequestsSigned={} but IdP WantAuthnRequestsSigned={}",
@@ -284,6 +334,12 @@ impl ServiceProvider {
             .get_single_sign_on_service(binding)
             .ok_or_else(|| SamlError::MissingMetadata("SingleSignOnService".into()))?;
         let custom_template = self.setting.login_request_template.as_deref();
+        if producer.follows() && (options.custom.is_some() || custom_template.is_some()) {
+            return Err(SamlError::Invalid(
+                "Web Browser SSO generation rules require the built-in AuthnRequest renderer"
+                    .into(),
+            ));
+        }
         let template = custom_template.unwrap_or(LOGIN_REQUEST_TEMPLATE);
         let (id, xml) = match (options.custom, custom_template) {
             (Some(f), _) => f(template),
@@ -312,6 +368,18 @@ impl ServiceProvider {
                     .first()
                     .cloned()
                     .unwrap_or_default();
+                let name_id_format_attr = if producer.follows() && name_id_format.is_empty() {
+                    None
+                } else {
+                    Some(name_id_format.as_str())
+                };
+                let allow_create = if producer.follows()
+                    && name_id_format == crate::constants::name_id_format::TRANSIENT
+                {
+                    AllowCreateAttribute::Omit
+                } else {
+                    AllowCreateAttribute::Include(self.setting.allow_create)
+                };
                 let id = generate_id();
                 let xml = if custom_template.is_none() {
                     let issue_instant = now_iso8601();
@@ -325,8 +393,8 @@ impl ServiceProvider {
                         assertion_consumer_service_url: acs_url.as_deref(),
                         assertion_consumer_service_index: options.assertion_consumer_service_index,
                         issuer: &issuer,
-                        name_id_format: &name_id_format,
-                        allow_create: self.setting.allow_create,
+                        name_id_format: name_id_format_attr,
+                        allow_create,
                     })
                 } else {
                     replace_tags_by_optional_value(

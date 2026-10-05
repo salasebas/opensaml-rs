@@ -46,7 +46,8 @@ impl Saml<Sp> {
     ///
     /// Returns [`SamlError`] when relay state is invalid, the IdP metadata
     /// cannot be parsed or trusted, the requested ACS is missing or conflicts
-    /// with the selected binding, or request creation fails because required
+    /// with the selected binding, producer rules are combined with a custom
+    /// AuthnRequest template, or request creation fails because required
     /// metadata, signing keys, or supported bindings are unavailable.
     ///
     /// # Examples
@@ -101,13 +102,12 @@ impl Saml<Sp> {
             response_binding: Some(response_binding.as_binding()),
             ..Default::default()
         };
-        let context = self
-            .raw_service_provider()
-            .create_login_request_with_options(
-                &raw_idp,
-                options.binding.as_binding(),
-                &raw_options,
-            )?;
+        let context = self.raw_service_provider().create_typed_login_request(
+            &raw_idp,
+            options.binding.as_binding(),
+            &raw_options,
+            options.web_browser_sso_producer,
+        )?;
         let outbound = Outbound::<AuthnRequest>::try_from(context)?;
         let pending = PendingAuthnRequest::try_new(
             outbound.id().clone(),
