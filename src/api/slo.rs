@@ -29,6 +29,10 @@ impl Saml<Sp> {
     /// Returns [`SamlError`] when relay state is invalid, IdP metadata cannot
     /// be parsed, a compatible logout endpoint or signing key is missing, the
     /// selected binding is unsupported, or logout request creation fails.
+    /// [`StartSlo::apply_single_logout_generation_rules`] also rejects a
+    /// missing `SessionIndex`, an `http` peer endpoint unless
+    /// [`StartSlo::allow_http_single_logout`] is
+    /// selected, and [`LogoutSigning::DoNotSignForCompatibility`].
     ///
     /// # Examples
     ///
@@ -98,6 +102,10 @@ impl Saml<Sp> {
     /// Returns [`SamlError`] when IdP metadata cannot be parsed, relay state is
     /// invalid, a compatible logout endpoint or signing key is missing, the
     /// selected binding is unsupported, or logout response creation fails.
+    /// [`RespondSlo::apply_single_logout_generation_rules`] also rejects an
+    /// `http` peer endpoint unless
+    /// [`RespondSlo::allow_http_single_logout`] is
+    /// selected.
     pub fn respond_slo(
         &self,
         idp: &IdpDescriptor,
@@ -111,6 +119,7 @@ impl Saml<Sp> {
             &raw_idp.metadata,
             request,
             options,
+            LogoutResponseTransport::SessionParticipant,
         )
     }
 
@@ -122,7 +131,9 @@ impl Saml<Sp> {
     /// request, including issuer, binding, relay state, destination, or
     /// `InResponseTo` mismatches; when IdP metadata cannot be parsed; when XML,
     /// signature, trust, status, or time validation fails; or when replay
-    /// validation detects a duplicate or expired message.
+    /// validation detects a duplicate or expired message. Response signatures
+    /// follow [`crate::LogoutPolicy::responses`]. The Single Logout accept
+    /// combination sets that field to [`crate::LogoutSignaturePolicy::RequireSigned`].
     ///
     /// # Examples
     ///
@@ -179,7 +190,10 @@ impl Saml<Idp> {
     ///
     /// The generated `LogoutRequest` always carries a UTC `NotOnOrAfter`
     /// derived from the configured [`crate::IdpConfig::issuance_lifetime`] and
-    /// the same captured `IssueInstant`.
+    /// the same captured `IssueInstant`. That attribute cannot be omitted.
+    /// [`StartSlo::apply_single_logout_generation_rules`] signs the request
+    /// and still allows `SessionIndex` to be omitted. It does not require an
+    /// `https` peer endpoint.
     ///
     /// # Errors
     ///
@@ -187,7 +201,8 @@ impl Saml<Idp> {
     /// parsed, a compatible logout endpoint or signing key is missing, the
     /// selected binding is unsupported, logout request creation fails, or the
     /// configured issuance lifetime cannot be added to the current issue
-    /// instant.
+    /// instant. [`StartSlo::apply_single_logout_generation_rules`] also
+    /// rejects [`LogoutSigning::DoNotSignForCompatibility`].
     ///
     /// # Examples
     ///
@@ -286,6 +301,8 @@ impl Saml<Idp> {
     /// Returns [`SamlError`] when SP metadata cannot be parsed, relay state is
     /// invalid, a compatible logout endpoint or signing key is missing, the
     /// selected binding is unsupported, or logout response creation fails.
+    /// [`RespondSlo::apply_single_logout_generation_rules`] does not add an
+    /// `https` requirement for this role.
     ///
     /// # Examples
     ///
@@ -315,6 +332,7 @@ impl Saml<Idp> {
             &raw_sp.metadata,
             request,
             options,
+            LogoutResponseTransport::SessionAuthority,
         )
     }
 
@@ -326,7 +344,9 @@ impl Saml<Idp> {
     /// request, including issuer, binding, relay state, destination, or
     /// `InResponseTo` mismatches; when SP metadata cannot be parsed; when XML,
     /// signature, trust, status, or time validation fails; or when replay
-    /// validation detects a duplicate or expired message.
+    /// validation detects a duplicate or expired message. Response signatures
+    /// follow [`crate::LogoutPolicy::responses`]. The Single Logout accept
+    /// combination sets that field to [`crate::LogoutSignaturePolicy::RequireSigned`].
     ///
     /// # Examples
     ///
@@ -400,10 +420,30 @@ fn start_slo_impl(
 ) -> Result<Started<LogoutRequest>, SamlError> {
     options.relay_state.validate()?;
     let subject = typed_logout_subject(subject);
+    let follows_rules = options.follows_generation_rules();
+    if follows_rules && matches!(options.signing, LogoutSigning::DoNotSignForCompatibility) {
+        return Err(Error::ProtocolProfile(
+            "a LogoutRequest signature cannot be disabled for HTTP-Redirect, HTTP-POST, or HTTP-POST-SimpleSign when Single Logout generation rules are selected".into(),
+        ));
+    }
+    if matches!(role, StartSloRole::SessionParticipant) {
+        enforce_participant_https(
+            peer_metadata,
+            options.binding.as_binding(),
+            follows_rules,
+            options.allows_http(),
+        )?;
+    }
     let (issue_instant, not_on_or_after, request_validation) = match role {
-        StartSloRole::SessionParticipant => {
-            (now_iso8601(), None, LogoutRequestValidation::Compatibility)
-        }
+        StartSloRole::SessionParticipant => (
+            now_iso8601(),
+            None,
+            if follows_rules {
+                LogoutRequestValidation::SessionParticipant
+            } else {
+                LogoutRequestValidation::Compatibility
+            },
+        ),
         StartSloRole::SessionAuthority { issuance_lifetime } => {
             let window = capture_idp_issuance_window(issuance_lifetime)?;
             (
@@ -413,6 +453,11 @@ fn start_slo_impl(
             )
         }
     };
+    let want_signed = if follows_rules {
+        true
+    } else {
+        logout_request_signing(local_setting, options.signing)
+    };
     let created = create_logout_request_with_session_indexes(LogoutRequestSessionIndexes {
         init_setting: local_setting,
         init_meta: local_metadata,
@@ -421,7 +466,7 @@ fn start_slo_impl(
         name_id: &subject.name_id,
         session_indexes: &subject.session_indexes,
         relay_state: options.relay_state.as_deref(),
-        want_signed: logout_request_signing(local_setting, options.signing),
+        want_signed,
         issue_instant: &issue_instant,
         not_on_or_after: not_on_or_after.as_deref(),
         validation: request_validation,
@@ -486,7 +531,16 @@ fn respond_slo_impl(
     peer_metadata: &Metadata,
     request: &Received<LogoutRequest>,
     options: RespondSlo,
+    transport: LogoutResponseTransport,
 ) -> Result<Outbound<LogoutResponse>, SamlError> {
+    if matches!(transport, LogoutResponseTransport::SessionParticipant) {
+        enforce_participant_https(
+            peer_metadata,
+            options.binding.as_binding(),
+            options.follows_generation_rules(),
+            options.allows_http(),
+        )?;
+    }
     let relay_state = options
         .relay_state
         .unwrap_or_else(|| request.relay_state().clone());
@@ -537,6 +591,41 @@ fn finish_slo_impl(
     Ok(LogoutCompleted::from_response(
         peer_entity_id.clone(),
         response,
+    ))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LogoutResponseTransport {
+    SessionParticipant,
+    SessionAuthority,
+}
+
+fn enforce_participant_https(
+    peer_metadata: &Metadata,
+    binding: Binding,
+    follows_rules: bool,
+    allow_http: bool,
+) -> Result<(), SamlError> {
+    if !follows_rules || allow_http {
+        return Ok(());
+    }
+    let destination = peer_metadata
+        .get_single_logout_service(binding)
+        .ok_or_else(|| Error::MissingMetadata("SingleLogoutService".into()))?;
+    require_https_logout_endpoint(&destination)
+}
+
+fn require_https_logout_endpoint(endpoint: &str) -> Result<(), SamlError> {
+    let url = url::Url::parse(endpoint).map_err(|error| {
+        Error::Invalid(format!(
+            "SingleLogoutService location is not a URL: {error}"
+        ))
+    })?;
+    if url.scheme() == "https" {
+        return Ok(());
+    }
+    Err(Error::ProtocolProfile(
+        "Single Logout sends the user agent to an https SingleLogoutService unless allow_http_single_logout is selected".into(),
     ))
 }
 

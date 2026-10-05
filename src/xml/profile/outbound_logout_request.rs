@@ -15,12 +15,21 @@ pub(crate) enum OutboundLogoutRequestValidation {
     AfterPostSigning,
 }
 
+/// How outbound `LogoutRequest` checks treat `NotOnOrAfter`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum OutboundLogoutExpiration<'a> {
+    /// The attribute may be absent. A present value must still be UTC.
+    Optional,
+    /// The attribute must equal this instant.
+    Required(&'a str),
+}
+
 pub(crate) struct OutboundLogoutRequestExpectation<'a> {
     pub(crate) id: &'a str,
     pub(crate) issue_instant: &'a str,
     pub(crate) destination: &'a str,
     pub(crate) issuer: &'a str,
-    pub(crate) expiration: &'a str,
+    pub(crate) expiration: OutboundLogoutExpiration<'a>,
     pub(crate) name_id: &'a str,
     pub(crate) name_id_format: &'a str,
     pub(crate) session_indexes: &'a [&'a str],
@@ -129,11 +138,12 @@ fn validate_root(
             "LogoutRequest NotOnOrAfter must use the SAML-conformant UTC xs:dateTime form ending in Z",
         ));
     }
-    if expiration != Some(expectation.expiration) {
-        return Err(profile_error(format!(
-            "Session Authority LogoutRequest NotOnOrAfter must equal the generated expiration {}",
-            expectation.expiration,
-        )));
+    if let OutboundLogoutExpiration::Required(expected) = expectation.expiration {
+        if expiration != Some(expected) {
+            return Err(profile_error(format!(
+                "Session Authority LogoutRequest NotOnOrAfter must equal the generated expiration {expected}",
+            )));
+        }
     }
     Ok(())
 }
