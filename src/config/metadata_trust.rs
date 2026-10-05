@@ -20,37 +20,16 @@ use super::descriptors::EntityId;
 
 /// Explicit trust policy for imported SAML metadata.
 ///
-/// This is a caller argument on descriptor import. It is not a field of
-/// [`crate::SpValidationPolicy`] or [`crate::IdpValidationPolicy`], and there
-/// is no `recommended()` constructor. The Web Browser SSO and Single Logout
-/// field combinations do not select it or invent trust anchors.
-/// [`Self::RequireSignature`] rejects a document that no pinned certificate
-/// verifies. [`Self::UnsignedForCompatibility`] may parse a signed document
-/// and does not record that signature as verified.
+/// This is a caller argument on descriptor import, not a field of
+/// [`crate::SpValidationPolicy`] or [`crate::IdpValidationPolicy`]. There is
+/// no `recommended()` constructor. The classification is
+/// `docs/conformance/metadata-and-replay.md`.
 ///
-/// SAML metadata trust is caller-pinned. This type does not use a public web
-/// PKI CA store, `ds:KeyInfo`, or a metadata `KeyDescriptor` as a trust anchor.
+/// SAML metadata trust is caller-pinned or federation-driven; this type does
+/// not use a public web PKI CA store by default.
 /// [`UnsignedForCompatibility`](Self::UnsignedForCompatibility) preserves an
-/// unsigned samlify-port or raw metadata import. It does not validate a
-/// signature that happens to be present.
-///
-/// # Metadata trust
-///
-/// Typed import reads a document the caller already holds. It does not resolve
-/// or cache metadata. The full record is `docs/conformance/metadata-and-replay.md`.
-///
-/// - Signing the root when there is no authenticated channel is a publisher
-///   recommendation (Metadata §3). Actor: metadata publisher. Direction:
-///   generate. This import does not reject unsigned metadata for that
-///   recommendation.
-/// - Validating a present signature is mandatory for the publication and
-///   resolution path in Metadata §4.3.3.2. Actor: metadata consumer.
-///   Direction: resolve. That path is outside this import.
-/// - [`Self::RequireSignature`] verifies only the caller-pinned certificates.
-///   Actor: metadata consumer. Direction: inbound. Level: the caller selected
-///   this optional check, and coverage of the `EntityDescriptor` is then
-///   mandatory (Metadata §3.1.2 and §3.1.4). An empty pin list is rejected.
-///   Errata 05 E69 gives `KeyDescriptor` certificates no trust meaning.
+/// unsigned samlify-port or raw metadata import. It is not the preferred
+/// production trust model.
 ///
 /// # Examples
 ///

@@ -251,11 +251,10 @@ pub enum NameIdCreationPolicy {
 ///
 /// Checking the bearer `Address` stays off. Actor: accepting service
 /// provider. Direction: inbound. Level: optional (Profiles §4.1.4.3).
-/// HTTP POST bearer replay is mandatory for the accepting service provider
+/// HTTP POST replay is mandatory for the accepting service provider
 /// (Profiles §4.1.4.5) and remains a caller-supplied
-/// [`crate::ReplayPolicy`]. This combination does not store identifiers and
-/// does not create a cache. Metadata trust is likewise a caller argument on
-/// descriptor import, not a field here. The record is
+/// [`crate::ReplayPolicy`]. This combination does not enable it.
+/// Metadata trust is also a caller argument. Both are classified in
 /// `docs/conformance/metadata-and-replay.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpValidationPolicy {
@@ -337,10 +336,6 @@ impl Default for SpValidationPolicy {
 ///   belongs to the service provider before the response is sent. Actor:
 ///   identity provider. Direction: inbound. Level: mandatory (Profiles
 ///   §4.1.4.1). The check runs when the response is issued.
-///
-/// Remembering an `AuthnRequest` identifier is library policy and stays on
-/// the caller-supplied [`crate::ReplayPolicy`]. This combination does not
-/// store it. Metadata trust is a caller argument on descriptor import.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdpValidationPolicy {
     /// Inbound AuthnRequest signature requirement.
@@ -416,12 +411,8 @@ impl Default for IdpValidationPolicy {
 ///
 /// Rejecting an expired `LogoutRequest@NotOnOrAfter` stays library policy.
 /// Core permits a recipient to discard the message after that instant and
-/// does not require rejection. Remembering a logout message identifier is
-/// also library policy and stays on the caller-supplied
-/// [`crate::ReplayPolicy`]. This combination does not store it. Metadata
-/// trust is a caller argument on descriptor import.
-/// [`XmlSignatureProfile::StrictRsaSha2`] stays library hardening and is not
-/// selected by this combination.
+/// does not require rejection. [`XmlSignatureProfile::StrictRsaSha2`] stays
+/// library hardening and is not selected by this combination.
 ///
 /// Producer rules for `start_slo` and `respond_slo` are selected with
 /// [`crate::StartSlo::apply_single_logout_generation_rules`] and
