@@ -113,18 +113,25 @@ pub enum AuthnRequestSigningPolicy {
 /// §4.1.6). Requiring a signature is an optional inbound capability for the
 /// identity provider. It stays off unless the caller selects
 /// [`Self::RequireSigned`]. Core §3.2.1 requires the responder to verify a
-/// signature that is present. Typed receive does that when this policy
-/// requires signatures. It does not verify a signature when the requirement
-/// is off; doing so would change today's Compatibility accept outcome.
+/// signature that is present. [`Self::AllowUnsignedVerifyIfPresent`] does
+/// that and still accepts an unsigned request.
+/// [`Self::AllowUnsignedForCompatibility`] does not verify a present
+/// signature.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AuthnRequestValidationPolicy {
     /// Reject unsigned AuthnRequests.
     ///
     /// Optional inbound capability for the identity provider.
     RequireSigned,
-    /// Accept unsigned AuthnRequests.
+    /// Accept an unsigned AuthnRequest and verify a signature that is present.
     ///
-    /// Leaves the optional signature requirement off.
+    /// Verifying a present signature is mandatory for the identity provider
+    /// (Core §3.2.1). Requiring a signature stays off.
+    AllowUnsignedVerifyIfPresent,
+    /// Accept unsigned AuthnRequests without verifying a signature that is
+    /// present.
+    ///
+    /// Compatibility hatch for the mandatory present-signature check.
     #[default]
     AllowUnsignedForCompatibility,
 }
@@ -147,23 +154,28 @@ pub enum LogoutSignaturePolicy {
 /// says the relying party must reject an assertion whose conditions are
 /// Invalid or Indeterminate. That is a mandatory inbound rule for the
 /// accepting service provider when a restriction is present.
-/// [`Self::Validate`] enforces it. [`Self::SkipForCompatibility`] is the
-/// legacy hatch that skips the check. It is not the named relaxation of a
-/// recommendation.
-///
-/// Errata 05 E26 (Profiles §4.1.4.2) requires the identity provider to put
-/// the service provider's identifier in a bearer assertion's audience
-/// restriction. [`Self::Validate`] also rejects a bearer assertion that omits
-/// the element. Core condition processing does not, by itself, make that
-/// omission Invalid.
+/// [`Self::EvaluatePresentRestrictions`] enforces that rule.
+/// [`Self::Validate`] also rejects a bearer assertion that omits the
+/// element. Errata 05 E26 (Profiles §4.1.4.2) requires the identity provider
+/// to include one. Core condition processing does not make that omission
+/// Invalid, so the extra rejection is library hardening.
+/// [`Self::SkipForCompatibility`] skips the check. It is the compatibility
+/// hatch, not the named relaxation of a recommendation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AudienceValidationPolicy {
-    /// Evaluate audience restrictions on inbound assertions.
+    /// Evaluate audience restrictions and reject a bearer assertion that
+    /// omits one.
     ///
-    /// Mandatory for the accepting service provider when a restriction is
-    /// present. Also rejects a bearer assertion that omits one.
+    /// The present-restriction check is mandatory. Rejecting an omission is
+    /// library hardening. [`SpValidationPolicy::strict`] keeps this variant.
     #[default]
     Validate,
+    /// Evaluate `<AudienceRestriction>` elements that are present.
+    ///
+    /// Mandatory inbound rule for the accepting service provider when a
+    /// restriction is present (Core §2.5.1.1 and §2.5.1.4, Errata 05 E46).
+    /// A bearer assertion that omits the element is not rejected.
+    EvaluatePresentRestrictions,
     /// Skip audience evaluation for legacy interoperability.
     ///
     /// Compatibility hatch for the mandatory audience check.
@@ -189,34 +201,51 @@ pub enum NameIdCreationPolicy {
 /// the fields below; outbound AuthnRequest signing, identifier creation, and
 /// logout are not part of this accept classification.
 ///
-/// - `assertions`: [`AssertionSignaturePolicy::AllowUnsignedForCompatibility`]
-///   (library hardening off).
-/// - `responses`: [`ResponseSignaturePolicy::RequireForEncryptedCbc`]
-///   (recommendation on).
-/// - `xml_signatures`: [`XmlSignatureProfile::AllowProviderSupportedForCompatibility`]
-///   (library hardening off).
-/// - `audience`: [`AudienceValidationPolicy::Validate`] (mandatory check on).
+/// - `assertions`: [`AssertionSignaturePolicy::AllowUnsignedForCompatibility`].
+///   Actor: accepting service provider. Direction: inbound. Level: library
+///   hardening, off.
+/// - `responses`: [`ResponseSignaturePolicy::RequireForEncryptedCbc`].
+///   Actor: accepting service provider. Direction: inbound. Level:
+///   recommendation, on. Relax it with
+///   [`ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility`].
+/// - `xml_signatures`:
+///   [`XmlSignatureProfile::AllowProviderSupportedForCompatibility`].
+///   Actor: accepting service provider. Direction: inbound. Level: library
+///   hardening, off.
+/// - `audience`: [`AudienceValidationPolicy::EvaluatePresentRestrictions`].
+///   Actor: accepting service provider. Direction: inbound. Level: mandatory
+///   when an `<AudienceRestriction>` is present.
+///   [`AudienceValidationPolicy::Validate`] also rejects a missing
+///   restriction. Actor: accepting service provider. Direction: inbound.
+///   Level: library hardening, off in this combination. `strict()` keeps
+///   `Validate`.
 ///
 /// These inbound rules have no field and no off switch:
 ///
-/// - `IssueInstant` is required and must be UTC (assertion and protocol
-///   schemas; Core §1.3.3 and §3.2.2). Core §1.3.3 forbids producers from
-///   generating leap seconds and does not require a receiver to reject an
-///   inbound leap-second value.
-/// - HTTP POST requires each assertion to be protected by a signature on the
-///   Assertion or the Response (Errata 05 E26, Profiles §4.1.4.5).
-/// - The service provider verifies bearer `Recipient`, `NotOnOrAfter`, and
-///   `InResponseTo` (Errata 05 E26, Profiles §4.1.4.3). An unsolicited
-///   response must not carry `InResponseTo` (Profiles §4.1.4.3 and §4.1.5).
-/// - A present `Destination` must identify the actual recipient (Core
-///   §3.2.2). A signed HTTP Redirect or HTTP POST message must carry
-///   `Destination`, and the recipient must verify it (Bindings §3.4.5.2 and
-///   §3.5.5.2).
+/// - UTC `IssueInstant` on the Response and the Assertion. Actor: accepting
+///   service provider. Direction: inbound. Level: mandatory (assertion and
+///   protocol schemas; Core §1.3.3 and §3.2.2). Core §1.3.3 forbids a
+///   producer from generating a leap second. Actor: producer. Direction:
+///   outbound. Level: mandatory. It does not require the receiver to reject
+///   an inbound leap-second value.
+/// - HTTP POST protects each assertion with a signature on the Assertion or
+///   the Response. Actor: accepting service provider. Direction: inbound.
+///   Level: mandatory (Errata 05 E26, Profiles §4.1.4.5).
+/// - Bearer `Recipient`, `NotOnOrAfter`, and `InResponseTo`. Actor: accepting
+///   service provider. Direction: inbound. Level: mandatory (Errata 05 E26,
+///   Profiles §4.1.4.3). An unsolicited response must not carry
+///   `InResponseTo` (Profiles §4.1.4.3 and §4.1.5).
+/// - A present `Destination` identifies the actual recipient. Actor:
+///   accepting service provider. Direction: inbound. Level: mandatory (Core
+///   §3.2.2). A signed HTTP Redirect or HTTP POST message carries
+///   `Destination`, and the recipient verifies it (Bindings §3.4.5.2 and
+///   §3.5.5.2). Level: mandatory when the message is signed.
 ///
-/// Checking the bearer `Address` is optional (Profiles §4.1.4.3) and stays
-/// off. Replay for HTTP POST is a profile requirement (Profiles §4.1.4.5)
-/// and remains a caller-supplied [`crate::ReplayPolicy`], not a field of
-/// this policy.
+/// Checking the bearer `Address` stays off. Actor: accepting service
+/// provider. Direction: inbound. Level: optional (Profiles §4.1.4.3).
+/// HTTP POST replay is mandatory for the accepting service provider
+/// (Profiles §4.1.4.5) and remains a caller-supplied
+/// [`crate::ReplayPolicy`]. This combination does not enable it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpValidationPolicy {
     /// Assertion signature requirement.
@@ -274,26 +303,25 @@ impl Default for SpValidationPolicy {
 /// # Web Browser SSO acceptance
 ///
 /// `receive_sso` reads `authn_requests`. There is no `recommended()`
-/// constructor. The accept combination leaves
-/// [`AuthnRequestValidationPolicy::AllowUnsignedForCompatibility`] (optional
-/// capability off). Logout is not part of this accept classification.
+/// constructor. The accept combination uses
+/// [`AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent`].
+/// Requiring a signature is optional and stays off. Verifying a signature
+/// that is present is mandatory (Core §3.2.1). Logout is not part of this
+/// accept classification.
 ///
 /// These inbound rules have no field and no off switch:
 ///
-/// - `IssueInstant` is required and must be UTC (Core §1.3.3 and §3.2.1).
-///   An inbound leap-second value stays accepted.
-/// - A present `Destination` must identify this identity provider's SSO
-///   endpoint (Core §3.2.1). The identity provider discards the request when
-///   it does not.
-/// - When signatures are required, a signature that is present must be
-///   valid (Core §3.2.1). With the requirement off, typed receive keeps
-///   today's behavior and does not verify a signature that merely happens
-///   to be present.
-///
-/// Profiles §4.1.4.1 requires the identity provider to verify any
-/// `AssertionConsumerServiceURL` or `AssertionConsumerServiceIndex` as
-/// belonging to the service provider before sending the response. That
-/// mandatory check runs when the response is issued.
+/// - UTC `IssueInstant`. Actor: identity provider. Direction: inbound.
+///   Level: mandatory (Core §1.3.3 and §3.2.1). An inbound leap-second value
+///   stays accepted.
+/// - A present `Destination` identifies this identity provider's SSO
+///   endpoint. Actor: identity provider. Direction: inbound. Level:
+///   mandatory (Core §3.2.1). The identity provider discards the request
+///   when it does not.
+/// - `AssertionConsumerServiceURL` or `AssertionConsumerServiceIndex`
+///   belongs to the service provider before the response is sent. Actor:
+///   identity provider. Direction: inbound. Level: mandatory (Profiles
+///   §4.1.4.1). The check runs when the response is issued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdpValidationPolicy {
     /// Inbound AuthnRequest signature requirement.
@@ -555,6 +583,13 @@ pub(super) fn authn_request_signature_required(policy: AuthnRequestValidationPol
     matches!(policy, AuthnRequestValidationPolicy::RequireSigned)
 }
 
+pub(super) fn verify_present_authn_request_signature(policy: AuthnRequestValidationPolicy) -> bool {
+    matches!(
+        policy,
+        AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent
+    )
+}
+
 pub(super) fn assertion_signature_required(policy: AssertionSignaturePolicy) -> bool {
     matches!(policy, AssertionSignaturePolicy::RequireSigned)
 }
@@ -578,5 +613,12 @@ pub(super) fn name_id_creation_allowed(policy: NameIdCreationPolicy) -> bool {
 }
 
 pub(super) fn audience_validation_enabled(policy: AudienceValidationPolicy) -> bool {
+    matches!(
+        policy,
+        AudienceValidationPolicy::Validate | AudienceValidationPolicy::EvaluatePresentRestrictions
+    )
+}
+
+pub(super) fn audience_restriction_required(policy: AudienceValidationPolicy) -> bool {
     matches!(policy, AudienceValidationPolicy::Validate)
 }

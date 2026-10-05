@@ -108,6 +108,15 @@ pub struct FlowOptions<'a> {
     pub xml_limits: XmlLimits,
     /// Whether to require and verify a signature.
     pub check_signature: bool,
+    /// Verify a signature when one is present, without requiring one.
+    ///
+    /// Ignored when `check_signature` is set.
+    pub verify_signature_if_present: bool,
+    /// Reject a bearer assertion that omits `<AudienceRestriction>`.
+    ///
+    /// Applies only when `expected_audience` is set. When false, a present
+    /// restriction is still evaluated.
+    pub require_audience_restriction: bool,
     /// Whether embedded SAML signatures must satisfy the strict RSA-SHA2 profile.
     pub strict_xml_signature_profile: bool,
     /// Expected issuer (peer `entityID`).
@@ -144,6 +153,8 @@ impl<'a> Default for FlowOptions<'a> {
             redirect_inflate_max_bytes: MAX_DEFLATE_RAW_DECODE_BYTES,
             xml_limits: XmlLimits::default(),
             check_signature: false,
+            verify_signature_if_present: false,
+            require_audience_restriction: true,
             strict_xml_signature_profile: false,
             from_issuer: None,
             signing_certs: &[],
@@ -846,13 +857,19 @@ fn audience_restriction_contains(
     })
 }
 
+enum AudienceCheck {
+    Satisfied,
+    Absent,
+    Rejected,
+}
+
 fn audience_restrictions_contain(
     assertion: Option<&str>,
     expected: &str,
     limits: XmlLimits,
-) -> Result<bool, SamlError> {
+) -> Result<AudienceCheck, SamlError> {
     let Some(assertion) = assertion else {
-        return Ok(false);
+        return Ok(AudienceCheck::Absent);
     };
     let field = ExtractorField::new(
         "audienceRestriction",
@@ -863,20 +880,24 @@ fn audience_restrictions_contain(
 
     match extracted.get("audienceRestriction") {
         Some(Value::Str(audience_restriction)) => {
-            audience_restriction_contains(audience_restriction, expected, limits)
+            if audience_restriction_contains(audience_restriction, expected, limits)? {
+                Ok(AudienceCheck::Satisfied)
+            } else {
+                Ok(AudienceCheck::Rejected)
+            }
         }
         Some(Value::Array(audience_restrictions)) if !audience_restrictions.is_empty() => {
             for audience_restriction in audience_restrictions {
                 let Some(audience_restriction) = audience_restriction.as_str() else {
-                    return Ok(false);
+                    return Ok(AudienceCheck::Rejected);
                 };
                 if !audience_restriction_contains(audience_restriction, expected, limits)? {
-                    return Ok(false);
+                    return Ok(AudienceCheck::Rejected);
                 }
             }
-            Ok(true)
+            Ok(AudienceCheck::Satisfied)
         }
-        _ => Ok(false),
+        _ => Ok(AudienceCheck::Absent),
     }
 }
 
@@ -1040,10 +1061,14 @@ fn validate_context(
     if parser_type == ParserType::SamlResponse {
         validate_subject_confirmation(extracted, opts, expected_recipient)?;
         if let Some(expected) = opts.expected_audience {
-            if !audience_restrictions_contain(assertion, expected, opts.xml_limits)? {
-                return Err(SamlError::AudienceMismatch {
-                    expected: expected.to_string(),
-                });
+            match audience_restrictions_contain(assertion, expected, opts.xml_limits)? {
+                AudienceCheck::Satisfied => {}
+                AudienceCheck::Absent if !opts.require_audience_restriction => {}
+                AudienceCheck::Absent | AudienceCheck::Rejected => {
+                    return Err(SamlError::AudienceMismatch {
+                        expected: expected.to_string(),
+                    });
+                }
             }
         }
         let session_bounds = authn_statement_not_on_or_after_values(extracted)?;
@@ -1083,6 +1108,32 @@ fn validate_context(
     Ok(())
 }
 
+fn signature_is_present(
+    binding: Binding,
+    request: &HttpRequest,
+    xml: &str,
+    limits: XmlLimits,
+) -> Result<bool, SamlError> {
+    let detached = request
+        .query
+        .iter()
+        .chain(request.body.iter())
+        .any(|(name, _)| name == "Signature");
+    if detached {
+        return Ok(true);
+    }
+    match binding {
+        Binding::Redirect | Binding::Post | Binding::SimpleSign | Binding::Artifact => {
+            let document = crate::xml::dom::parse_with_limits(xml, limits)?;
+            Ok(node_contains_signature(&document.root))
+        }
+    }
+}
+
+fn node_contains_signature(node: &crate::xml::dom::Node) -> bool {
+    node.local_name == "Signature" || node.children.iter().any(node_contains_signature)
+}
+
 fn flow_inner(
     opts: &FlowOptions<'_>,
     request: &HttpRequest,
@@ -1108,8 +1159,11 @@ fn flow_inner(
     validate_protocol_profile(&xml, parser_type, opts.xml_limits)?;
     check_status_with_limits(&xml, parser_type, opts.xml_limits)?;
 
+    let verify_signature = opts.check_signature
+        || (opts.verify_signature_if_present
+            && signature_is_present(binding, request, &xml, opts.xml_limits)?);
     let (saml_content, assertion, sig_alg, message_authenticated, verified_xml_signatures) =
-        if opts.check_signature {
+        if verify_signature {
             match binding {
                 Binding::Redirect | Binding::SimpleSign => {
                     let sig_alg = verify_detached(binding, parser_type, request, opts, &xml)?;

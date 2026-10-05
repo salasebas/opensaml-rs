@@ -670,6 +670,8 @@ impl ServiceProvider {
                 binding: Some(binding),
                 parser_type: Some(ParserType::SamlResponse),
                 check_signature: true,
+                verify_signature_if_present: false,
+                require_audience_restriction: self.setting.require_audience_restriction,
                 strict_xml_signature_profile: self.setting.strict_xml_signature_profile,
                 from_issuer: idp.metadata.get_entity_id(),
                 signing_certs: &signing_certs,

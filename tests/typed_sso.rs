@@ -151,20 +151,20 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
         .build()
 }
 
-// Web Browser SSO accept fields. `recommended()` is intentionally not a method.
+// Field combination exercised by the typed Web Browser SSO accept tests.
 fn recommended_sso_accept_validation() -> SpValidationPolicy {
     SpValidationPolicy {
         assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
         responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
         xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
-        audience: AudienceValidationPolicy::Validate,
+        audience: AudienceValidationPolicy::EvaluatePresentRestrictions,
         ..SpValidationPolicy::compatibility()
     }
 }
 
 fn recommended_sso_accept_idp_validation() -> IdpValidationPolicy {
     IdpValidationPolicy {
-        authn_requests: AuthnRequestValidationPolicy::AllowUnsignedForCompatibility,
+        authn_requests: AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent,
         ..IdpValidationPolicy::compatibility()
     }
 }
@@ -2073,6 +2073,98 @@ fn idp_with_validation_and_xml(validation: IdpValidationPolicy) -> Result<IdpCon
         .validation(validation)
         .xml(encrypted_xml_policy())
         .build()
+}
+
+fn response_without_audience_restriction(xml: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let start = xml
+        .find("<saml:AudienceRestriction")
+        .ok_or("missing AudienceRestriction")?;
+    let closer = "</saml:AudienceRestriction>";
+    let relative_end = xml[start..]
+        .find(closer)
+        .ok_or("unterminated AudienceRestriction")?;
+    let end = start + relative_end + closer.len();
+    resign_response(&format!("{}{}", &xml[..start], &xml[end..]))
+}
+
+fn corrupt_signature_value(xml: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let marker = "<ds:SignatureValue>";
+    let start = xml.find(marker).ok_or("missing signature value")? + marker.len();
+    let mut bytes = xml.as_bytes().to_vec();
+    let byte = *bytes.get(start).ok_or("empty signature value")?;
+    bytes[start] = if byte == b'A' { b'B' } else { b'A' };
+    Ok(String::from_utf8(bytes)?)
+}
+
+#[test]
+fn recommended_sso_accept_does_not_require_an_audience_restriction(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = recommended_post_exchange()?;
+    let fields = response_fields_with_xml(
+        exchange.response_fields.clone(),
+        &response_without_audience_restriction(&response_xml_from_fields(
+            &exchange.response_fields,
+        )?)?,
+    )?;
+    let session = exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields.clone()),
+        validation(),
+    )?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+
+    let validate_omission = Saml::sp(sp_with_validation(SpValidationPolicy {
+        audience: AudienceValidationPolicy::Validate,
+        ..recommended_sso_accept_validation()
+    })?)?;
+    match validate_omission.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields),
+        validation(),
+    ) {
+        Err(SamlError::AudienceMismatch { .. }) => Ok(()),
+        other => Err(format!(
+            "expected AudienceMismatch when omission hardening is selected, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn recommended_idp_receive_verifies_a_present_authn_request_signature(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let signing_sp = Saml::sp(sp_config()?)?;
+    let strict_idp = Saml::idp(idp_config()?)?;
+    let recommended_idp = Saml::idp(idp_with_validation(recommended_sso_accept_idp_validation())?)?;
+    let compatibility_idp = Saml::idp(idp_with_validation(IdpValidationPolicy::compatibility())?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&signing_sp, &strict_idp)?;
+    let started = signing_sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let signed = authn_request_input(&started.outbound)?;
+    recommended_idp.receive_sso(&sp_descriptor, signed, validation())?;
+
+    let corrupted = corrupt_signature_value(&authn_request_xml(&started.outbound)?)?;
+    match recommended_idp.receive_sso(
+        &sp_descriptor,
+        post_authn_request_input_with_xml(&corrupted),
+        validation(),
+    ) {
+        Err(SamlError::SignatureVerification { .. }) => {}
+        other => {
+            return Err(format!(
+                "expected SignatureVerification for a present invalid signature, got {other:?}"
+            )
+            .into());
+        }
+    }
+
+    compatibility_idp.receive_sso(
+        &sp_descriptor,
+        post_authn_request_input_with_xml(&corrupted),
+        validation(),
+    )?;
+    Ok(())
 }
 
 #[test]

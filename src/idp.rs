@@ -553,6 +553,8 @@ impl IdentityProvider {
                 binding: Some(binding),
                 parser_type: Some(ParserType::SamlRequest),
                 check_signature: self.metadata.is_want_authn_requests_signed(),
+                verify_signature_if_present: self.setting.verify_authn_request_signature_if_present,
+                require_audience_restriction: true,
                 strict_xml_signature_profile: false,
                 from_issuer: sp.metadata.get_entity_id(),
                 signing_certs: &signing_certs,

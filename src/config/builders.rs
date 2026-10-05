@@ -8,11 +8,12 @@ use super::algorithms::{name_id_format_uris, transform_algorithm_uris, NameIdFor
 use super::credentials::Credentials;
 use super::descriptors::{validate_entity_id, EntityId, IdpMetadataConfig, SpMetadataConfig};
 use super::policies::{
-    assertion_signature_required, audience_validation_enabled, authn_request_signature_required,
-    authn_request_signing_enabled, encrypted_cbc_response_signature_required,
-    logout_signature_required, name_id_creation_allowed, response_signature_required,
-    AlgorithmPolicy, AssertionEncryptionPolicy, AuthnRequestSigningPolicy, IdpValidationPolicy,
-    SpValidationPolicy, TemplatePolicy, XmlPolicy,
+    assertion_signature_required, audience_restriction_required, audience_validation_enabled,
+    authn_request_signature_required, authn_request_signing_enabled,
+    encrypted_cbc_response_signature_required, logout_signature_required, name_id_creation_allowed,
+    response_signature_required, verify_present_authn_request_signature, AlgorithmPolicy,
+    AssertionEncryptionPolicy, AuthnRequestSigningPolicy, IdpValidationPolicy, SpValidationPolicy,
+    TemplatePolicy, XmlPolicy,
 };
 #[cfg(not(any(
     feature = "crypto-rustcrypto",
@@ -663,6 +664,8 @@ impl TryFrom<&SpConfig> for EntitySetting {
             authn_request_signing_enabled(config.validation.authn_requests);
         setting.want_assertions_signed = assertion_signature_required(config.validation.assertions);
         setting.validate_audience = audience_validation_enabled(config.validation.audience);
+        setting.require_audience_restriction =
+            audience_restriction_required(config.validation.audience);
         setting.want_message_signed = response_signature_required(config.validation.responses);
         setting.strict_xml_signature_profile = matches!(
             config.validation.xml_signatures,
@@ -695,6 +698,8 @@ impl TryFrom<&IdpConfig> for EntitySetting {
         );
         setting.want_authn_requests_signed =
             authn_request_signature_required(config.validation.authn_requests);
+        setting.verify_authn_request_signature_if_present =
+            verify_present_authn_request_signature(config.validation.authn_requests);
         setting.want_logout_request_signed =
             logout_signature_required(config.validation.logout.requests)?;
         setting.want_logout_response_signed =
