@@ -6,7 +6,7 @@ use crate::template::{
     apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
 };
 use crate::xml::{
-    validate_logout_request_outbound, validate_logout_response_outbound,
+    validate_logout_request_outbound, validate_logout_response_outbound, OutboundLogoutExpiration,
     OutboundLogoutRequestExpectation, OutboundLogoutRequestValidation, OutboundLogoutValidation,
 };
 
@@ -257,19 +257,19 @@ fn create_logout_request_for_subject_inner(
         )?
     };
     let session_indexes = subject.session_indexes.as_slice();
-    // `None` skips outbound checks. `Some(None)` checks a participant request
-    // and leaves `NotOnOrAfter` optional. `Some(Some(_))` requires the
+    // `None` skips outbound checks. `Optional` checks a participant request
+    // and leaves `NotOnOrAfter` optional. `Required` checks the
     // session-authority instant.
     let expiration = match validation {
         LogoutRequestValidation::Compatibility => None,
-        LogoutRequestValidation::SessionParticipant => Some(None),
-        LogoutRequestValidation::SessionAuthority => {
-            Some(Some(not_on_or_after.ok_or_else(|| {
+        LogoutRequestValidation::SessionParticipant => Some(OutboundLogoutExpiration::Optional),
+        LogoutRequestValidation::SessionAuthority => Some(OutboundLogoutExpiration::Required(
+            not_on_or_after.ok_or_else(|| {
                 SamlError::Invalid(
                     "Session Authority LogoutRequest is missing its generated expiration".into(),
                 )
-            })?))
-        }
+            })?,
+        )),
     };
     let expectation = expiration.map(|expiration| OutboundLogoutRequestExpectation {
         id: &id,

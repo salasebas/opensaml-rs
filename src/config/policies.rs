@@ -396,7 +396,7 @@ impl Default for IdpValidationPolicy {
 ///
 /// Rejecting an expired `LogoutRequest@NotOnOrAfter` stays library policy.
 /// Core permits a recipient to discard the message after that instant and
-/// does not require rejection. The direct XML-signature profile stays
+/// does not require rejection. [`XmlSignatureProfile::StrictRsaSha2`] stays
 /// library hardening and is not selected by this combination.
 ///
 /// Producer rules for `start_slo` and `respond_slo` are selected with

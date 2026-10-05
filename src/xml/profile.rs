@@ -11,7 +11,7 @@ mod outbound_logout_request;
 
 pub(crate) use outbound_logout::{validate_logout_response_outbound, OutboundLogoutValidation};
 pub(crate) use outbound_logout_request::{
-    validate_logout_request_outbound, OutboundLogoutRequestExpectation,
+    validate_logout_request_outbound, OutboundLogoutExpiration, OutboundLogoutRequestExpectation,
     OutboundLogoutRequestValidation,
 };
 
