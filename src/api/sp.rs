@@ -106,7 +106,7 @@ impl Saml<Sp> {
             &raw_idp,
             options.binding.as_binding(),
             &raw_options,
-            options.follow_web_browser_sso_producer,
+            options.web_browser_sso_producer,
         )?;
         let outbound = Outbound::<AuthnRequest>::try_from(context)?;
         let pending = PendingAuthnRequest::try_new(

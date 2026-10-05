@@ -1,5 +1,6 @@
 use crate::browser::{LogoutBinding, SsoRequestBinding, SsoResponseBinding};
 use crate::model::RelayStateParam;
+use crate::sp::WebBrowserSsoProducer;
 
 /// Explicit `ForceAuthn` value for outbound AuthnRequests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +28,7 @@ pub struct StartSso {
     pub(super) relay_state: RelayStateParam,
     pub(super) force_authn: Option<ForceAuthn>,
     pub(super) acs_index: Option<u16>,
-    pub(super) follow_web_browser_sso_producer: bool,
+    pub(super) web_browser_sso_producer: WebBrowserSsoProducer,
 }
 
 impl StartSso {
@@ -53,7 +54,7 @@ impl StartSso {
             relay_state: RelayStateParam::absent(),
             force_authn: None,
             acs_index: None,
-            follow_web_browser_sso_producer: false,
+            web_browser_sso_producer: WebBrowserSsoProducer::Compatibility,
         }
     }
 
@@ -89,7 +90,7 @@ impl StartSso {
     /// a transient identifier request. Signing stays on
     /// [`crate::AuthnRequestSigningPolicy`] and is not turned on here.
     pub fn follow_web_browser_sso_producer(mut self) -> Self {
-        self.follow_web_browser_sso_producer = true;
+        self.web_browser_sso_producer = WebBrowserSsoProducer::Follow;
         self
     }
 }
@@ -100,7 +101,7 @@ pub struct RespondSso {
     pub(super) binding: SsoResponseBinding,
     pub(super) relay_state: Option<RelayStateParam>,
     response_signing: ResponseSigning,
-    pub(super) follow_web_browser_sso_producer: bool,
+    pub(super) web_browser_sso_producer: WebBrowserSsoProducer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,7 +127,7 @@ impl RespondSso {
             binding,
             relay_state: None,
             response_signing: ResponseSigning::FollowEncryptedCbcRecommendation,
-            follow_web_browser_sso_producer: false,
+            web_browser_sso_producer: WebBrowserSsoProducer::Compatibility,
         }
     }
 
@@ -152,12 +153,19 @@ impl RespondSso {
     /// Follow Web Browser SSO producer requirements on this response.
     ///
     /// [`Self::post`] and [`Self::simple_sign`] leave this off. When enabled, a
-    /// successful response carries an authentication statement. An unsolicited
-    /// response omits `InResponseTo` on the response and on bearer subject
-    /// confirmation data. CBC response signing is unchanged: it stays on unless
+    /// successful response carries an authentication statement whose
+    /// `AuthnInstant` is the assertion `IssueInstant` and whose
+    /// `AuthnContextClassRef` is
+    /// `urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified`. That class means
+    /// the authentication mechanism was not recorded. It is not evidence of a
+    /// particular authentication strength. When the identity provider metadata
+    /// advertises `SingleLogoutService`, `SessionIndex` is the assertion `ID`.
+    /// An unsolicited response omits `InResponseTo` on the response and on
+    /// bearer subject confirmation data. CBC response signing is unchanged: it
+    /// stays on unless
     /// [`Self::allow_unsigned_encrypted_cbc_for_compatibility`] is selected.
     pub fn follow_web_browser_sso_producer(mut self) -> Self {
-        self.follow_web_browser_sso_producer = true;
+        self.web_browser_sso_producer = WebBrowserSsoProducer::Follow;
         self
     }
 

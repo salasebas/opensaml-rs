@@ -215,7 +215,7 @@ impl Saml<Idp> {
                     acs: explicit_acs.as_deref(),
                     name_id_format: name_id_format.as_deref(),
                     issuance_lifetime: Some(self.0.issuance_lifetime),
-                    follow_web_browser_sso_producer: options.follow_web_browser_sso_producer,
+                    web_browser_sso_producer: options.web_browser_sso_producer,
                 },
             )?;
         Outbound::<SsoResponse>::try_from(context)
