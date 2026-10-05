@@ -20,6 +20,7 @@ use saml_rs::constants::ParserType;
 use saml_rs::crypto::{
     construct_message_signature, construct_saml_signature, keys::load_private_key,
 };
+use saml_rs::entity::{SignatureAction, SignatureConfig};
 use saml_rs::error::TimeWindowField;
 use saml_rs::raw::Binding;
 use saml_rs::template::{LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
@@ -175,6 +176,19 @@ fn recommended_sso_accept_idp_validation() -> IdpValidationPolicy {
         authn_requests: AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent,
         ..IdpValidationPolicy::compatibility()
     }
+}
+
+fn signed_idp_metadata() -> Result<String, SamlError> {
+    let xml = format!(
+        r#"<EntityDescriptor ID="_idp_md1" entityID="{IDP_ENTITY_ID}" xmlns="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol"><SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="{IDP_SSO_POST}"/></IDPSSODescriptor></EntityDescriptor>"#
+    );
+    let key = load_private_key(PRIVKEY, None)?;
+    let config = SignatureConfig {
+        prefix: "ds".into(),
+        reference: Some("/*[local-name(.)='EntityDescriptor']".into()),
+        action: SignatureAction::Prepend,
+    };
+    construct_saml_signature(&xml, true, &key, CERT, RSA_SHA256, &[], Some(&config))
 }
 
 fn sp_with_validation(validation: SpValidationPolicy) -> Result<SpConfig, SamlError> {
@@ -1718,6 +1732,140 @@ fn assert_response_root_signature(
         return Err("expected a response signature and no direct assertion signature".into());
     }
     Ok(())
+}
+
+#[test]
+fn recommended_sso_trusts_signed_metadata_only_with_pinned_certificates(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_with_validation(recommended_sso_accept_validation())?)?;
+    let signed = signed_idp_metadata()?;
+    if !signed.contains("<ds:X509Certificate>") {
+        return Err("expected the metadata signature to carry its own certificate".into());
+    }
+
+    let empty: [CertificatePem; 0] = [];
+    match IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new(IDP_ENTITY_ID)?,
+        &signed,
+        MetadataTrustPolicy::RequireSignature {
+            trusted_certificates: &empty,
+        },
+    ) {
+        Err(SamlError::NoTrustedCertificate | SamlError::SignatureVerification { .. }) => {}
+        other => {
+            return Err(format!(
+                "expected signed metadata without pinned certificates to be rejected, got {other:?}"
+            )
+            .into());
+        }
+    }
+
+    let pinned = [CertificatePem::new(CERT)];
+    let verified = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new(IDP_ENTITY_ID)?,
+        &signed,
+        MetadataTrustPolicy::RequireSignature {
+            trusted_certificates: &pinned,
+        },
+    )?;
+    assert!(verified.was_verified_with_pinned_certificates());
+    let started = sp.start_sso(&verified, StartSso::post())?;
+    assert!(!started.outbound.id().as_str().is_empty());
+
+    let unverified = IdpDescriptor::from_metadata_xml_for(
+        EntityId::try_new(IDP_ENTITY_ID)?,
+        &signed,
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    assert!(!unverified.was_verified_with_pinned_certificates());
+    Ok(())
+}
+
+#[test]
+fn recommended_sso_accept_does_not_store_replay_without_a_caller_cache(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = recommended_post_exchange()?;
+    let fields = exchange.response_fields;
+    exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields.clone()),
+        validation(),
+    )?;
+    exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields.clone()),
+        validation(),
+    )?;
+
+    let mut cache = MemoryReplayCache::default();
+    exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields.clone()),
+        validation_with_cache(&mut cache),
+    )?;
+    let stored: Vec<_> = cache.seen.keys().cloned().collect();
+    if !stored.iter().any(|key| key.starts_with("assertion_id:")) {
+        return Err("expected the caller cache to store the assertion id".into());
+    }
+    match exchange.sp.finish_sso(
+        &exchange.idp_descriptor,
+        &exchange.pending,
+        BrowserInput::<SsoResponse>::post(fields),
+        validation_with_cache(&mut cache),
+    ) {
+        Err(SamlError::ReplayDetected { .. }) => Ok(()),
+        other => {
+            Err(format!("expected ReplayDetected from the caller cache, got {other:?}").into())
+        }
+    }
+}
+
+#[test]
+fn recommended_sso_receive_does_not_store_replay_without_a_caller_cache(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_with_validation(recommended_sso_accept_validation())?)?;
+    let idp = Saml::idp(idp_with_validation(recommended_sso_accept_idp_validation())?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    assert!(!idp_descriptor.was_verified_with_pinned_certificates());
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let fields = post_fields(&started.outbound)?;
+
+    idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(fields.clone()),
+        validation(),
+    )?;
+    idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(fields.clone()),
+        validation(),
+    )?;
+
+    let mut cache = MemoryReplayCache::default();
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(fields.clone()),
+        validation_with_cache(&mut cache),
+    )?;
+    let replay_key = format!("authn_request_id:{}", received.message().id().as_str());
+    assert!(cache.seen.contains_key(&replay_key));
+    match idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(fields),
+        validation_with_cache(&mut cache),
+    ) {
+        Err(SamlError::ReplayDetected { key }) => {
+            assert_eq!(key, replay_key);
+            Ok(())
+        }
+        other => Err(format!(
+            "expected AuthnRequest ReplayDetected from the caller cache, got {other:?}"
+        )
+        .into()),
+    }
 }
 
 #[test]

@@ -173,6 +173,11 @@ pub trait ReplayCache {
 }
 
 /// Replay behavior for typed inbound browser flows.
+///
+/// This is a caller argument on [`SamlValidationContext::new`], not a field of
+/// [`crate::SpValidationPolicy`] or [`crate::IdpValidationPolicy`]. There is
+/// no `recommended()` constructor. The classification is
+/// `docs/conformance/metadata-and-replay.md`.
 #[non_exhaustive]
 pub enum ReplayPolicy<'a> {
     /// Skip replay checks. The raw API and the samlify port have no replay cache.

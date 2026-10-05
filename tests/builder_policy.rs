@@ -235,6 +235,41 @@ fn compatibility_policy_names_unsigned_choices_explicitly() {
 }
 
 #[test]
+fn raw_settings_keep_audience_and_logout_defaults_that_differ_from_compatibility(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let raw = EntitySetting::default();
+    assert!(raw.validate_audience);
+    assert!(raw.want_logout_request_signed);
+    assert!(raw.want_logout_response_signed);
+
+    let sp = SpConfig::try_new(
+        EntityId::try_new("https://sp.example.com/metadata")?,
+        SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
+    )?;
+    assert_eq!(sp.validation, SpValidationPolicy::compatibility());
+    let converted = EntitySetting::try_from(&sp)?;
+    assert!(!converted.validate_audience);
+    assert!(!converted.want_logout_request_signed);
+    assert!(!converted.want_logout_response_signed);
+
+    let idp = IdpConfig::try_new(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        IdpMetadataConfig::new(vec![SsoEndpoint::redirect("https://idp.example.com/sso")?]),
+    )?;
+    assert_eq!(idp.validation, IdpValidationPolicy::compatibility());
+    let converted = EntitySetting::try_from(&idp)?;
+    assert!(converted.validate_audience);
+    assert!(!converted.want_logout_request_signed);
+    assert!(!converted.want_logout_response_signed);
+
+    let raw_after = EntitySetting::default();
+    assert!(raw_after.validate_audience);
+    assert!(raw_after.want_logout_request_signed);
+    assert!(raw_after.want_logout_response_signed);
+    Ok(())
+}
+
+#[test]
 fn public_validation_defaults_remain_compatibility() {
     assert!(!EntitySetting::default().want_message_signed);
     assert_eq!(

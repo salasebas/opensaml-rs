@@ -254,6 +254,8 @@ pub enum NameIdCreationPolicy {
 /// HTTP POST replay is mandatory for the accepting service provider
 /// (Profiles §4.1.4.5) and remains a caller-supplied
 /// [`crate::ReplayPolicy`]. This combination does not enable it.
+/// Metadata trust is also a caller argument. Both are classified in
+/// `docs/conformance/metadata-and-replay.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpValidationPolicy {
     /// Assertion signature requirement.
