@@ -1,3 +1,5 @@
+//! `ReplayPolicy::DisabledForCompatibility` preserves the raw API, which has no replay cache.
+
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},

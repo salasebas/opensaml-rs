@@ -44,10 +44,12 @@ pub enum AssertionSignaturePolicy {
 /// should be signed, before the ciphertext is processed. That recommendation
 /// obligates the accepting service provider on inbound acceptance.
 /// [`Self::RequireForEncryptedCbc`] follows it.
-/// [`Self::AllowUnsignedEncryptedCbcForCompatibility`] relaxes that
-/// recommendation alone. It does not remove the HTTP POST rule that each
-/// assertion must be protected by a signature on the Assertion or the
-/// Response.
+/// [`Self::AllowUnsignedEncryptedCbc`] relaxes that recommendation alone.
+/// The name is the E93 relaxation, not the Compatibility preset.
+/// [`SpValidationPolicy::compatibility`] still selects it because the samlify
+/// port did not require the signature. It does not remove the HTTP POST rule
+/// that each assertion must be protected by a signature on the Assertion or
+/// the Response.
 ///
 /// [`Self::RequireSigned`] requires a Response signature on every response.
 /// The profile allows an Assertion signature instead, so this variant is
@@ -57,9 +59,10 @@ pub enum AssertionSignaturePolicy {
 pub enum ResponseSignaturePolicy {
     /// Do not apply the E93 Response-signature recommendation.
     ///
-    /// Inbound acceptance, named relaxation of that recommendation.
+    /// Inbound acceptance. This is the named relaxation of that
+    /// recommendation, not the Compatibility preset.
     #[default]
-    AllowUnsignedEncryptedCbcForCompatibility,
+    AllowUnsignedEncryptedCbc,
     /// Require a signed Response when an `<EncryptedAssertion>` uses CBC.
     ///
     /// Inbound acceptance, recommendation, accepting service provider.
@@ -101,7 +104,7 @@ pub enum XmlSignatureProfile {
 pub enum AuthnRequestSigningPolicy {
     /// Sign outgoing AuthnRequests.
     Sign,
-    /// Send unsigned AuthnRequests for legacy interoperability.
+    /// Send unsigned AuthnRequests, preserving the samlify port.
     #[default]
     DoNotSignForCompatibility,
 }
@@ -131,7 +134,10 @@ pub enum AuthnRequestValidationPolicy {
     /// Accept unsigned AuthnRequests without verifying a signature that is
     /// present.
     ///
-    /// Compatibility hatch for the mandatory present-signature check.
+    /// Samlify-port hatch for the mandatory present-signature check.
+    ///
+    /// A caller leaving the raw API keeps this behavior through
+    /// [`IdpValidationPolicy::compatibility`].
     #[default]
     AllowUnsignedForCompatibility,
 }
@@ -142,7 +148,7 @@ pub enum LogoutSignaturePolicy {
     /// Reject unsigned logout messages.
     #[default]
     RequireSigned,
-    /// Accept unsigned logout messages for legacy interoperability.
+    /// Accept unsigned logout messages, preserving the samlify port.
     AllowUnsignedForCompatibility,
 }
 
@@ -159,7 +165,7 @@ pub enum LogoutSignaturePolicy {
 /// element. Errata 05 E26 (Profiles §4.1.4.2) requires the identity provider
 /// to include one. Core condition processing does not make that omission
 /// Invalid, so the extra rejection is library hardening.
-/// [`Self::SkipForCompatibility`] skips the check. It is the compatibility
+/// [`Self::SkipForCompatibility`] skips the check. It is the samlify-port
 /// hatch, not the named relaxation of a recommendation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AudienceValidationPolicy {
@@ -176,9 +182,10 @@ pub enum AudienceValidationPolicy {
     /// restriction is present (Core §2.5.1.1 and §2.5.1.4, Errata 05 E46).
     /// A bearer assertion that omits the element is not rejected.
     EvaluatePresentRestrictions,
-    /// Skip audience evaluation for legacy interoperability.
+    /// Skip audience evaluation, preserving the samlify port.
     ///
-    /// Compatibility hatch for the mandatory audience check.
+    /// Samlify-port hatch for the mandatory audience check. A caller leaving
+    /// the raw API keeps this through [`SpValidationPolicy::compatibility`].
     SkipForCompatibility,
 }
 
@@ -208,7 +215,7 @@ pub enum NameIdCreationPolicy {
 /// - `responses`: [`ResponseSignaturePolicy::RequireForEncryptedCbc`].
 ///   Actor: accepting service provider. Direction: inbound. Level:
 ///   recommendation, on. Relax it with
-///   [`ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility`].
+///   [`ResponseSignaturePolicy::AllowUnsignedEncryptedCbc`].
 /// - `xml_signatures`:
 ///   [`XmlSignatureProfile::AllowProviderSupportedForCompatibility`].
 ///   Actor: accepting service provider. Direction: inbound. Level: library
@@ -279,11 +286,14 @@ impl SpValidationPolicy {
         }
     }
 
-    /// Legacy interoperability policy with unsigned behavior made explicit.
+    /// Samlify-port policy kept for a caller leaving the raw API.
+    ///
+    /// Unsigned choices stay explicit. This preset does not name an OASIS
+    /// recommendation relaxation.
     pub fn compatibility() -> Self {
         Self {
             assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
-            responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility,
+            responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbc,
             xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
             authn_requests: AuthnRequestSigningPolicy::DoNotSignForCompatibility,
             audience: AudienceValidationPolicy::SkipForCompatibility,
@@ -341,7 +351,10 @@ impl IdpValidationPolicy {
         }
     }
 
-    /// Legacy interoperability policy with unsigned behavior made explicit.
+    /// Samlify-port policy kept for a caller leaving the raw API.
+    ///
+    /// Unsigned choices stay explicit. This preset does not name an OASIS
+    /// recommendation relaxation.
     pub fn compatibility() -> Self {
         Self {
             authn_requests: AuthnRequestValidationPolicy::AllowUnsignedForCompatibility,
@@ -373,11 +386,11 @@ impl Default for IdpValidationPolicy {
 ///   HTTP-POST, and HTTP-POST-SimpleSign (Profiles §4.4.3.1, §4.4.4.1, and
 ///   Core §3.7.3.1 / §3.7.3.2).
 ///   [`LogoutSignaturePolicy::AllowUnsignedForCompatibility`] is the
-///   compatibility hatch, not a named relaxation of a recommendation.
+///   samlify-port hatch, not a named relaxation of a recommendation.
 /// - `responses`: [`LogoutSignaturePolicy::RequireSigned`]. Actor: the
 ///   recipient of a `LogoutResponse`. Direction: inbound. Level: mandatory
 ///   for those same bindings (Profiles §4.4.3.4 and §4.4.4.2). The
-///   compatibility hatch is the same unsigned variant.
+///   samlify-port hatch is the same unsigned variant.
 ///
 /// These inbound rules have no field and no off switch:
 ///
@@ -421,7 +434,7 @@ impl LogoutPolicy {
         }
     }
 
-    /// Accept unsigned logout requests and responses for legacy interoperability.
+    /// Accept unsigned logout requests and responses, preserving the samlify port.
     pub fn compatibility() -> Self {
         Self {
             requests: LogoutSignaturePolicy::AllowUnsignedForCompatibility,
@@ -504,7 +517,7 @@ impl XmlEncryptionPolicy {
 /// Software RSA key-transport decryption is disabled by default on the
 /// RustCrypto provider because that backend, reached through `bergshamra` /
 /// `kryptering`, is affected by `RUSTSEC-2023-0071`. Enable it only as an
-/// explicit compatibility exception for a RustCrypto deployment that accepts
+/// explicit RustCrypto exception for a deployment that accepts
 /// that risk. AWS-LC and FIPS ignore this opt-in.
 ///
 /// ```
@@ -594,7 +607,7 @@ pub struct TemplatePolicy {
     ///
     /// Typed Session Authority generation requires a complete unqualified
     /// `NotOnOrAfter="{NotOnOrAfter}"` root attribute. Typed SP and raw
-    /// compatibility generation do not synthesize the attribute.
+    /// samlify-port generation do not synthesize the attribute.
     pub logout_request_template: Option<String>,
     /// Logout response template.
     ///

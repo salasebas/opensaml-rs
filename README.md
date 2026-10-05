@@ -57,10 +57,11 @@ Source: [`examples/sso.rs`](examples/sso.rs). The same calls, checked by
 [crate-root SSO example](https://docs.rs/saml-rs/latest/saml_rs/#sp-initiated-sso).
 
 Those snippets use `ReplayPolicy::DisabledForCompatibility` and, where noted,
-unsigned metadata so they compile alone. For production inbound validation, use
-`ReplayPolicy::RequireCache` with a caller-owned replay cache.
-`MetadataTrustPolicy::UnsignedForCompatibility` is a legacy interoperability
-choice. Choose either policy in
+`MetadataTrustPolicy::UnsignedForCompatibility` so they compile alone. Both
+names preserve a raw or samlify-port choice: no replay cache, and an unsigned
+metadata import. For production inbound validation, use
+`ReplayPolicy::RequireCache` with a caller-owned replay cache. Choose either
+metadata policy in
 [metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and
 [`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html).
 

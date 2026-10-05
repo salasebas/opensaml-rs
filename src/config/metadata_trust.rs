@@ -22,8 +22,9 @@ use super::descriptors::EntityId;
 ///
 /// SAML metadata trust is caller-pinned or federation-driven; this type does
 /// not use a public web PKI CA store by default.
-/// [`UnsignedForCompatibility`](Self::UnsignedForCompatibility) is for explicit
-/// legacy interoperability, not the preferred production trust model.
+/// [`UnsignedForCompatibility`](Self::UnsignedForCompatibility) preserves an
+/// unsigned samlify-port or raw metadata import. It is not the preferred
+/// production trust model.
 ///
 /// # Examples
 ///
@@ -47,7 +48,7 @@ use super::descriptors::EntityId;
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub enum MetadataTrustPolicy<'a> {
-    /// Accept unsigned metadata for legacy interoperability.
+    /// Accept unsigned metadata to preserve a samlify-port or raw import.
     UnsignedForCompatibility,
     /// Require a valid metadata signature from one of the pinned certificates.
     RequireSignature {

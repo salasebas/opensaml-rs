@@ -1,3 +1,6 @@
+//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
+//! `RespondSso::allow_unsigned_encrypted_cbc` relaxes Errata 05 E93 and is not that preset.
+
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
@@ -489,7 +492,7 @@ fn typed_cbc_response_signature_stays_recommended_and_relaxes_alone(
         subject(),
         RespondSso::post()
             .apply_web_browser_sso_generation_rules()
-            .allow_unsigned_encrypted_cbc_for_compatibility(),
+            .allow_unsigned_encrypted_cbc(),
     )?;
     let unsigned_xml = response_xml(&unsigned)?;
     assert!(!unsigned_xml.contains("<ds:Signature"));
