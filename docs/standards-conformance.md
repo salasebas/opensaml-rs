@@ -199,8 +199,9 @@ requirements:
   turning them into inbound rejection rules;
 - keep the conformant default visible in API documentation and tests.
 
-Compatibility policies are exceptions, not alternate interpretations of
-OASIS. Their names and documentation should make the deviation clear.
+Compatibility is the samlify-port behavior kept for callers leaving the raw
+API. It is not an alternate interpretation of OASIS, and a recommendation
+relaxation does not use that name.
 
 ### Optional Capabilities
 
@@ -272,8 +273,9 @@ current feature support:
   protection before a relying party processes CBC-encrypted SAML data and
   specifically recommends signing a Response that contains a CBC
   `EncryptedAssertion`. Typed defaults follow this producer and relying-party
-  recommendation; accepting an unsigned CBC-encrypted Response requires an
-  explicit compatibility policy.
+  recommendation; accepting an unsigned CBC-encrypted Response requires
+  `ResponseSignaturePolicy::AllowUnsignedEncryptedCbc`. Generating one
+  requires `RespondSso::allow_unsigned_encrypted_cbc`.
 
 ## Change And Review Checklist
 

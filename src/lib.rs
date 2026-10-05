@@ -8,8 +8,8 @@
 //! callers can store with browser session state.
 //!
 //! The dependency-free config builders use strict typed defaults. Opt into
-//! compatibility policy by name when a legacy peer requires unsigned protocol
-//! messages.
+//! [`SpValidationPolicy::compatibility`] to keep the samlify-port behavior
+//! when leaving the raw API.
 //! Where the compact flow examples below use
 //! [`ReplayPolicy::DisabledForCompatibility`] or unsigned metadata, treat those
 //! as explicit interoperability choices. Production-shaped inbound flows should
@@ -242,23 +242,25 @@
 //! # Metadata trust
 //!
 //! Metadata trust is explicit and caller-pinned. [`MetadataTrustPolicy`] can
-//! accept unsigned metadata for explicit legacy compatibility or require a
-//! signature from caller-provided certificates with
+//! accept unsigned metadata with
+//! [`MetadataTrustPolicy::UnsignedForCompatibility`] to preserve a samlify-port
+//! or raw import, or require a signature from caller-provided certificates with
 //! [`MetadataTrustPolicy::RequireSignature`]. Prefer signed metadata with pinned
 //! certificates for production trust decisions; the crate does not treat the
 //! public web PKI CA store as SAML metadata trust.
 //!
-//! # Raw compatibility API
+//! # Raw samlify-port API
 //!
-//! The [`raw`] module contains the low-level compatibility API and protocol
-//! helpers. Advanced callers should import [`raw::ServiceProvider`],
-//! [`raw::IdentityProvider`], [`raw::HttpRequest`], and [`raw::BindingContext`]
-//! from there rather than using root compatibility exports.
+//! The [`raw`] module is the samlify-port surface. [`SpValidationPolicy::compatibility`]
+//! is the typed name for keeping that behavior on the builders. The two
+//! surfaces keep their own defaults. Advanced callers should import
+//! [`raw::ServiceProvider`], [`raw::IdentityProvider`], [`raw::HttpRequest`],
+//! and [`raw::BindingContext`] from there rather than using the root re-exports.
 //!
 //! Visible docs.rs modules and crate-root re-exports are the supported public
-//! documentation surface. The [`raw`] module is supported for compatibility;
-//! hidden modules are lower-level implementation or compatibility paths and
-//! should not be the first choice for new integrations.
+//! documentation surface. The [`raw`] module is the supported samlify-port
+//! API. Hidden modules are lower-level implementation paths and should not be
+//! the first choice for new integrations.
 //!
 //! # Unsupported profiles
 //!
@@ -272,9 +274,9 @@
 //!
 //! XML cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
 //! message signatures) is delegated to `bergshamra`. The default
-//! `crypto-bergshamra` compatibility feature selects RustCrypto; applications
+//! `crypto-bergshamra` feature selects RustCrypto; applications
 //! can instead select `crypto-aws-lc` or `crypto-fips` with default features
-//! disabled. Configure assertion encryption and XML-Enc compatibility exceptions
+//! disabled. Configure assertion encryption and the RustCrypto XML-Enc exception
 //! through [`XmlEncryptionPolicy`].
 //! Disable default features to build the crypto-free protocol layer; crypto
 //! operations then fail closed with [`SamlError::Unsupported`].
@@ -368,9 +370,9 @@ pub use crypto::{
     crypto_provider_info, initialize_crypto_provider, CryptoFipsStatus, CryptoProvider,
     CryptoProviderInfo,
 };
-#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::EntitySetting`."]
+#[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::EntitySetting`."]
 pub use entity::EntitySetting;
-#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::IdentityProvider`."]
+#[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::IdentityProvider`."]
 pub use idp::IdentityProvider;
 #[cfg(any(
     feature = "crypto-rustcrypto",
@@ -386,5 +388,5 @@ pub use model::{
     SsoSession, Subject, SubjectConfirmation, VerifiedXmlSignature, VerifiedXmlSignatureCoverage,
     MAX_RELAY_STATE_BYTES,
 };
-#[doc = "Compatibility export for older crate-root imports. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
+#[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;

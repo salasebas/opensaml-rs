@@ -108,7 +108,7 @@ pub struct RespondSso {
 enum ResponseSigning {
     FollowEncryptedCbcRecommendation,
     Always,
-    AllowUnsignedEncryptedCbcForCompatibility,
+    AllowUnsignedEncryptedCbc,
 }
 
 impl RespondSso {
@@ -142,11 +142,12 @@ impl RespondSso {
 
     /// Allow an unsigned Response around a CBC-encrypted Assertion.
     ///
-    /// This explicitly relaxes SAML V2.0 Approved Errata 05 E93, which
-    /// recommends signing the Response so the ciphertext is integrity
-    /// protected. By default, typed IdPs sign such Responses automatically.
-    pub fn allow_unsigned_encrypted_cbc_for_compatibility(mut self) -> Self {
-        self.response_signing = ResponseSigning::AllowUnsignedEncryptedCbcForCompatibility;
+    /// This relaxes SAML V2.0 Approved Errata 05 E93, which recommends signing
+    /// the Response so the ciphertext is integrity protected. It is not the
+    /// Compatibility preset and it does not preserve a samlify-port setting.
+    /// By default, typed IdPs sign such Responses automatically.
+    pub fn allow_unsigned_encrypted_cbc(mut self) -> Self {
+        self.response_signing = ResponseSigning::AllowUnsignedEncryptedCbc;
         self
     }
 
@@ -163,7 +164,7 @@ impl RespondSso {
     /// An unsolicited response omits `InResponseTo` on the response and on
     /// bearer subject confirmation data. CBC response signing is unchanged: it
     /// stays on unless
-    /// [`Self::allow_unsigned_encrypted_cbc_for_compatibility`] is selected.
+    /// [`Self::allow_unsigned_encrypted_cbc`] is selected.
     pub fn apply_web_browser_sso_generation_rules(mut self) -> Self {
         self.web_browser_sso_producer = WebBrowserSsoProducer::Follow;
         self
@@ -189,7 +190,7 @@ impl RespondSso {
                     && crate::constants::is_xml_encryption_cbc_algorithm(data_encryption_algorithm)
             }
             ResponseSigning::Always => true,
-            ResponseSigning::AllowUnsignedEncryptedCbcForCompatibility => false,
+            ResponseSigning::AllowUnsignedEncryptedCbc => false,
         }
     }
 }
@@ -201,18 +202,19 @@ pub enum LogoutSigning {
     FollowLocalPolicy,
     /// Sign this logout message.
     Sign,
-    /// Send unsigned logout for an explicit compatibility exception.
+    /// Send unsigned logout, preserving the samlify-port choice.
     DoNotSignForCompatibility,
 }
 
 /// Whether typed Single Logout generation follows producer rules.
 ///
-/// [`Self::Compatibility`] is the historical typed output. [`Self::Follow`]
-/// applies the producer obligations recorded for this flow. It is not a
-/// validation preset and it does not publish `recommended()`.
+/// [`Self::Compatibility`] is the samlify-port output kept for a caller
+/// leaving the raw API. [`Self::Follow`] applies the producer obligations
+/// recorded for this flow. It is not a validation preset and it does not
+/// publish `recommended()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum SingleLogoutGeneration {
-    /// Keep today's typed generation.
+    /// Keep the samlify-port generation.
     #[default]
     Compatibility,
     /// Emit the producer obligations for this flow.

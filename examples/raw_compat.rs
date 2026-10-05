@@ -1,8 +1,10 @@
-//! Low-level raw compatibility SSO example.
+//! Low-level samlify-port SSO example on the raw API.
 //!
-//! New browser integrations should start with `examples/sso.rs`. This example
-//! is for callers that need direct access to raw `ServiceProvider`,
-//! `IdentityProvider`, `HttpRequest`, or `FlowResult` values.
+//! `SpValidationPolicy::compatibility` is the typed name for keeping this
+//! behavior on the builders. New browser integrations should start with
+//! `examples/sso.rs`. This example is for callers that need direct access to
+//! raw `ServiceProvider`, `IdentityProvider`, `HttpRequest`, or `FlowResult`
+//! values.
 
 #[cfg(any(
     feature = "crypto-rustcrypto",
@@ -77,7 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &request.id,
     )?;
     println!(
-        "raw compatibility authenticated = {:?}",
+        "samlify-port raw authenticated = {:?}",
         result.extract.get_str("nameID")
     );
     Ok(())

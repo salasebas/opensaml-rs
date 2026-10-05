@@ -123,7 +123,8 @@ metadata using the inbound binding. A present `Destination` must equal that
 endpoint, and a mismatch is rejected even when the message is unsigned. Once
 the HTTP binding or root XML signature authenticates the message,
 `Destination` is also required. An absent `Destination` on an unauthenticated
-message is accepted only under `SpValidationPolicy::compatibility()` or
+message is accepted only under the samlify-port preset
+`SpValidationPolicy::compatibility()` or
 `IdpValidationPolicy::compatibility()`, and only for a binding that permits
 unsigned logout input. These checks run before replay state is written. Raw
 logout parsers cannot perform the same endpoint comparison because they are
@@ -215,7 +216,7 @@ Rules:
 - Check inbound binding against the pending expected logout binding.
 - Match RelayState exactly: absent, present empty, and present value are
   distinct. If pending expects absent and the inbound message carries
-  RelayState, fail unless an explicit compatibility policy permits it.
+  RelayState, fail unless the samlify-port Compatibility preset permits it.
 - Use `SamlValidationContext` for inbound signed, timed, or replay-sensitive
   logout response validation.
 - Apply the same binding-aware local `Destination` validation as

@@ -175,7 +175,7 @@ pub trait ReplayCache {
 /// Replay behavior for typed inbound browser flows.
 #[non_exhaustive]
 pub enum ReplayPolicy<'a> {
-    /// Skip replay checks for raw compatibility migrations.
+    /// Skip replay checks. The raw API and the samlify port have no replay cache.
     DisabledForCompatibility,
     /// Require the caller to provide replay storage.
     RequireCache(&'a mut dyn ReplayCache),

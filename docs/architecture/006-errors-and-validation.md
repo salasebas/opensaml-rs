@@ -123,7 +123,7 @@ pub trait ReplayCache {
 }
 ```
 
-Raw compatibility can keep today's hidden process-clock behavior. Typed browser
+The raw samlify-port API can keep today's hidden process-clock behavior. Typed browser
 flows should not. Use `SamlValidationContext` in `finish_sso`,
 `accept_unsolicited_sso`, `receive_sso`, `receive_slo`, `finish_slo`, and any
 other inbound signed, timed, or replay-sensitive browser-message validation.
@@ -138,8 +138,9 @@ LogoutRequest time errors preserve the standards/policy boundary:
 - an effective deadline that cannot be represented by the caller's
   `SystemTime` replay cache is `TimeWindowInvalid` for `ReplayExpiration`.
 
-Replay-disabled compatibility skips storage only. It does not disable the
-LogoutRequest expiration policy.
+`ReplayPolicy::DisabledForCompatibility` preserves the raw API, which has no
+replay cache. It skips storage only. It does not disable the LogoutRequest
+expiration policy.
 
 RelayState comparison is exact tri-state:
 
@@ -152,8 +153,8 @@ pub enum RelayStateParam {
 ```
 
 For SP-initiated SSO/SLO, if pending state expects `Absent` and the inbound
-message carries any RelayState, fail with `RelayStateMismatch` unless an
-explicit compatibility policy permits the extra parameter.
+message carries any RelayState, fail with `RelayStateMismatch` unless the
+samlify-port Compatibility preset permits the extra parameter.
 
 ## Validation Order For SP SSO Response
 

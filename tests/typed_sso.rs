@@ -1,3 +1,6 @@
+//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
+//! `RespondSso::allow_unsigned_encrypted_cbc` relaxes Errata 05 E93 and is not that preset.
+
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
@@ -997,7 +1000,7 @@ fn typed_strict_sp_rejects_explicit_unsigned_encrypted_cbc_compatibility(
         &sp_descriptor,
         &received,
         subject(),
-        RespondSso::post().allow_unsigned_encrypted_cbc_for_compatibility(),
+        RespondSso::post().allow_unsigned_encrypted_cbc(),
     )?;
 
     match sp.finish_sso(
@@ -1956,7 +1959,7 @@ fn recommended_sso_accept_requires_issue_instant_and_accepts_leap_seconds(
 fn cbc_relaxation_does_not_disable_other_accept_rules() -> Result<(), Box<dyn std::error::Error>> {
     let exchange = recommended_post_exchange()?;
     let relaxed = Saml::sp(sp_with_validation(SpValidationPolicy {
-        responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility,
+        responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbc,
         ..recommended_sso_accept_validation()
     })?)?;
     let unsigned =
@@ -2010,7 +2013,7 @@ fn recommended_sso_accept_rejects_unsigned_cbc_response_unless_relaxed(
         recommended_sso_accept_validation(),
     )?)?;
     let relaxed = Saml::sp(sp_with_validation_and_xml(SpValidationPolicy {
-        responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility,
+        responses: ResponseSignaturePolicy::AllowUnsignedEncryptedCbc,
         ..recommended_sso_accept_validation()
     })?)?;
     let assertion_signed = Saml::sp(sp_with_validation_and_xml(SpValidationPolicy {
@@ -2031,7 +2034,7 @@ fn recommended_sso_accept_rejects_unsigned_cbc_response_unless_relaxed(
         &assertion_signed_descriptor,
         &received,
         subject(),
-        RespondSso::post().allow_unsigned_encrypted_cbc_for_compatibility(),
+        RespondSso::post().allow_unsigned_encrypted_cbc(),
     )?;
     let fields = post_fields(&response)?;
 

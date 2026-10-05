@@ -15,11 +15,12 @@ used when it narrows Core for this flow.
 `StartSlo::apply_single_logout_generation_rules` and
 `RespondSlo::apply_single_logout_generation_rules` select the producer rules
 below. The constructors `redirect`, `post`, and `simple_sign` leave that
-selection off, which is the compatibility generation behavior.
+selection off, which is the samlify-port generation kept for callers leaving
+the raw API.
 
 `finish_slo` reads `LogoutPolicy::responses`. The accept combination is
 `LogoutSignaturePolicy::RequireSigned` for both `requests` and `responses`.
-`LogoutPolicy::compatibility` remains the unsigned hatch.
+`LogoutPolicy::compatibility` remains the samlify-port unsigned hatch.
 `LogoutPolicy::strict` is unchanged.
 
 ## LogoutRequest from a session participant
@@ -32,8 +33,8 @@ selection off, which is the compatibility generation behavior.
 | `ID`, `Version` `2.0`, and UTC `IssueInstant` are present | Session participant | Generate LogoutRequest | Mandatory. Protocol schema `RequestAbstractType`; Core §1.3.3 |
 | Do not generate a leap-second time | Session participant | Generate any instant | Mandatory. Core §1.3.3 `MUST NOT` generate leap seconds. Receivers are not required to reject them |
 | Identify the principal with `NameID` | Session participant | Generate LogoutRequest | Mandatory. Profiles §4.4.4.1 and the schema's required identifier choice. Typed generation emits `NameID` |
-| Include at least one `SessionIndex` | Session participant | Generate LogoutRequest | Mandatory. Profiles §4.4.4.1 as replaced by Errata 05 E38. Enforced when producer rules are selected. Compatibility generation may omit it |
-| Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Session participant | Generate LogoutRequest | Mandatory for these bindings. Profiles §4.4.3.1 requires a signature for HTTP POST and HTTP Redirect. §4.4.4.1 requires the requester to authenticate by signing or a binding-specific mechanism; SimpleSign's mechanism is its signature. Core §3.7.1's general `SHOULD` is not applied on top of that profile rule. `LogoutSigning::DoNotSignForCompatibility` is rejected when producer rules are selected. Compatibility generation may still omit the signature. Requiring it on generation does not add a receiver rule; the recipient's duty to authenticate is the separate accept rule below |
+| Include at least one `SessionIndex` | Session participant | Generate LogoutRequest | Mandatory. Profiles §4.4.4.1 as replaced by Errata 05 E38. Enforced when producer rules are selected. Samlify-port generation may omit it |
+| Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Session participant | Generate LogoutRequest | Mandatory for these bindings. Profiles §4.4.3.1 requires a signature for HTTP POST and HTTP Redirect. §4.4.4.1 requires the requester to authenticate by signing or a binding-specific mechanism; SimpleSign's mechanism is its signature. Core §3.7.1's general `SHOULD` is not applied on top of that profile rule. `LogoutSigning::DoNotSignForCompatibility` is rejected when producer rules are selected. Samlify-port generation may still omit the signature. Requiring it on generation does not add a receiver rule; the recipient's duty to authenticate is the separate accept rule below |
 | Send the user agent to an `https` `SingleLogoutService` | Session participant | Generate LogoutRequest | Recommendation. Profiles §4.4.3.1 recommends SSL or TLS for the HTTP exchange. saml-rs follows it by requiring an `https` location. `StartSlo::allow_http_single_logout` relaxes that recommendation alone. A recipient does not reject `http` in `Destination` because of it |
 | `NotOnOrAfter` | Session participant | Generate LogoutRequest | Optional. The schema marks it optional, and Core §3.7.3.2 assigns the duty to set it to the session authority only. Typed session-participant generation does not synthesize it |
 | `Reason` | Session participant | Generate LogoutRequest | Optional. Core §3.7.3. Default generation omits it. Errata 05 E10 requires a URI when a producer includes the attribute. This crate does not emit `Reason` and does not add a receiver rejection for its form |
@@ -65,7 +66,7 @@ other participants, so those rules are not fields of this flow.
 | --- | --- | --- | --- |
 | Answer a `LogoutRequest` with a `LogoutResponse` | Responder | Generate LogoutResponse | Mandatory. Core §3.7.2. `respond_slo` is that answer |
 | `Issuer` is present and omits `Format` or sets it to `entity` | Responder | Generate LogoutResponse | Mandatory. Profiles §4.4.4.2. Typed response generation already rejects a message that breaks this |
-| Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Responder | Generate LogoutResponse | Mandatory for these bindings. Profiles §4.4.3.4 requires a signature when the response returns to the identity provider over HTTP POST or Redirect. §4.4.4.2 requires the responder to authenticate. Typed `respond_slo` always signs. There is no off switch, including under compatibility |
+| Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Responder | Generate LogoutResponse | Mandatory for these bindings. Profiles §4.4.3.4 requires a signature when the response returns to the identity provider over HTTP POST or Redirect. §4.4.4.2 requires the responder to authenticate. Typed `respond_slo` always signs. There is no off switch, including under the samlify-port preset |
 | Deliver a service-provider response to an `https` `SingleLogoutService` | Session participant | Generate LogoutResponse | Recommendation. Profiles §4.4.3.4 recommends SSL or TLS for that HTTP exchange. Starts enabled when the service provider selects producer rules. `RespondSlo::allow_http_single_logout` relaxes it alone and leaves the response signed. The identity provider's response is §4.4.3.5, which does not repeat the recommendation, so `Saml<Idp>::respond_slo` does not gain the check |
 | Do not generate a leap-second time | Responder | Generate any instant | Mandatory. Core §1.3.3 |
 
@@ -73,8 +74,8 @@ other participants, so those rules are not fields of this flow.
 
 | Rule | Actor | Direction | Level |
 | --- | --- | --- | --- |
-| Authenticate a `LogoutRequest` by requiring its signature | Session participant or session authority receiving the request | Inbound `receive_slo` | Mandatory for HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign. Core §3.7.3.1 and §3.7.3.2 require the recipient to authenticate the sender. Profiles §4.4.3.1 and §4.4.4.1 require the signature for these bindings. Accept combination: `LogoutPolicy.requests = RequireSigned`. `AllowUnsignedForCompatibility` is the compatibility hatch |
-| Authenticate a `LogoutResponse` by requiring its signature | Original requester finishing logout | Inbound `finish_slo` | Mandatory for those bindings. Profiles §4.4.3.4 and §4.4.4.2. Accept combination: `LogoutPolicy.responses = RequireSigned`. The unsigned variant is the compatibility hatch, not a recommendation relaxation |
+| Authenticate a `LogoutRequest` by requiring its signature | Session participant or session authority receiving the request | Inbound `receive_slo` | Mandatory for HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign. Core §3.7.3.1 and §3.7.3.2 require the recipient to authenticate the sender. Profiles §4.4.3.1 and §4.4.4.1 require the signature for these bindings. Accept combination: `LogoutPolicy.requests = RequireSigned`. `AllowUnsignedForCompatibility` is the samlify-port hatch |
+| Authenticate a `LogoutResponse` by requiring its signature | Original requester finishing logout | Inbound `finish_slo` | Mandatory for those bindings. Profiles §4.4.3.4 and §4.4.4.2. Accept combination: `LogoutPolicy.responses = RequireSigned`. The unsigned variant is the samlify-port hatch, not a recommendation relaxation |
 | UTC `IssueInstant` | Logout recipient | Inbound | Mandatory. No off switch. Inbound leap-second values stay accepted |
 | A present `Destination` matches the recipient endpoint, and a signed message carries `Destination` | Logout recipient | Inbound | Mandatory. Core §3.2.1 and §3.2.2; Bindings §3.4.5.2 and §3.5.5.2; SimpleSign §2.4 when the message is signed |
 | Typed `InResponseTo` matches the pending `LogoutRequest` | Original requester | Inbound `finish_slo` | Mandatory for this typed exchange. Core §3.2.2 |

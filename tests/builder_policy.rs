@@ -1,3 +1,5 @@
+//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
+
 use std::{str::FromStr, time::Duration};
 
 use saml_rs::{
@@ -214,7 +216,7 @@ fn compatibility_policy_names_unsigned_choices_explicitly() {
     );
     assert_eq!(
         sp.responses,
-        ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility
+        ResponseSignaturePolicy::AllowUnsignedEncryptedCbc
     );
     assert_eq!(
         sp.authn_requests,
@@ -249,7 +251,7 @@ fn public_validation_defaults_remain_compatibility() {
     );
     assert_eq!(
         ResponseSignaturePolicy::default(),
-        ResponseSignaturePolicy::AllowUnsignedEncryptedCbcForCompatibility
+        ResponseSignaturePolicy::AllowUnsignedEncryptedCbc
     );
     assert_eq!(
         AuthnRequestSigningPolicy::default(),
