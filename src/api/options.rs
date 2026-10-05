@@ -232,7 +232,7 @@ enum ParticipantLogoutTransport {
     #[default]
     RequireHttps,
     /// Allow an `http` `SingleLogoutService`.
-    AllowCleartextForCompatibility,
+    AllowHttp,
 }
 
 /// Producer-rule selection shared by logout requests and responses.
@@ -248,8 +248,8 @@ impl SingleLogoutRules {
         self
     }
 
-    fn allow_cleartext(mut self) -> Self {
-        self.transport = ParticipantLogoutTransport::AllowCleartextForCompatibility;
+    fn allow_http(mut self) -> Self {
+        self.transport = ParticipantLogoutTransport::AllowHttp;
         self
     }
 
@@ -257,11 +257,8 @@ impl SingleLogoutRules {
         self.generation.follows()
     }
 
-    fn allows_cleartext(self) -> bool {
-        matches!(
-            self.transport,
-            ParticipantLogoutTransport::AllowCleartextForCompatibility
-        )
+    fn allows_http(self) -> bool {
+        matches!(self.transport, ParticipantLogoutTransport::AllowHttp)
     }
 }
 
@@ -320,7 +317,7 @@ impl StartSlo {
     /// A service provider, acting as a session participant, includes at least
     /// one `SessionIndex` and sends the user agent to an `https`
     /// `SingleLogoutService` unless
-    /// [`Self::allow_cleartext_single_logout_for_compatibility`] is selected.
+    /// [`Self::allow_http_single_logout`] is selected.
     /// An identity provider, acting as a session authority, still emits
     /// `NotOnOrAfter` and may omit `SessionIndex`. The `https` recommendation
     /// is not applied to that role.
@@ -335,8 +332,8 @@ impl StartSlo {
     /// This relaxes the Single Logout recommendation to protect the HTTP
     /// exchange with TLS. It does not remove `SessionIndex`, the request
     /// signature, or session-authority `NotOnOrAfter`.
-    pub fn allow_cleartext_single_logout_for_compatibility(mut self) -> Self {
-        self.rules = self.rules.allow_cleartext();
+    pub fn allow_http_single_logout(mut self) -> Self {
+        self.rules = self.rules.allow_http();
         self
     }
 
@@ -344,8 +341,8 @@ impl StartSlo {
         self.rules.follows()
     }
 
-    pub(super) fn allows_cleartext(&self) -> bool {
-        self.rules.allows_cleartext()
+    pub(super) fn allows_http(&self) -> bool {
+        self.rules.allows_http()
     }
 }
 
@@ -396,7 +393,7 @@ impl RespondSlo {
     /// off. Typed responses are already signed. When a service provider
     /// selects these rules, the response is delivered to an `https`
     /// `SingleLogoutService` unless
-    /// [`Self::allow_cleartext_single_logout_for_compatibility`] is selected.
+    /// [`Self::allow_http_single_logout`] is selected.
     /// An identity provider response does not gain that transport check.
     pub fn apply_single_logout_generation_rules(mut self) -> Self {
         self.rules = self.rules.apply_generation_rules();
@@ -408,8 +405,8 @@ impl RespondSlo {
     ///
     /// This relaxes the Single Logout recommendation to protect that HTTP
     /// exchange with TLS. The response remains signed.
-    pub fn allow_cleartext_single_logout_for_compatibility(mut self) -> Self {
-        self.rules = self.rules.allow_cleartext();
+    pub fn allow_http_single_logout(mut self) -> Self {
+        self.rules = self.rules.allow_http();
         self
     }
 
@@ -417,7 +414,7 @@ impl RespondSlo {
         self.rules.follows()
     }
 
-    pub(super) fn allows_cleartext(&self) -> bool {
-        self.rules.allows_cleartext()
+    pub(super) fn allows_http(&self) -> bool {
+        self.rules.allows_http()
     }
 }

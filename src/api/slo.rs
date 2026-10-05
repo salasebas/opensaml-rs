@@ -31,7 +31,7 @@ impl Saml<Sp> {
     /// selected binding is unsupported, or logout request creation fails.
     /// [`StartSlo::apply_single_logout_generation_rules`] also rejects a
     /// missing `SessionIndex`, an `http` peer endpoint unless
-    /// [`StartSlo::allow_cleartext_single_logout_for_compatibility`] is
+    /// [`StartSlo::allow_http_single_logout`] is
     /// selected, and [`LogoutSigning::DoNotSignForCompatibility`].
     ///
     /// # Examples
@@ -104,7 +104,7 @@ impl Saml<Sp> {
     /// selected binding is unsupported, or logout response creation fails.
     /// [`RespondSlo::apply_single_logout_generation_rules`] also rejects an
     /// `http` peer endpoint unless
-    /// [`RespondSlo::allow_cleartext_single_logout_for_compatibility`] is
+    /// [`RespondSlo::allow_http_single_logout`] is
     /// selected.
     pub fn respond_slo(
         &self,
@@ -431,7 +431,7 @@ fn start_slo_impl(
             peer_metadata,
             options.binding.as_binding(),
             follows_rules,
-            options.allows_cleartext(),
+            options.allows_http(),
         )?;
     }
     let (issue_instant, not_on_or_after, request_validation) = match role {
@@ -538,7 +538,7 @@ fn respond_slo_impl(
             peer_metadata,
             options.binding.as_binding(),
             options.follows_generation_rules(),
-            options.allows_cleartext(),
+            options.allows_http(),
         )?;
     }
     let relay_state = options
@@ -604,9 +604,9 @@ fn enforce_participant_https(
     peer_metadata: &Metadata,
     binding: Binding,
     follows_rules: bool,
-    allow_cleartext: bool,
+    allow_http: bool,
 ) -> Result<(), SamlError> {
-    if !follows_rules || allow_cleartext {
+    if !follows_rules || allow_http {
         return Ok(());
     }
     let destination = peer_metadata
@@ -625,7 +625,7 @@ fn require_https_logout_endpoint(endpoint: &str) -> Result<(), SamlError> {
         return Ok(());
     }
     Err(Error::ProtocolProfile(
-        "Single Logout sends the user agent to an https SingleLogoutService unless allow_cleartext_single_logout_for_compatibility is selected".into(),
+        "Single Logout sends the user agent to an https SingleLogoutService unless allow_http_single_logout is selected".into(),
     ))
 }
 

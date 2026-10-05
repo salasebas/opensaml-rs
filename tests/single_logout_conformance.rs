@@ -209,7 +209,7 @@ fn compatibility_session_participant_logout_stays_unsigned_without_session_index
 }
 
 #[test]
-fn cleartext_logout_request_relaxes_transport_without_dropping_the_other_rules(
+fn http_logout_request_relaxes_transport_without_dropping_the_other_rules(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sp = sp(SP_SLO_HTTPS, SpValidationPolicy::compatibility())?;
     let idp = idp(IDP_SLO_HTTP, idp_with_slo_accept())?;
@@ -231,7 +231,7 @@ fn cleartext_logout_request_relaxes_transport_without_dropping_the_other_rules(
         subject_without_session(),
         StartSlo::post()
             .apply_single_logout_generation_rules()
-            .allow_cleartext_single_logout_for_compatibility(),
+            .allow_http_single_logout(),
     ) {
         Err(SamlError::ProtocolProfile(message)) if message.contains("SessionIndex") => {}
         other => {
@@ -244,7 +244,7 @@ fn cleartext_logout_request_relaxes_transport_without_dropping_the_other_rules(
         subject_with_session()?,
         StartSlo::post()
             .apply_single_logout_generation_rules()
-            .allow_cleartext_single_logout_for_compatibility()
+            .allow_http_single_logout()
             .signing(LogoutSigning::DoNotSignForCompatibility),
     ) {
         Err(SamlError::ProtocolProfile(message)) if message.contains("signature") => {}
@@ -258,7 +258,7 @@ fn cleartext_logout_request_relaxes_transport_without_dropping_the_other_rules(
         subject_with_session()?,
         StartSlo::post()
             .apply_single_logout_generation_rules()
-            .allow_cleartext_single_logout_for_compatibility(),
+            .allow_http_single_logout(),
     )?;
     let xml = post_xml(&started.outbound)?;
     assert!(xml.contains("ds:Signature"));
@@ -382,7 +382,7 @@ fn session_participant_response_requires_https_unless_that_recommendation_is_rel
         &received,
         RespondSlo::post()
             .apply_single_logout_generation_rules()
-            .allow_cleartext_single_logout_for_compatibility(),
+            .allow_http_single_logout(),
     )?;
     let xml = post_xml(&response)?;
     assert!(xml.contains("ds:Signature"));
