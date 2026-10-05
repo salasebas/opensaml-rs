@@ -254,11 +254,16 @@ pub struct FlowResult {
 pub(crate) struct FlowResultWithSignatureEvidence {
     flow_result: FlowResult,
     verified_xml_signatures: Vec<VerifiedXmlSignatureEvidence>,
+    message_authenticated: bool,
 }
 
 impl FlowResultWithSignatureEvidence {
     pub(crate) fn into_parts(self) -> (FlowResult, Vec<VerifiedXmlSignatureEvidence>) {
         (self.flow_result, self.verified_xml_signatures)
+    }
+
+    pub(crate) fn message_authenticated(&self) -> bool {
+        self.message_authenticated
     }
 
     fn into_flow_result(self) -> FlowResult {
@@ -1114,24 +1119,31 @@ fn signature_is_present(
     xml: &str,
     limits: XmlLimits,
 ) -> Result<bool, SamlError> {
-    let detached = request
-        .query
-        .iter()
-        .chain(request.body.iter())
-        .any(|(name, _)| name == "Signature");
+    let detached = match binding {
+        Binding::Redirect => request.query.iter().any(|(name, _)| name == "Signature"),
+        Binding::SimpleSign => request.body.iter().any(|(name, _)| name == "Signature"),
+        Binding::Post | Binding::Artifact => false,
+    };
     if detached {
         return Ok(true);
     }
-    match binding {
-        Binding::Redirect | Binding::Post | Binding::SimpleSign | Binding::Artifact => {
-            let document = crate::xml::dom::parse_with_limits(xml, limits)?;
-            Ok(node_contains_signature(&document.root))
-        }
-    }
+    let document = crate::xml::dom::parse_with_limits(xml, limits)?;
+    Ok(protocol_signature_candidate(&document.root))
 }
 
-fn node_contains_signature(node: &crate::xml::dom::Node) -> bool {
-    node.local_name == "Signature" || node.children.iter().any(node_contains_signature)
+/// Same placement as embedded-signature verification: a `Signature` child of
+/// the protocol root, or of an `Assertion` child of that root.
+fn protocol_signature_candidate(root: &crate::xml::dom::Node) -> bool {
+    root.children
+        .iter()
+        .any(|child| child.local_name == "Signature")
+        || root.children.iter().any(|child| {
+            child.local_name == "Assertion"
+                && child
+                    .children
+                    .iter()
+                    .any(|nested| nested.local_name == "Signature")
+        })
 }
 
 fn flow_inner(
@@ -1242,10 +1254,26 @@ fn flow_inner(
             sig_alg,
         },
         verified_xml_signatures,
+        message_authenticated,
     })
 }
 
 /// Run the inbound flow described by `opts` against `request`.
+pub(crate) fn flow_with_authentication(
+    opts: &FlowOptions<'_>,
+    request: &HttpRequest,
+) -> Result<(FlowResult, bool), SamlError> {
+    let result = flow_inner(
+        opts,
+        request,
+        None,
+        AssertionSignatureRequirement::Compatible,
+        ResponseSignatureRequirement::Optional,
+    )?;
+    let message_authenticated = result.message_authenticated();
+    Ok((result.into_flow_result(), message_authenticated))
+}
+
 pub fn flow(opts: &FlowOptions<'_>, request: &HttpRequest) -> Result<FlowResult, SamlError> {
     Ok(flow_inner(
         opts,

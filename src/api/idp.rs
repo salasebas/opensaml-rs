@@ -70,7 +70,7 @@ impl Saml<Idp> {
         let binding = SsoRequestBinding::try_from(input_binding(&input))?;
         let raw_sp = raw_sp_descriptor(sp)?;
         let request = HttpRequest::try_from(input)?;
-        let flow = self.raw_identity_provider().parse_login_request_at(
+        let (flow, message_authenticated) = self.raw_identity_provider().parse_login_request_at(
             &raw_sp,
             binding.as_binding(),
             &request,
@@ -78,16 +78,22 @@ impl Saml<Idp> {
             validation.clock_skew().as_millis(),
         )?;
         let authn = AuthnRequest::try_from(flow)?;
-        if let Some(destination) = authn.destination() {
+        let verify_present_signature = self
+            .raw_identity_provider()
+            .setting
+            .verify_authn_request_signature_if_present;
+        if authn.destination().is_some() || (message_authenticated && verify_present_signature) {
             let expected = self
                 .raw_identity_provider()
                 .metadata
                 .get_single_sign_on_service(binding.as_binding())
                 .ok_or_else(|| Error::MissingMetadata("SingleSignOnService".into()))?;
-            if destination.as_str() != expected {
+            if authn.destination().map(|destination| destination.as_str())
+                != Some(expected.as_str())
+            {
                 return Err(Error::destination_mismatch(
                     &expected,
-                    Some(destination.as_str()),
+                    authn.destination().map(|destination| destination.as_str()),
                 ));
             }
         }
