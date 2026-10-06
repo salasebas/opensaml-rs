@@ -1,11 +1,12 @@
-# Standards Conformance Policy
+# Standards conformance
 
-This document defines how `saml-rs` interprets and implements requirements from
-the OASIS SAML specifications. It is the maintainer policy for new protocol
-behavior, validation, rendering, metadata, bindings, profiles, and
-compatibility work.
+This note explains how `saml-rs` interprets requirements from the OASIS SAML
+specifications. It covers new protocol behaviour, validation, rendering,
+metadata, bindings, profiles, and compatibility work. The steps for reviewing
+a change are in
+[How to review a SAML change](how-to-review-saml-behaviour.md).
 
-The goal is precise conformance without inventing protocol requirements:
+The aim is precise conformance without inventing protocol requirements:
 
 - mandatory requirements are always implemented for the applicable scope;
 - recommendations are enabled by default and may be relaxed only through an
@@ -13,16 +14,16 @@ The goal is precise conformance without inventing protocol requirements:
 - optional capabilities are exposed intentionally;
 - requirements aimed at one actor are not silently converted into requirements
   for another actor;
-- behavior not required by the applicable standards is not presented as OASIS
+- behaviour not required by the applicable standards is not presented as OASIS
   validation.
 
-## Normative Sources
+## Normative sources
 
-Use the exact approved specification, schema, and errata that govern the
-feature under review. The links below are a navigation aid, not a whitelist,
+The source for a feature is the exact approved specification, schema, and
+errata that govern it. The links below are a navigation aid, not a whitelist,
 an exhaustive list, or a statement of the crate's current feature support.
 
-Use these as the canonical catalogs for the SAML V2.0 specification set:
+The canonical catalogs for the SAML V2.0 specification set are:
 
 - [SAML V2.0 Conformance Requirements](https://docs.oasis-open.org/security/saml/v2.0/saml-conformance-2.0-os.pdf),
   which identifies the documents and schemas that comprise SAML V2.0 and
@@ -44,9 +45,9 @@ The base specification set commonly relevant to implementation work includes:
 
 An applicable feature may also be governed by an approved OASIS SAML extension
 or later OASIS specification and by dependent standards such as XML Schema,
-XML Signature, XML Encryption, HTTP, URI, or TLS. Use each source only within
-its scope, record the exact version and status, and do not treat a draft as the
-default SAML requirement. A draft may be targeted only by an explicitly
+XML Signature, XML Encryption, HTTP, URI, or TLS. Each source applies only
+within its scope, and the record names the exact version and status. A draft
+is not the default SAML requirement. A draft is a target only for an explicitly
 experimental feature.
 
 Requirement-language and dependent-standard references include:
@@ -54,16 +55,6 @@ Requirement-language and dependent-standard references include:
 - [RFC 2119 requirement levels](https://www.rfc-editor.org/rfc/rfc2119.html)
 - [RFC 8174 capitalization clarification](https://www.rfc-editor.org/rfc/rfc8174.html)
 - [W3C XML Schema](https://www.w3.org/TR/xmlschema-1/)
-
-Before implementing or reviewing SAML behavior:
-
-1. Identify the exact normative document, section, and schema declaration.
-2. Check applicable approved errata.
-3. Check whether a binding or profile narrows or adds requirements.
-4. Prefer final standards over drafts unless the feature explicitly targets a
-   draft or extension.
-5. Record enough provenance in the issue, PR, test, or code comment for a
-   future maintainer to verify the interpretation.
 
 OASIS SAML Core uses the requirement language defined by RFC 2119. Its schema
 documents take precedence over schema listings in prose when they disagree,
@@ -111,12 +102,12 @@ Within each row, the terms have the same normative strength:
 
 - `MUST`, `REQUIRED`, and `SHALL` are absolute requirements.
 - `MUST NOT` and `SHALL NOT` are absolute prohibitions.
-- `SHOULD` and `RECOMMENDED` describe the normal behavior. A deviation requires
+- `SHOULD` and `RECOMMENDED` describe the normal behaviour. A deviation requires
   a valid reason and an understanding of its interoperability and security
   consequences.
-- `SHOULD NOT` and `NOT RECOMMENDED` describe behavior that is normally
+- `SHOULD NOT` and `NOT RECOMMENDED` describe behaviour that is normally
   avoided. An exception likewise requires explicit justification.
-- `MAY` and `OPTIONAL` describe behavior or capabilities that are truly
+- `MAY` and `OPTIONAL` describe behaviour or capabilities that are truly
   optional.
 
 OASIS also uses labels such as `[Required]` and `[Optional]` when describing
@@ -128,14 +119,15 @@ Only uppercase requirement keywords carry the special RFC meaning. Normative
 schemas and prose can still impose requirements without using one of those
 keywords, so classification must consider the complete applicable text.
 
-## Interpret The Rule Before Implementing It
+## What a rule actually obligates
 
-Never classify a rule from its keyword alone. Determine all of the following:
+A keyword is not enough to classify a rule. Classification names all of the
+following:
 
 - **Actor:** producer, sender, receiver, relying party, identity provider,
   service provider, metadata publisher, metadata consumer, or application.
 - **Direction:** outbound generation, inbound acceptance, inbound validation,
-  or local API behavior.
+  or local API behaviour.
 - **Condition:** whether the rule applies only when a field, signature,
   binding, feature, or prior condition is present.
 - **Scope:** Core, a particular profile, binding, role, message type, or
@@ -145,8 +137,8 @@ Never classify a rule from its keyword alone. Determine all of the following:
 - **Required outcome:** generate, accept, process, verify, ignore, reject, or
   expose a value.
 
-A requirement for one actor does not automatically create a rejection rule for
-another actor. In particular:
+A requirement for one actor does not create a rejection rule for another
+actor. In particular:
 
 - `MUST generate` does not imply that a receiver `MUST reject` every other
   representation.
@@ -155,89 +147,93 @@ another actor. In particular:
 - `SHOULD` for a producer does not imply that a receiver should reject a
   producer that deviates.
 
-Add inbound rejection only when the applicable schema, Core processing rule,
-binding, profile, conformance requirement, or another normative source makes
-the input invalid or requires the receiver to reject it.
+Inbound rejection belongs in the library only when the applicable schema, Core
+processing rule, binding, profile, conformance requirement, or another
+normative source makes the input invalid or requires the receiver to reject
+it.
 
 Conditional requirements remain mandatory when their condition is true. For
 example, an element may be optional, while a receiver `MUST` perform a
 particular check whenever that element is present.
 
-## Library Policy By Requirement Level
+## What each requirement level means here
 
-### Mandatory Conformance
+### Mandatory conformance
 
-For applicable `MUST`, `REQUIRED`, `SHALL`, `MUST NOT`, and `SHALL NOT`
-requirements:
+An applicable `MUST`, `REQUIRED`, `SHALL`, `MUST NOT`, or `SHALL NOT`
+requirement has this shape in the library:
 
-- implement the requirement in every API that claims the applicable SAML
-  behavior;
-- do not provide a policy that disables it in a conformant typed flow;
-- enforce required XML structure, datatype, namespace, and cardinality rules
-  that are within the parser or validator's declared scope;
-- fail closed with an explicit `SamlError` when a mandatory inbound validation
-  rule requires rejection;
-- test the narrowest positive and negative cases that prove the requirement;
-- do not broaden the rule beyond its actor, condition, or profile.
+- every API that claims the applicable SAML behaviour implements it;
+- a conformant typed flow has no policy that disables it;
+- required XML structure, datatype, namespace, and cardinality rules inside
+  the parser or validator's declared scope are enforced;
+- a mandatory inbound validation rule that requires rejection fails closed
+  with an explicit `SamlError`;
+- the narrowest positive and negative tests prove the requirement;
+- the rule stays inside its actor, condition, and profile.
 
-Raw compatibility APIs may expose lower-level data and unsupported profiles,
-but they must not silently label non-conformant data as validated. A raw escape
-hatch is not permission to weaken the mandatory guarantees of a typed result.
+Raw compatibility APIs can expose lower-level data and unsupported profiles.
+They do not label non-conformant data as validated. A raw escape hatch does
+not weaken the mandatory guarantees of a typed result.
 
-### Recommended Conformance
+### Recommended conformance
 
-For applicable `SHOULD`, `RECOMMENDED`, `SHOULD NOT`, and `NOT RECOMMENDED`
-requirements:
+An applicable `SHOULD`, `RECOMMENDED`, `SHOULD NOT`, or `NOT RECOMMENDED`
+requirement has this shape:
 
-- follow the recommendation by default;
-- permit a deviation only through an explicit, typed, and narrowly named
-  policy or builder option;
-- avoid generic `strict` booleans that combine unrelated recommendations;
-- document the exact recommendation being relaxed and the interoperability or
-  security consequences;
-- apply producer recommendations to generated output without automatically
-  turning them into inbound rejection rules;
-- keep the conformant default visible in API documentation and tests.
+- the recommendation is the default;
+- a deviation exists only as an explicit, typed, narrowly named policy or
+  builder option;
+- unrelated recommendations stay separate, rather than sharing one generic
+  `strict` boolean;
+- the relaxed recommendation, and its interoperability or security
+  consequences, are named;
+- a producer recommendation changes generated output and does not by itself
+  become an inbound rejection;
+- the conformant default is visible in API documentation and tests.
 
 Recommended is the preset for claimed features. It is not an implementation
 of SAML V2.0 as a whole. Compatibility is the legacy permissive preset: the
-samlify-port behavior kept for callers leaving the raw API. It is not an
+samlify-port behaviour kept for callers leaving the raw API. It is not an
 alternate interpretation of OASIS, and a recommendation relaxation does not
 use that name.
 
-### Optional Capabilities
+### Optional capabilities
 
-For applicable `MAY` and `OPTIONAL` behavior:
+An applicable `MAY` or `OPTIONAL` behaviour has this shape:
 
-- expose support through an intentional API, configuration, builder, or
-  feature flag when the capability is in scope;
-- do not imply that every optional SAML capability must be implemented;
-- accept or preserve optional wire data when required for interoperability,
-  even if the library does not otherwise use that data;
-- apply any mandatory processing rules that become active when the optional
-  capability is selected or the optional field is present;
-- keep unsupported profiles explicit rather than partially implementing them
-  behind ambiguous behavior.
+- support, when the capability is in scope, is an intentional API,
+  configuration, builder, or feature flag;
+- naming a capability in the specifications does not imply that this crate
+  implements it;
+- optional wire data stays available when interoperability needs it, even when
+  the library does not otherwise use that data;
+- mandatory processing rules that become active when the optional capability
+  is selected, or the optional field is present, still apply;
+- an unsupported profile stays explicit, rather than appearing as a partial
+  implementation behind ambiguous behaviour.
 
-### Unspecified And Application Policy
+### Unspecified behaviour and application policy
 
 Terms such as `implementation-dependent`, `application-specific`,
 `profile-specific`, and `unspecified` do not create another RFC requirement
-level. They identify decisions intentionally left to an implementation,
-profile, deployment, or caller.
+level. They identify decisions left to an implementation, profile, deployment,
+or caller.
 
-For such behavior:
+For that kind of behaviour:
 
-- do not invent an OASIS rejection rule;
-- expose an application policy or hook when the decision belongs to the caller;
-- document library defaults as library policy, not standards conformance;
-- distinguish protocol validation from resource limits, parser safety, and
+- the library does not invent an OASIS rejection rule;
+- when the decision belongs to the caller, the library exposes an application
+  policy or hook;
+- a library default is documented as library policy, not standards conformance;
+- protocol validation stays distinct from resource limits, parser safety, and
   other implementation-security controls.
 
-Implementation-security controls such as XML resource limits or disabling an
-unsafe cryptographic backend may remain library invariants even when they are
-not SAML wire requirements. Their rationale must be documented separately and
-must not be cited as if OASIS required a peer's message to be rejected.
+Implementation-security controls, such as XML resource limits or disabling an
+unsafe cryptographic backend, can remain library invariants even when they are
+not SAML wire requirements. Their rationale is recorded separately from OASIS
+text. Citing them as if OASIS required a peer's message to be rejected
+misstates the source.
 
 ## Interpretation Examples
 
@@ -279,30 +275,5 @@ current feature support:
   `ResponseSignaturePolicy::AllowUnsignedEncryptedCbc`. Generating one
   requires `RespondSso::allow_unsigned_encrypted_cbc`.
 
-## Change And Review Checklist
-
-Every change that adds or alters SAML behavior should answer:
-
-1. What exact standard, schema declaration, profile, binding, or erratum
-   governs the behavior?
-2. What feature-scoped conformance or support claim is affected?
-3. What is the requirement level?
-4. Who is the obligated actor?
-5. Is the rule conditional?
-6. What message types, roles, directions, bindings, and profiles are in scope?
-7. Is the implementation complete for that claimed scope, or does it provide
-   only lower-level parsing, serialization, or partial flow support?
-8. Does the normative text require generation, processing, acceptance,
-   verification, or rejection?
-9. Is the implementation enforcing only that requirement, without adding a
-   stricter receiver rule?
-10. Is a recommendation default-on and relaxed only through an explicit
-    policy?
-11. Is optional behavior intentionally configured and interoperable?
-12. Do focused tests cover the normative boundary without duplicating unrelated
-    guarantees?
-
-When the evidence is ambiguous, investigate the schemas, related OASIS
-documents, approved errata, and interoperability behavior before changing
-validation. Do not guess, and do not turn uncertainty into a new rejection
-rule.
+The working checklist for a change is
+[How to review a SAML change](how-to-review-saml-behaviour.md).

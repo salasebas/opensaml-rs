@@ -1,6 +1,7 @@
 # IdP fixture keys
 
-These keys support the rolling-certificate fixtures.
+Test-only keys for the rolling-certificate fixtures. The passwords below
+belong to those fixtures. They are not deployment credentials.
 
 | File | Password | Certificate |
 | --- | --- | --- |

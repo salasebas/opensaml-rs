@@ -1,6 +1,8 @@
-# Errors and Validation
+# Errors and validation
 
-The canonical error type remains `SamlError`.
+The canonical error type remains `SamlError`. This note explains why a single
+semantic error, plus an explicit validation context, replaced generic failure
+buckets and hidden clocks.
 
 ## Current Problem
 
@@ -19,7 +21,7 @@ SamlError::MissingSigAlg
 SamlError::UndefinedBinding
 ```
 
-This works for fail-closed behavior, but it is not enough for a polished typed
+This works for fail-closed behaviour, but it is not enough for a polished typed
 API. Callers should branch on validation rule failures without string matching.
 
 ## Target Error Shape
@@ -123,7 +125,7 @@ pub trait ReplayCache {
 }
 ```
 
-The raw samlify-port API can keep today's hidden process-clock behavior. Typed browser
+The raw samlify-port API can keep today's hidden process-clock behaviour. Typed browser
 flows should not. Use `SamlValidationContext` in `finish_sso`,
 `accept_unsolicited_sso`, `receive_sso`, `receive_slo`, `finish_slo`, and any
 other inbound signed, timed, or replay-sensitive browser-message validation.
@@ -177,7 +179,8 @@ order explicit:
 
 ## Metadata Signature Validation
 
-Signed metadata validation must not return only `bool` in the typed API.
+A `bool` is not enough for signed metadata in the typed API. The caller also
+needs the signed descriptor that verification covered.
 
 Target:
 

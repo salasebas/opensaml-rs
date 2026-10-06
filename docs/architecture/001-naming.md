@@ -1,14 +1,17 @@
-# Naming Checkpoint
+# Naming
 
-This document records the reviewed public names used by the typed facade.
+This note explains which public names are canonical for the typed facade, and
+which names were rejected.
 
-## Crate Names
+## Crate names
 
 - Cargo package: `saml-rs`
 - Rust import path: `saml_rs`
 - Canonical error type: `SamlError`
 
-Do not introduce public names prefixed with `OpenSaml`.
+Public names prefixed with `OpenSaml` were rejected. This crate is not
+Shibboleth OpenSAML, and `opensaml` remains only the compatibility package
+name.
 
 ## Active Local Roles
 

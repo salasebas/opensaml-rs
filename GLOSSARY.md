@@ -1,7 +1,8 @@
-# SAML Protocol
+# Glossary
 
-This context names the SAML roles, flows, and receiver boundaries whose
-protocol obligations are modeled by saml-rs.
+Names for the SAML roles, flows, and receiver boundaries whose protocol
+obligations saml-rs models. Each entry is the term to use, then the term to
+avoid when that distinction matters.
 
 ## Language
 
@@ -52,7 +53,7 @@ on top of a validation preset.
 _Avoid_: strict, profile
 
 **Claimed feature**:
-A SAML behavior saml-rs already implements, bounded by role, direction,
+A SAML behaviour saml-rs already implements, bounded by role, direction,
 profile or flow, and binding.
 _Avoid_: SAML V2.0 as a whole
 
@@ -64,7 +65,7 @@ become a receiver rejection.
 _Avoid_: default, full SAML conformance, profile
 
 **Compatibility**:
-The legacy permissive preset. It is the samlify-port behavior kept for a
+The legacy permissive preset. It is the samlify-port behaviour kept for a
 caller leaving the raw API. It does not claim standards conformance, and it
 does not name a relaxation of an OASIS recommendation.
 _Avoid_: OASIS relaxation, recommended, default

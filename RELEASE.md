@@ -1,13 +1,13 @@
-# Release Process
+# How to release saml-rs
 
-This release process is for the independent, unofficial **saml-rs** Rust
+This guide is for publishing the independent, unofficial **saml-rs** Rust
 package.
 
 This repository publishes one crate after the migration: `saml-rs`.
 
 Git tags use `v*`, for example `v0.1.5`.
 
-## Normal release process
+## How to publish through release-plz
 
 1. Merge changes to `main` using Conventional Commit titles: `fix: ...`,
    `feat: ...`, or `feat!: ...` / `BREAKING CHANGE: ...`.
@@ -24,7 +24,7 @@ Old alias crates are retired and frozen. Do not yank healthy published alias
 versions as a deprecation mechanism; yank only for a bad release, security, or
 legal reason.
 
-## GitHub and crates.io setup
+## How to configure GitHub and crates.io
 
 Recommended setup is crates.io trusted publishing:
 
@@ -40,7 +40,7 @@ Recommended setup is crates.io trusted publishing:
 The GitHub repository is `salasebas/saml-rs`. The published crate name is
 `saml-rs`.
 
-## Manual fallback
+## How to publish by hand
 
 1. Bump `[package] version` in the root `Cargo.toml`.
 2. Refresh `Cargo.lock` with `cargo build`.

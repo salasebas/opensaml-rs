@@ -10,7 +10,7 @@ concerns the actual latest applicable assertion, so this policy does not claim
 ordering against arbitrary historical, custom, or proxied assertions. The
 attribute cannot be disabled in the typed
 session-authority flow, while typed SP and raw compatibility generation retain
-their existing role-appropriate behavior. The five-minute value is library
+their existing role-appropriate behaviour. The five-minute value is library
 policy, not an OASIS requirement.
 
 Normative provenance: SAML Core 2.0 section 3.7.3.2 requires a Session

@@ -1,13 +1,14 @@
-# Raw Compatibility
+# Raw compatibility
 
-The typed API is additive. The current flow API remains available.
+The typed API is additive. The current flow API remains available because
+removing it would strand integrations that still need direct XML.
 
-## Why Keep Raw
+## Why raw stays
 
-The current API is useful for:
+The current API remains useful for:
 
 - migration;
-- unusual interop behavior;
+- unusual interop behaviour;
 - tests and conformance fixtures;
 - callers that need direct XML, `FlowResult`, or `BindingContext`;
 - cases where typed support has not yet been built.
@@ -77,9 +78,9 @@ pub use sp::ServiceProvider;
 pub use entity::EntitySetting;
 ```
 
-Before typed API stabilization, root-level `ServiceProvider` and
-`IdentityProvider` should be rustdoc-deprecated or documented as compat-only.
-Docs should still teach the typed API first.
+Root-level `ServiceProvider` and `IdentityProvider` stay available for older
+imports. Their rustdoc points a new integration at `Saml`, and these notes
+describe the typed API first.
 
 ## Raw Escape Hatches From Typed Results
 
@@ -103,8 +104,12 @@ impl<Message> Outbound<Message> {
 Rules:
 
 - Raw accessors are named with `raw_`.
-- Typed docs should not teach `FlowResult.extract` as the normal path.
-- Raw compatibility must not weaken typed validation rules.
+- Typed notes describe the typed path. `FlowResult.extract` stays a raw
+  escape, because presenting it as the normal result would hide the checks
+  the typed session already performed.
+- Raw compatibility does not weaken typed validation rules. A typed success
+  has already applied those rules; the raw view is the same message, not a
+  second, looser verdict.
 - Raw logout parsers do not receive the actual local endpoint. Their
   `FlowResult` therefore does not claim that `Destination` was compared with
   the receiving endpoint; direct raw callers own that check.

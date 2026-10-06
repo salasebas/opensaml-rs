@@ -1,6 +1,9 @@
 # Typed Web SSO API
 
-This document describes the typed browser Web SSO API.
+This note explains the typed browser Web SSO calls, and the constraints that
+keep an illegal binding unrepresentable. The steps for a service-provider
+integration are in
+[How to add service-provider SSO](../../README.md#how-to-add-service-provider-sso).
 
 ## SP-Initiated Login
 
@@ -254,11 +257,13 @@ pub enum Outbound<Message> {
 }
 ```
 
-Typed SimpleSign POST input must not ask callers for arbitrary signed octets.
-Callers pass parsed fields with `BrowserInput::<M>::simple_sign(fields)` or a
-raw form body with `BrowserInput::<M>::simple_sign_body(raw_body)`. The library
-parses the form fields and derives the exact octets used for signature
-verification. Raw `raw::HttpRequest` compatibility may still accept manual
+Typed SimpleSign POST input does not take arbitrary signed octets from the
+caller. The caller passes parsed fields with
+`BrowserInput::<M>::simple_sign(fields)` or a raw form body with
+`BrowserInput::<M>::simple_sign_body(raw_body)`. The library parses the form
+fields and derives the exact octets used for signature verification. The
+reason is that the signature covers those octets, so a second caller-supplied
+buffer could disagree with the form the browser posted. Raw `raw::HttpRequest` compatibility may still accept manual
 detached octet data for legacy interop.
 
 Constructors are marker-specific. `BrowserInput<SsoResponse>` exposes POST and

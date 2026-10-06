@@ -1,8 +1,12 @@
 # Typed API architecture
 
-Maintainer notes for the typed public API, matched to the facade that is
-implemented now. The package is `saml-rs`. Rust imports it as `saml_rs`. The
-low-level flow API stays available as raw compatibility.
+These notes explain why the typed public API has this shape, matched to the
+facade that is implemented now. They are not the steps for wiring a service
+provider; that guide is
+[How to add service-provider SSO](../../README.md#how-to-add-service-provider-sso).
+The package is `saml-rs`. Rust imports it as `saml_rs`. The low-level flow
+API stays available as raw compatibility. The listings show the call shape
+under discussion.
 
 ## Which note to read
 

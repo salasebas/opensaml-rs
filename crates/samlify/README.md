@@ -53,9 +53,8 @@ cargo run -p saml-rs --example sso
 ## Security
 
 `samlify` 0.5 and later forbid unsafe code and re-export the `saml-rs`
-validation and crypto policy. Read the
-[saml-rs security notes](https://github.com/salasebas/saml-rs/blob/main/README.md#security)
-before production use.
+validation and crypto policy. The properties are the
+[saml-rs security notes](https://github.com/salasebas/saml-rs/blob/main/README.md#security).
 
 ## License
 

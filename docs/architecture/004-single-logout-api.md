@@ -1,7 +1,8 @@
 # Typed Single Logout API
 
-Single Logout should mirror the typed SSO style: start, receive, respond, and
-finish with typed correlation.
+Typed Single Logout follows the SSO shape: start, receive, respond, and
+finish, with the same typed correlation. Logout then carries the role and the
+pending message, rather than a free-form request identifier.
 
 ## Logout Subject
 
@@ -181,9 +182,12 @@ Rules:
 - `respond_slo` echoes `Received<LogoutRequest>` RelayState by default. An
   explicit `relay_state(RelayStateParam::absent())` suppresses echo, and an
   explicit present RelayState overrides it.
-- Callers must not pass arbitrary request ID strings in the typed API.
-- Custom LogoutResponse rendering must not silently emit wrong or empty
-  `InResponseTo` when a typed request exists.
+- The typed API takes `Received<LogoutRequest>` rather than a caller-supplied
+  request-identifier string, so `InResponseTo` cannot drift from the request
+  that was accepted.
+- Custom LogoutResponse rendering that drops or empties `InResponseTo` while a
+  typed request exists would break that correlation, so generation keeps the
+  identifier from `Received<LogoutRequest>`.
 
 ## Finishing Logout
 

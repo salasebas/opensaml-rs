@@ -1,7 +1,9 @@
-# Config, Policies, and Metadata Trust
+# Config, policies, and metadata trust
 
-The typed API should replace `EntitySetting` as the recommended config surface.
-`EntitySetting` remains raw compatibility.
+The typed config surface replaces `EntitySetting` as the primary path.
+`EntitySetting` remains raw compatibility. A raw string bag cannot keep an
+illegal endpoint or credential combination unrepresentable, which is why the
+typed builders exist.
 
 ## Construction Style
 
@@ -86,7 +88,7 @@ pub struct IdpConfig {
 `issuance_lifetime` defaults to five minutes and is shared by typed IdP SSO
 assertion bounds and typed Session Authority LogoutRequest expiration. The
 value is retained privately by `Saml<Idp>` rather than copied into raw
-`EntitySetting`, preserving raw compatibility behavior.
+`EntitySetting`, preserving raw compatibility behaviour.
 
 Configs convert internally to today's raw `EntitySetting` when calling legacy
 implementation helpers.
@@ -113,7 +115,8 @@ Rules:
 - Secret-bearing types have redacted `Debug`.
 - Credential strings stay behind typed wrappers, with `as_str()` available as a
   raw compatibility and migration escape hatch.
-- Do not make `EntitySetting` with raw strings the primary typed config.
+- `EntitySetting` with raw strings stays a raw-compatibility escape, not the
+  primary typed config.
 
 ## Algorithm Policy
 
@@ -348,7 +351,9 @@ Rules:
 - `signed_entity_descriptor_xml()` exposes the signed descriptor evidence when
   pinned verification passed.
 - `UnsignedForCompatibility` is explicit and visible in call sites.
-- Do not claim PKIX, federation, or online metadata refresh support by default.
+- PKIX path validation, federation, and online metadata refresh are outside
+  this trust model. The caller supplies the certificates that verify a
+  signature.
 
 ## Endpoint Config
 

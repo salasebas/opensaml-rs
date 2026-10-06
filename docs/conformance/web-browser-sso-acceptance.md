@@ -1,18 +1,17 @@
 # Web Browser SSO acceptance rules
 
-This record classifies inbound rules for typed Web Browser SSO:
-service-provider `finish_sso` and `accept_unsolicited_sso`, and identity-provider
-`receive_sso`. `SpValidationPolicy::recommended` includes the service-provider
-rows below. It also includes the Single Logout accept combination and leaves
-AuthnRequest signing and identifier creation off. Those last three are not
-part of this accept combination; they are recorded with logout and generation.
+Inbound rules for typed Web Browser SSO: service-provider `finish_sso` and
+`accept_unsolicited_sso`, and identity-provider `receive_sso`.
+`SpValidationPolicy::recommended` includes the service-provider rows below. It
+also includes the Single Logout accept combination and leaves AuthnRequest
+signing and identifier creation off. Those last three are not part of this
+accept combination; they are recorded with logout and generation.
 `IdpValidationPolicy::recommended` includes the identity-provider rows below
-and the same logout accept combination. Recommended is the preset for these
-claimed features. It is not an implementation of SAML V2.0 as a whole.
-Compatibility is the legacy permissive preset. `Default`, `new`, and `try_new`
-stay on Compatibility. Config builders stay on the deprecated `strict()`
-bundle. That bundle is unchanged and does not select the RSA-SHA2 XML-DSig
-profile.
+and the same logout accept combination. `Default`, `new`, and `try_new` stay
+on Compatibility. Config builders stay on the deprecated `strict()` bundle.
+That bundle is unchanged and does not select the RSA-SHA2 XML-DSig profile.
+Why those presets differ is in
+[validation presets](../adr/0002-validation-presets.md).
 
 Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected
 by Approved Errata 05. HTTP-POST-SimpleSign is the supported CD04 binding.
