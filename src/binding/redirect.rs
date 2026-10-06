@@ -48,9 +48,7 @@ pub fn redirect_binding_query(
 /// DEFLATE → base64 → url-encode the message, choose `?`/`&` based on whether
 /// `base_url` already carries a query, and append an optional `RelayState`.
 ///
-/// A direct child `ds:Signature` of the protocol root is a protocol signature.
-/// Bindings §3.4.4.1 requires that signature to be removed and replaced by a
-/// detached signature, so this unsigned encoder rejects it.
+/// Rejects a direct child `ds:Signature` on the protocol root. Bindings §3.4.4.1.
 pub fn build_redirect_url(
     base_url: &str,
     parser_type: ParserType,
@@ -67,9 +65,8 @@ pub fn build_redirect_url(
 
 /// Build the octet string to sign for a signed HTTP-Redirect message.
 ///
-/// A direct child `ds:Signature` of the protocol root is removed before raw
-/// DEFLATE. A signature nested inside the message, such as an assertion
-/// signature, stays. Bindings §3.4.4.1.
+/// Removes a direct child `ds:Signature` before raw DEFLATE. A nested
+/// signature stays. Bindings §3.4.4.1.
 pub fn build_redirect_octet(
     parser_type: ParserType,
     xml: &str,

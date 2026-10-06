@@ -2,10 +2,7 @@ use crate::error::SamlError;
 
 /// SAML Bindings 2.0 prohibits a RelayState value longer than 80 bytes.
 ///
-/// The prohibition is Bindings §3.4.3, which Approved Errata 05 E1 does not
-/// change, Bindings §3.5.3, and HTTP-POST-SimpleSign CD-04 §2.3. Integrity
-/// protection of that value remains a recommendation in those sections.
-///
+/// Bindings §3.4.3, §3.5.3, and HTTP-POST-SimpleSign CD-04 §2.3.
 /// Reference: <https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf>.
 pub const MAX_RELAY_STATE_BYTES: usize = 80;
 
