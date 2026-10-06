@@ -202,8 +202,12 @@ impl SpValidationPolicy {
 
     /// Deprecated bundle of SP validation choices.
     ///
-    /// The returned fields are unchanged from earlier releases.
-    #[deprecated(note = "start from recommended() and add only the named hardenings you want")]
+    /// Removed in the following release. Start from [`Self::recommended`] and
+    /// add only the named hardenings you want. The returned fields are
+    /// unchanged from earlier releases.
+    #[deprecated(
+        note = "removed in the following release; start from recommended() and add only the named hardenings you want"
+    )]
     #[expect(
         deprecated,
         reason = "the deprecated strict preset keeps its current logout bundle"
@@ -269,9 +273,13 @@ impl IdpValidationPolicy {
 
     /// Deprecated bundle of IdP validation choices.
     ///
-    /// Inbound `AuthnRequest` and logout messages must be signed. The returned
-    /// fields are unchanged from earlier releases.
-    #[deprecated(note = "start from recommended() and add only the named hardenings you want")]
+    /// Removed in the following release. Start from [`Self::recommended`] and
+    /// add only the named hardenings you want. Inbound `AuthnRequest` and
+    /// logout messages must be signed. The returned fields are unchanged from
+    /// earlier releases.
+    #[deprecated(
+        note = "removed in the following release; start from recommended() and add only the named hardenings you want"
+    )]
     #[expect(
         deprecated,
         reason = "the deprecated strict preset keeps its current logout bundle"
@@ -330,8 +338,12 @@ impl LogoutPolicy {
 
     /// Deprecated logout signature bundle.
     ///
-    /// Logout requests and responses must still be signed.
-    #[deprecated(note = "start from recommended() and add only the named hardenings you want")]
+    /// Removed in the following release. Start from [`Self::recommended`] and
+    /// add only the named hardenings you want. Logout requests and responses
+    /// must still be signed.
+    #[deprecated(
+        note = "removed in the following release; start from recommended() and add only the named hardenings you want"
+    )]
     pub fn strict() -> Self {
         Self {
             requests: LogoutSignaturePolicy::RequireSigned,
