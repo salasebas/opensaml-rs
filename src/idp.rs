@@ -1,6 +1,6 @@
 //! SAML Identity Provider entity.
 
-use crate::constants::{status_code, Binding, ParserType};
+use crate::constants::{Binding, ParserType};
 use crate::entity::{
     capture_idp_issuance_window, generate_id, BindingContext, CustomTagReplacement, EntitySetting,
     User,
@@ -8,6 +8,7 @@ use crate::entity::{
 use crate::error::SamlError;
 use crate::flow::{FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::{try_generate_idp_metadata, IdpMetadata, IdpMetadataConfig};
+use crate::model::{Status, TopLevelStatusCode};
 use crate::sp::{ServiceProvider, WebBrowserSsoProducer};
 use crate::template::{
     apply_tag_prefixes, attr_tag, attribute_statement_builder, replace_tags_by_value,
@@ -16,7 +17,10 @@ use crate::template::{
 
 mod login_response;
 
-use login_response::{render_default_login_response, LoginResponseXml};
+use login_response::{
+    render_default_login_response, render_error_login_response, ErrorLoginResponseXml,
+    LoginResponseXml,
+};
 use std::time::SystemTime;
 
 /// Optional inputs for [`IdentityProvider::create_login_response`].
@@ -41,6 +45,7 @@ pub(crate) struct LoginResponseOverrides<'a> {
     pub(crate) name_id_format: Option<&'a str>,
     pub(crate) issuance_lifetime: Option<time::Duration>,
     pub(crate) web_browser_sso_producer: WebBrowserSsoProducer,
+    pub(crate) status: Option<&'a Status>,
 }
 
 #[derive(Clone, Copy)]
@@ -49,6 +54,7 @@ struct LoginResponseRendering<'a> {
     custom: Option<CustomTagReplacement<'a>>,
     issuance_lifetime: time::Duration,
     web_browser_sso_producer: WebBrowserSsoProducer,
+    status: Option<&'a Status>,
 }
 
 /// A SAML 2.0 Identity Provider: runtime [`EntitySetting`] plus parsed [`IdpMetadata`].
@@ -132,13 +138,45 @@ impl IdentityProvider {
         let tmpl = self.setting.login_response_template.as_ref();
         let attributes = tmpl.map(|t| t.attributes.as_slice()).unwrap_or(&[]);
         let has_custom_context = tmpl.and_then(|t| t.context.as_ref()).is_some();
-        if rendering.web_browser_sso_producer.follows()
-            && (rendering.custom.is_some() || has_custom_context)
-        {
+        let fallback_status = Status::success();
+        let status = rendering.status.unwrap_or(&fallback_status);
+        let error_response = status.top_level() != TopLevelStatusCode::Success;
+        let uses_template = rendering.custom.is_some() || has_custom_context;
+        if rendering.web_browser_sso_producer.follows() && uses_template {
             return Err(SamlError::Invalid(
                 "Web Browser SSO generation rules require the built-in login response renderer"
                     .into(),
             ));
+        }
+        if error_response && uses_template {
+            return Err(SamlError::Invalid(
+                "an error Response omits assertions and cannot use a login response template"
+                    .into(),
+            ));
+        }
+        if status.subordinate().is_some() && uses_template {
+            return Err(SamlError::Invalid(
+                "login response template StatusCode placeholder cannot carry a subordinate status code"
+                    .into(),
+            ));
+        }
+        if error_response {
+            let window = capture_idp_issuance_window(rendering.issuance_lifetime)?;
+            let id = generate_id();
+            let issuer = self.entity_id();
+            let emitted_in_response_to =
+                response_in_response_to(rendering.web_browser_sso_producer, in_response_to);
+            let xml = render_error_login_response(&ErrorLoginResponseXml {
+                protocol_prefix: &self.setting.tag_prefix_protocol,
+                assertion_prefix: &self.setting.tag_prefix_assertion,
+                response_id: &id,
+                issue_instant: &window.issue_instant,
+                destination: acs,
+                issuer: &issuer,
+                status,
+                in_response_to: emitted_in_response_to,
+            })?;
+            return Ok((id, xml));
         }
         if rendering.custom.is_none() && !has_custom_context {
             let window = capture_idp_issuance_window(rendering.issuance_lifetime)?;
@@ -155,13 +193,8 @@ impl IdentityProvider {
             let assertion_id = generate_id();
             let audience = sp.metadata.get_entity_id().unwrap_or_default().to_string();
             let issuer = self.entity_id();
-            let raw_in_response_to = in_response_to.unwrap_or_default();
             let emitted_in_response_to =
-                if rendering.web_browser_sso_producer.follows() && raw_in_response_to.is_empty() {
-                    None
-                } else {
-                    Some(raw_in_response_to)
-                };
+                response_in_response_to(rendering.web_browser_sso_producer, in_response_to);
             let supports_single_logout = !self.metadata.get_support_bindings().is_empty();
             let session_index = (rendering.web_browser_sso_producer.follows()
                 && supports_single_logout)
@@ -175,7 +208,7 @@ impl IdentityProvider {
                 destination: acs,
                 subject_recipient: acs,
                 issuer: &issuer,
-                status_code: status_code::SUCCESS,
+                status,
                 subject_confirmation_not_on_or_after: &window.expiration,
                 conditions_not_before: &window.issue_instant,
                 conditions_not_on_or_after: &window.expiration,
@@ -239,7 +272,7 @@ impl IdentityProvider {
             ),
             ("Issuer", self.entity_id()),
             ("IssueInstant", window.issue_instant.clone()),
-            ("StatusCode", status_code::SUCCESS.to_string()),
+            ("StatusCode", status.top_level().as_uri().to_string()),
             ("ConditionsNotBefore", window.issue_instant),
             ("ConditionsNotOnOrAfter", window.expiration.clone()),
             ("SubjectConfirmationDataNotOnOrAfter", window.expiration),
@@ -339,9 +372,19 @@ impl IdentityProvider {
                     .issuance_lifetime
                     .unwrap_or(time::Duration::seconds(300)),
                 web_browser_sso_producer: overrides.web_browser_sso_producer,
+                status: overrides.status,
             },
         )?;
-        let signed = self.finalize_login_response(sp, binding, &raw, options.encrypt_then_sign)?;
+        let error_response = overrides
+            .status
+            .is_some_and(|status| status.top_level() != TopLevelStatusCode::Success);
+        let signed = self.finalize_login_response(
+            sp,
+            binding,
+            &raw,
+            options.encrypt_then_sign,
+            error_response,
+        )?;
         let relay = options.relay_state.map(str::to_string);
         let (context, signature, sig_alg) =
             self.bind_response(binding, &signed, &acs, relay.as_deref())?;
@@ -439,6 +482,7 @@ impl IdentityProvider {
         binding: Binding,
         raw: &str,
         _encrypt_then_sign: bool,
+        error_response: bool,
     ) -> Result<String, SamlError> {
         use crate::crypto::{construct_saml_signature, encrypt_assertion, keys::load_private_key};
 
@@ -455,12 +499,28 @@ impl IdentityProvider {
         let sig_alg = &self.setting.request_signature_algorithm;
         let key = load_private_key(key_pem, self.setting.private_key_pass.as_deref())?;
 
+        let mut xml = raw.to_string();
+        if error_response {
+            // HTTP-POST signs the Response. There is no assertion to sign.
+            if binding == Binding::Post {
+                xml = construct_saml_signature(
+                    &xml,
+                    true,
+                    &key,
+                    cert,
+                    sig_alg,
+                    &sp.setting.transformation_algorithms,
+                    self.setting.signature_config.as_ref(),
+                )?;
+            }
+            return Ok(xml);
+        }
+
         let want_assertions_signed = sp.metadata.is_want_assertions_signed();
         // POST embeds an XML-DSig message signature; redirect/SimpleSign use a
         // detached query signature added later in `bind_response`.
         let sign_message =
             binding == Binding::Post && (sp.setting.want_message_signed || !want_assertions_signed);
-        let mut xml = raw.to_string();
 
         // step: sign assertion -> (encrypt) -> sign message
         if want_assertions_signed {
@@ -526,6 +586,7 @@ impl IdentityProvider {
         _binding: Binding,
         _raw: &str,
         _encrypt_then_sign: bool,
+        _error_response: bool,
     ) -> Result<String, SamlError> {
         Err(SamlError::Unsupported(
             "createLoginResponse requires a crypto provider feature".into(),
@@ -599,6 +660,18 @@ impl IdentityProvider {
             },
             request,
         )
+    }
+}
+
+fn response_in_response_to(
+    producer: WebBrowserSsoProducer,
+    in_response_to: Option<&str>,
+) -> Option<&str> {
+    let raw = in_response_to.unwrap_or("");
+    if producer.follows() && raw.is_empty() {
+        None
+    } else {
+        Some(raw)
     }
 }
 

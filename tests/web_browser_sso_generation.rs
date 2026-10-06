@@ -10,6 +10,7 @@
 use std::time::SystemTime;
 
 use saml_rs::binding::{base64_decode, deflate_raw_decode};
+use saml_rs::constants::status_code;
 use saml_rs::raw::Binding;
 use saml_rs::template::LoginResponseTemplate;
 use saml_rs::{
@@ -18,7 +19,7 @@ use saml_rs::{
     IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId, NameIdCreationPolicy,
     NameIdFormat, Outbound, PrivateKeyPem, ReplayPolicy, RespondSso, Saml, SamlError,
     SamlValidationContext, SloEndpoint, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint,
-    SsoResponse, StartSso, Subject,
+    SsoResponse, StartSso, Status, Subject, SubordinateStatusCode,
 };
 #[cfg(not(feature = "crypto-fips"))]
 use saml_rs::{XmlEncryptionPolicy, XmlPolicy};
@@ -593,5 +594,296 @@ fn typed_plaintext_response_stays_accepted_without_producer_rules(
         validation(),
     )?;
     assert_eq!(session.name_id().value(), "alice@example.com");
+    Ok(())
+}
+
+fn status_element(xml: &str) -> Result<&str, Box<dyn std::error::Error>> {
+    let start = xml.find("<samlp:Status>").ok_or("missing Status")?;
+    let rest = &xml[start..];
+    let end = rest.find("</samlp:Status>").ok_or("missing Status end")?;
+    Ok(&rest[..end + "</samlp:Status>".len()])
+}
+
+fn assert_error_response_has_no_assertion(xml: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if xml.contains("<saml:Assertion")
+        || xml.contains("EncryptedAssertion")
+        || xml.contains("AuthnStatement")
+        || xml.contains("alice@example.com")
+    {
+        return Err(format!("error Response included an assertion: {xml}").into());
+    }
+    if xml.matches("<saml:Issuer>").count() != 1 {
+        return Err(format!("error Response Issuer count was not 1: {xml}").into());
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_sso_error_response_carries_caller_status_and_no_assertions(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with(SpValidationPolicy::strict())?;
+    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(started.outbound.post_form()?.fields().to_vec()),
+        validation(),
+    )?;
+    let request_id = received.message().id().as_str().to_string();
+
+    let response = idp.respond_sso(
+        &sp_descriptor,
+        &received,
+        subject(),
+        RespondSso::post()
+            .apply_web_browser_sso_generation_rules()
+            .status(
+                Status::responder()
+                    .with_subordinate(SubordinateStatusCode::try_new(status_code::NO_PASSIVE)?),
+            ),
+    )?;
+    let xml = response_xml(&response)?;
+    assert_error_response_has_no_assertion(&xml)?;
+    assert_eq!(
+        status_element(&xml)?,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Responder\">",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:NoPassive\"/>",
+            "</samlp:StatusCode>",
+            "</samlp:Status>"
+        )
+    );
+    assert!(xml.contains(&format!("<saml:Issuer>{IDP_ENTITY_ID}</saml:Issuer>")));
+    assert!(xml.contains(&format!("Destination=\"{SP_ACS}\"")));
+    assert!(xml.contains(&format!("InResponseTo=\"{request_id}\"")));
+    assert!(xml.contains("<ds:Signature"));
+    assert_generated_instants_have_no_leap_second(&xml)?;
+
+    let requester = idp.respond_sso(
+        &sp_descriptor,
+        &received,
+        subject(),
+        RespondSso::post().status(Status::requester()),
+    )?;
+    let requester_xml = response_xml(&requester)?;
+    assert_error_response_has_no_assertion(&requester_xml)?;
+    assert_eq!(
+        status_element(&requester_xml)?,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Requester\"/>",
+            "</samlp:Status>"
+        )
+    );
+    assert!(requester_xml.contains(&format!("InResponseTo=\"{request_id}\"")));
+    assert!(requester_xml.contains(&format!("Destination=\"{SP_ACS}\"")));
+    Ok(())
+}
+
+#[test]
+fn typed_sso_without_error_status_keeps_success_and_assertions(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with(SpValidationPolicy::strict())?;
+    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let received = idp.receive_sso(
+        &sp_descriptor,
+        BrowserInput::<AuthnRequest>::post(started.outbound.post_form()?.fields().to_vec()),
+        validation(),
+    )?;
+
+    let solicited = idp.respond_sso(&sp_descriptor, &received, subject(), RespondSso::post())?;
+    let solicited_xml = response_xml(&solicited)?;
+    assert!(solicited_xml.contains("<saml:Assertion"));
+    assert!(solicited_xml.contains("alice@example.com"));
+    assert_eq!(
+        status_element(&solicited_xml)?,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Success\"/>",
+            "</samlp:Status>"
+        )
+    );
+
+    let explicit_success = idp.respond_sso(
+        &sp_descriptor,
+        &received,
+        subject(),
+        RespondSso::post().status(Status::success()),
+    )?;
+    let explicit_xml = response_xml(&explicit_success)?;
+    assert!(explicit_xml.contains("<saml:Assertion"));
+    assert_eq!(
+        status_element(&explicit_xml)?,
+        status_element(&solicited_xml)?
+    );
+
+    let unsolicited = idp.initiate_sso(&sp_descriptor, subject(), RespondSso::post())?;
+    let unsolicited_xml = response_xml(&unsolicited)?;
+    assert!(unsolicited_xml.contains("<saml:Assertion"));
+    assert_eq!(
+        status_element(&unsolicited_xml)?,
+        status_element(&solicited_xml)?
+    );
+
+    let success_with_detail = idp.respond_sso(
+        &sp_descriptor,
+        &received,
+        subject(),
+        RespondSso::post().status(
+            Status::success()
+                .with_subordinate(SubordinateStatusCode::try_new(status_code::REQUEST_DENIED)?),
+        ),
+    )?;
+    let detail_xml = response_xml(&success_with_detail)?;
+    assert!(detail_xml.contains("<saml:Assertion"));
+    assert!(detail_xml.contains("alice@example.com"));
+    assert_eq!(
+        status_element(&detail_xml)?,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Success\">",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:RequestDenied\"/>",
+            "</samlp:StatusCode>",
+            "</samlp:Status>"
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_unsolicited_error_response_follows_in_response_to_rules(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp_with(SpValidationPolicy::strict())?;
+    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let (sp_descriptor, _) = descriptors(&sp, &idp)?;
+
+    let ruled = idp.initiate_sso(
+        &sp_descriptor,
+        subject(),
+        RespondSso::post()
+            .apply_web_browser_sso_generation_rules()
+            .status(Status::version_mismatch()),
+    )?;
+    let ruled_xml = response_xml(&ruled)?;
+    assert_error_response_has_no_assertion(&ruled_xml)?;
+    assert!(!ruled_xml.contains("InResponseTo"));
+    assert!(ruled_xml.contains(&format!("<saml:Issuer>{IDP_ENTITY_ID}</saml:Issuer>")));
+    assert!(ruled_xml.contains(&format!("Destination=\"{SP_ACS}\"")));
+    assert_eq!(
+        status_element(&ruled_xml)?,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:VersionMismatch\"/>",
+            "</samlp:Status>"
+        )
+    );
+
+    let compatibility = idp.initiate_sso(
+        &sp_descriptor,
+        subject(),
+        RespondSso::post().status(Status::version_mismatch()),
+    )?;
+    let compatibility_xml = response_xml(&compatibility)?;
+    assert_error_response_has_no_assertion(&compatibility_xml)?;
+    assert!(compatibility_xml.contains("InResponseTo=\"\""));
+    assert!(compatibility_xml.contains(&format!("Destination=\"{SP_ACS}\"")));
+    assert!(compatibility_xml.contains(&format!("<saml:Issuer>{IDP_ENTITY_ID}</saml:Issuer>")));
+    Ok(())
+}
+
+#[test]
+fn typed_error_response_rejects_a_login_response_template() -> Result<(), Box<dyn std::error::Error>>
+{
+    let sp = sp_with(SpValidationPolicy::strict())?;
+    let mut idp_config = IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+        .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+        .credentials(credentials())
+        .validation(IdpValidationPolicy::strict())
+        .build()?;
+    idp_config.templates.login_response_template = Some(LoginResponseTemplate {
+        context: Some(saml_rs::template::LOGIN_RESPONSE_TEMPLATE.to_string()),
+        attributes: Vec::new(),
+    });
+    let idp = Saml::idp(idp_config)?;
+    let (sp_descriptor, _) = descriptors(&sp, &idp)?;
+
+    match idp.initiate_sso(
+        &sp_descriptor,
+        subject(),
+        RespondSso::post().status(Status::responder()),
+    ) {
+        Err(SamlError::Invalid(message))
+            if message.contains("cannot use a login response template") =>
+        {
+            Ok(())
+        }
+        other => Err(format!("expected template rejection, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_simplesign_error_response_keeps_the_detached_signature(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(
+        SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+            .acs_endpoint(AcsEndpoint::post(SP_ACS)?.mark_default())
+            .acs_endpoint(AcsEndpoint::simple_sign(
+                "https://sp.example.com/acs/simple-sign",
+            )?)
+            .credentials(credentials())
+            .validation(SpValidationPolicy::strict())
+            .build()?,
+    )?;
+    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let (sp_descriptor, _) = descriptors(&sp, &idp)?;
+    let response = idp.initiate_sso(
+        &sp_descriptor,
+        subject(),
+        RespondSso::simple_sign().status(Status::responder()),
+    )?;
+    let form = response.post_form()?;
+    let xml = response_xml(&response)?;
+
+    assert_error_response_has_no_assertion(&xml)?;
+    assert!(xml.contains("Destination=\"https://sp.example.com/acs/simple-sign\""));
+    assert!(form.value("Signature").is_some());
+    assert!(form.value("SigAlg").is_some());
+    assert!(!xml.contains("<ds:Signature"));
+    Ok(())
+}
+
+#[cfg(not(feature = "crypto-fips"))]
+#[test]
+fn typed_error_response_stays_plaintext_when_assertion_encryption_is_on(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let encryption = XmlPolicy {
+        encryption: XmlEncryptionPolicy::encrypt_assertions()
+            .with_insecure_software_rsa_key_transport_decryption_allowed(),
+        ..XmlPolicy::default()
+    };
+    let sp = sp_with(SpValidationPolicy::strict())?;
+    let idp = Saml::idp(
+        IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+            .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+            .credentials(credentials())
+            .validation(IdpValidationPolicy::strict())
+            .xml(encryption)
+            .build()?,
+    )?;
+    let (sp_descriptor, _) = descriptors(&sp, &idp)?;
+    let response = idp.initiate_sso(
+        &sp_descriptor,
+        subject(),
+        RespondSso::post().status(Status::responder()),
+    )?;
+    let xml = response_xml(&response)?;
+
+    assert_error_response_has_no_assertion(&xml)?;
+    assert!(!xml.contains("EncryptedData"));
+    assert!(xml.contains("<ds:Signature"));
     Ok(())
 }

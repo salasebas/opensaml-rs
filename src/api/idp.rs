@@ -111,7 +111,8 @@ impl Saml<Idp> {
     /// with the response binding or SP metadata, required metadata or signing
     /// keys are missing, the configured issuance expiration overflows the
     /// supported timestamp range, producer rules are combined with a custom
-    /// login response template, or response creation fails.
+    /// login response template, an error status is combined with a login
+    /// response template, or response creation fails.
     pub fn respond_sso(
         &self,
         sp: &SpDescriptor,
@@ -131,7 +132,8 @@ impl Saml<Idp> {
     /// parsed, a compatible ACS endpoint or signing key is missing, the
     /// selected binding is unsupported, the configured issuance expiration
     /// overflows the supported timestamp range, producer rules are combined
-    /// with a custom login response template, or response creation fails.
+    /// with a custom login response template, an error status is combined with
+    /// a login response template, or response creation fails.
     ///
     /// # Examples
     ///
@@ -222,6 +224,7 @@ impl Saml<Idp> {
                     name_id_format: name_id_format.as_deref(),
                     issuance_lifetime: Some(self.0.issuance_lifetime),
                     web_browser_sso_producer: options.web_browser_sso_producer,
+                    status: options.status.as_ref(),
                 },
             )?;
         Outbound::<SsoResponse>::try_from(context)
