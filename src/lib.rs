@@ -168,8 +168,9 @@
 //! applies no library-selected maximum age to it. Optional UTC
 //! `NotOnOrAfter` values are rejected at their skew-adjusted exclusive
 //! deadline as a fail-closed saml-rs policy, not an OASIS receiver `MUST`.
-//! [`ClockSkew`] controls that tolerance, and replay storage uses the same
-//! effective deadline when it is present.
+//! A new [`SamlValidationContext`] allows five minutes of skew on that
+//! deadline. [`ClockSkew::strict`] keeps the tolerance at zero, and replay
+//! storage uses the same effective deadline when it is present.
 //!
 //! ```no_run
 //! use saml_rs::{
@@ -390,8 +391,8 @@ pub use model::{
     ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, MessageId, NameId,
     NameIdCreationRequest, NameIdPolicy, Received, RelayState, RelayStateParam, ReplayCache,
     ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex, SsoResponse,
-    SsoSession, Subject, SubjectConfirmation, VerifiedXmlSignature, VerifiedXmlSignatureCoverage,
-    MAX_RELAY_STATE_BYTES,
+    SsoSession, Status, Subject, SubjectConfirmation, SubordinateStatusCode, TopLevelStatusCode,
+    VerifiedXmlSignature, VerifiedXmlSignatureCoverage, MAX_RELAY_STATE_BYTES,
 };
 #[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;
