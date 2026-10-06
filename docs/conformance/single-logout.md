@@ -90,3 +90,14 @@ Propagating logout to every other participant is outside one `start_slo` or
 An `http` `Destination` remains acceptable when it is the recipient's
 endpoint. The TLS recommendation obligates the party sending the user agent.
 It does not become a receiver rejection.
+
+## Browser bindings
+
+Typed logout send and receive use HTTP-Redirect, HTTP-POST, and
+HTTP-POST-SimpleSign for `LogoutRequest` and `LogoutResponse`.
+
+| Rule | Actor | Direction | Level |
+| --- | --- | --- | --- |
+| `RelayState` does not exceed 80 bytes | Either role | Generate and inbound | Mandatory prohibition. Bindings §3.4.3, §3.5.3, and HTTP-POST-SimpleSign CD-04 §2.3. Integrity protection remains a recommendation |
+| HTTP-Redirect removes a protocol `ds:Signature` before raw DEFLATE and signs or verifies `SAMLRequest` or `SAMLResponse`, `RelayState` when present, then `SigAlg` | Either role | Generate and inbound | Mandatory. Bindings §3.4.4.1. Generation rejects an unsigned redirect that still has a protocol signature. Inbound verification uses the original URL-encoded values. An absent `RelayState` is omitted |
+| HTTP-POST-SimpleSign signs or verifies the raw XML octets, then `RelayState` when present, then `SigAlg` | Either role | Generate and inbound | Mandatory when that binding is used. CD-04 §2.5 and §2.6. An XML signature inside the message stays |

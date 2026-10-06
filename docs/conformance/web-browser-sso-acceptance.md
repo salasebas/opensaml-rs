@@ -15,8 +15,8 @@ bundle. That bundle is unchanged and does not select the RSA-SHA2 XML-DSig
 profile.
 
 Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected
-by Approved Errata 05. Schema citations are the OASIS assertion and protocol
-schemas.
+by Approved Errata 05. HTTP-POST-SimpleSign is the supported CD04 binding.
+Schema citations are the OASIS assertion and protocol schemas.
 
 Outbound AuthnRequest signing, identifier creation, and logout are not part of
 the service-provider accept combination. Single Logout acceptance is classified
@@ -47,6 +47,8 @@ select the accept combination by setting the fields below.
 | Apply a caller-supplied outstanding logout to a later assertion for the same principal and session | Accepting service provider | Inbound `finish_sso_with_outstanding_logout` and `accept_unsolicited_sso_with_outstanding_logout` | Mandatory when the caller supplies the logout. Core §3.7.3.1. Typed NameID values must be equal, and a `Format` on the logout must match (Core §3.3.4). An omitted `Format` compares values only; a typed `LogoutRequest` NameID does not carry `Format`. `NameQualifier`, `SPNameQualifier`, and `SPProvidedID` are not compared. No `SessionIndex` applies to every session of that principal. The context `NotOnOrAfter` skew applies. At or after that deadline the logout does not reject. `finish_sso` and `accept_unsolicited_sso` omit the check. No session store |
 | A present `Destination` identifies the actual recipient | Accepting service provider | Inbound | Mandatory. Core §3.2.2. A signed HTTP-Redirect or HTTP-POST message carries `Destination`, and the recipient verifies it |
 | Check the bearer `Address` | Accepting service provider | Inbound | Optional. Stays off. Profiles §4.1.4.3 |
+| `RelayState` does not exceed 80 bytes | Accepting service provider | Inbound `finish_sso` and `accept_unsolicited_sso` | Mandatory prohibition. Bindings §3.5.3 and HTTP-POST-SimpleSign CD-04 §2.3 |
+| HTTP-POST-SimpleSign verifies the raw XML octets, then `RelayState` when present, then `SigAlg` | Accepting service provider | Inbound | Mandatory when that binding is used. CD-04 §2.6. An absent `RelayState` is omitted |
 
 ## Identity provider
 
@@ -67,3 +69,6 @@ is `AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent`.
 | No identifier in that `Subject` means the presenter is the requested subject | Identity provider | Inbound `receive_sso` | Core §3.4.1. `<BaseID>` and `<EncryptedID>` stay distinct and are not decoded |
 | Requested `<NameID>` keeps its content and qualifier attributes | Identity provider | Inbound `receive_sso` | Core §3.3.4. A qualified `NameQualifier`, `SPNameQualifier`, or `SPProvidedID` is rejected |
 | One `Subject` and one identifier element | Identity provider | Inbound `receive_sso` | A second `Subject`, a second identifier, or a foreign namespace is rejected |
+| `RelayState` does not exceed 80 bytes | Identity provider | Inbound `receive_sso` | Mandatory prohibition. Bindings §3.4.3, §3.5.3, and HTTP-POST-SimpleSign CD-04 §2.3 |
+| HTTP-Redirect verifies `SAMLRequest`, `RelayState` when present, then `SigAlg`, using the original URL-encoded values | Identity provider | Inbound AuthnRequest | Mandatory when the request is signed with that binding. Bindings §3.4.4.1. The message is raw-inflated after base64 decoding |
+| HTTP-POST-SimpleSign verifies the raw XML octets, then `RelayState` when present, then `SigAlg` | Identity provider | Inbound AuthnRequest | Mandatory when that binding is used. CD-04 §2.6 |

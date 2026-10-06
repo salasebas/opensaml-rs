@@ -333,9 +333,7 @@ fn validate_outbound_root_child(
         }
         (b"Signature", NamespaceKind::Dsig, RootStage::AfterIssuer) => {
             if !expectation.validation.root_signature_allowed() {
-                // Library policy centralizes root signature construction. This
-                // also ensures Redirect can meet Bindings 2.0 §3.4.4.1 before
-                // DEFLATE without teaching generic binding helpers about XML.
+                // HTTP-Redirect removes a protocol signature before DEFLATE.
                 return Err(profile_error(
                     "outbound LogoutResponse templates must not contain a root ds:Signature before library signing",
                 ));
