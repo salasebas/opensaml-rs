@@ -188,21 +188,15 @@ impl Saml<Sp> {
         finish_validated_session(session, &mut validation, None)
     }
 
-    /// Finish SP-initiated SSO and apply an outstanding logout.
+    /// Finish SP-initiated SSO and apply an [`OutstandingLogout`].
     ///
-    /// `outstanding_logout` is a `LogoutRequest` the caller has already
-    /// accepted. A later assertion for that principal and session is rejected
-    /// while validation time is still before its `NotOnOrAfter`, using the
-    /// validation context's `NotOnOrAfter` clock skew. The bearer assertion
-    /// identifier is still recorded for replay when the response is otherwise
-    /// valid.
+    /// A match is rejected. The assertion identifier is still recorded for
+    /// replay.
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError::AssertionMatchesOutstandingLogout`] when the
-    /// assertion matches the outstanding logout and that logout is still
-    /// before `NotOnOrAfter`. Also returns the errors documented on
-    /// [`Self::finish_sso`].
+    /// Returns [`SamlError::AssertionMatchesOutstandingLogout`] when the logout
+    /// matches. Also returns the errors documented on [`Self::finish_sso`].
     pub fn finish_sso_with_outstanding_logout(
         &self,
         idp: &IdpDescriptor,
@@ -238,17 +232,12 @@ impl Saml<Sp> {
         finish_validated_session(session, &mut validation, None)
     }
 
-    /// Accept an IdP-initiated SSO response and apply an outstanding logout.
-    ///
-    /// The logout rules are the same as
-    /// [`Self::finish_sso_with_outstanding_logout`].
+    /// Accept an IdP-initiated SSO response and apply an [`OutstandingLogout`].
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError::AssertionMatchesOutstandingLogout`] when the
-    /// assertion matches the outstanding logout and that logout is still
-    /// before `NotOnOrAfter`. Also returns the errors documented on
-    /// [`Self::accept_unsolicited_sso`].
+    /// Returns the errors documented on [`Self::finish_sso_with_outstanding_logout`]
+    /// and [`Self::accept_unsolicited_sso`].
     pub fn accept_unsolicited_sso_with_outstanding_logout(
         &self,
         idp: &IdpDescriptor,

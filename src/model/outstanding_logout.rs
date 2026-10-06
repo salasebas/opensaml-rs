@@ -9,25 +9,12 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 /// A `LogoutRequest` the caller has already accepted.
 ///
-/// It names one principal, the sessions that logout ended, and
-/// `NotOnOrAfter`. Pass it to
-/// [`Saml<Sp>::finish_sso_with_outstanding_logout`] or
+/// Pass it to [`Saml<Sp>::finish_sso_with_outstanding_logout`] or
 /// [`Saml<Sp>::accept_unsolicited_sso_with_outstanding_logout`]. The library
-/// does not store it.
-///
-/// While validation time is still before `NotOnOrAfter`, including the
-/// validation context's `NotOnOrAfter` clock skew, a later assertion for that
-/// principal and session is rejected. At or after that deadline the logout
-/// does not reject the assertion.
-///
-/// The principal matches when the NameID values are equal. When this logout
-/// includes a [`NameId`] format, the assertion NameID format must be identical,
-/// as in Core §3.3.4. When the logout omits `Format`, only the values are
-/// compared: a typed `LogoutRequest` NameID does not carry `Format`.
-/// `NameQualifier`, `SPNameQualifier`, and `SPProvidedID` are not on [`NameId`]
-/// and are not compared.
-/// An empty session list means the logout carried no `SessionIndex` and
-/// applies to every session of the principal.
+/// does not store it. NameID values must be equal. A `Format` on the logout
+/// must match; an omitted `Format` compares values only. An empty session list
+/// applies to every session of that principal. The classification is in
+/// `docs/conformance/web-browser-sso-acceptance.md`.
 ///
 /// [`Saml<Sp>::finish_sso_with_outstanding_logout`]: crate::Saml::finish_sso_with_outstanding_logout
 /// [`Saml<Sp>::accept_unsolicited_sso_with_outstanding_logout`]: crate::Saml::accept_unsolicited_sso_with_outstanding_logout

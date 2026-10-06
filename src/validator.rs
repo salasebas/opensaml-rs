@@ -57,8 +57,6 @@ pub(crate) fn logout_request_not_on_or_after_deadline(
 }
 
 /// `NotOnOrAfter` plus the validation context's `NotOnOrAfter` clock skew.
-///
-/// The instant is still in force while `now` is before the returned deadline.
 pub(crate) fn effective_not_on_or_after(
     deadline: OffsetDateTime,
     not_on_or_after_skew_ms: i64,
