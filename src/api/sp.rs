@@ -2,7 +2,8 @@ use crate::browser::{BrowserInput, Outbound, PendingAuthnRequest, SsoResponseBin
 use crate::config::IdpDescriptor;
 use crate::flow::{FlowResultWithSignatureEvidence, HttpRequest};
 use crate::model::{
-    AuthnRequest, SamlValidationContext, SsoResponse, SsoSession, VerifiedXmlSignature,
+    AuthnRequest, OutstandingLogout, SamlValidationContext, SsoResponse, SsoSession,
+    VerifiedXmlSignature,
 };
 use crate::sp::{LoginRequestOptions, LoginResponseParseOptions, ServiceProvider};
 
@@ -27,6 +28,22 @@ fn session_from_verified_flow(
         })
         .collect();
     SsoSession::try_from_with_verified_xml_signatures(flow, verified_xml_signatures)
+}
+
+fn finish_validated_session(
+    session: SsoSession,
+    validation: &mut SamlValidationContext<'_>,
+    outstanding_logout: Option<&OutstandingLogout>,
+) -> Result<SsoSession, SamlError> {
+    let matches_outstanding_logout = match outstanding_logout {
+        Some(logout) => logout.matches_unexpired(&session, validation)?,
+        None => false,
+    };
+    session.check_and_store_replay(validation)?;
+    if matches_outstanding_logout {
+        return Err(SamlError::AssertionMatchesOutstandingLogout);
+    }
+    Ok(session)
 }
 
 impl Saml<Sp> {
@@ -122,6 +139,10 @@ impl Saml<Sp> {
 
     /// Finish SP-initiated SSO using stored pending AuthnRequest state.
     ///
+    /// This accepts the response without applying an outstanding logout. Use
+    /// [`Self::finish_sso_with_outstanding_logout`] to reject a later assertion
+    /// that matches one.
+    ///
     /// # Errors
     ///
     /// Returns [`SamlError`] when the response does not match the pending
@@ -163,6 +184,78 @@ impl Saml<Sp> {
         input: BrowserInput<SsoResponse>,
         mut validation: SamlValidationContext<'_>,
     ) -> Result<SsoSession, SamlError> {
+        let session = self.parsed_sso_session(idp, pending, input, &validation)?;
+        finish_validated_session(session, &mut validation, None)
+    }
+
+    /// Finish SP-initiated SSO and apply an [`OutstandingLogout`].
+    ///
+    /// A match is rejected. The assertion identifier is still recorded for
+    /// replay.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::AssertionMatchesOutstandingLogout`] when the logout
+    /// matches. Also returns the errors documented on [`Self::finish_sso`].
+    pub fn finish_sso_with_outstanding_logout(
+        &self,
+        idp: &IdpDescriptor,
+        pending: &PendingAuthnRequest,
+        input: BrowserInput<SsoResponse>,
+        mut validation: SamlValidationContext<'_>,
+        outstanding_logout: &OutstandingLogout,
+    ) -> Result<SsoSession, SamlError> {
+        let session = self.parsed_sso_session(idp, pending, input, &validation)?;
+        finish_validated_session(session, &mut validation, Some(outstanding_logout))
+    }
+
+    /// Accept an IdP-initiated SSO response explicitly.
+    ///
+    /// This accepts the response without applying an outstanding logout. Use
+    /// [`Self::accept_unsolicited_sso_with_outstanding_logout`] to reject a
+    /// later assertion that matches one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError`] when the browser binding is not valid for SSO
+    /// responses, `RelayState` exceeds 80 bytes, the IdP metadata cannot be
+    /// parsed or trusted, XML parsing or signature verification fails,
+    /// destination, recipient, audience, or time validation fails, or replay
+    /// validation returns `ReplayDetected` or `TimeWindowInvalid`.
+    pub fn accept_unsolicited_sso(
+        &self,
+        idp: &IdpDescriptor,
+        input: BrowserInput<SsoResponse>,
+        mut validation: SamlValidationContext<'_>,
+    ) -> Result<SsoSession, SamlError> {
+        let session = self.parsed_unsolicited_session(idp, input, &validation)?;
+        finish_validated_session(session, &mut validation, None)
+    }
+
+    /// Accept an IdP-initiated SSO response and apply an [`OutstandingLogout`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors documented on [`Self::finish_sso_with_outstanding_logout`]
+    /// and [`Self::accept_unsolicited_sso`].
+    pub fn accept_unsolicited_sso_with_outstanding_logout(
+        &self,
+        idp: &IdpDescriptor,
+        input: BrowserInput<SsoResponse>,
+        mut validation: SamlValidationContext<'_>,
+        outstanding_logout: &OutstandingLogout,
+    ) -> Result<SsoSession, SamlError> {
+        let session = self.parsed_unsolicited_session(idp, input, &validation)?;
+        finish_validated_session(session, &mut validation, Some(outstanding_logout))
+    }
+
+    fn parsed_sso_session(
+        &self,
+        idp: &IdpDescriptor,
+        pending: &PendingAuthnRequest,
+        input: BrowserInput<SsoResponse>,
+        validation: &SamlValidationContext<'_>,
+    ) -> Result<SsoSession, SamlError> {
         ensure_entity_id(pending.idp_entity_id(), idp.entity_id())?;
         ensure_sso_response_binding(input_binding(&input), pending.response_binding())?;
         ensure_relay_state(pending.relay_state(), &relay_state_from_input(&input)?)?;
@@ -181,25 +274,14 @@ impl Saml<Sp> {
                 )
                 .with_expected_recipient(pending.acs().location().as_str()),
             )?;
-        let session = session_from_verified_flow(flow)?;
-        session.check_and_store_replay(&mut validation)?;
-        Ok(session)
+        session_from_verified_flow(flow)
     }
 
-    /// Accept an IdP-initiated SSO response explicitly.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SamlError`] when the browser binding is not valid for SSO
-    /// responses, `RelayState` exceeds 80 bytes, the IdP metadata cannot be
-    /// parsed or trusted, XML parsing or signature verification fails,
-    /// destination, recipient, audience, or time validation fails, or replay
-    /// validation returns `ReplayDetected` or `TimeWindowInvalid`.
-    pub fn accept_unsolicited_sso(
+    fn parsed_unsolicited_session(
         &self,
         idp: &IdpDescriptor,
         input: BrowserInput<SsoResponse>,
-        mut validation: SamlValidationContext<'_>,
+        validation: &SamlValidationContext<'_>,
     ) -> Result<SsoSession, SamlError> {
         relay_state_from_input(&input)?;
         let binding = SsoResponseBinding::try_from(input_binding(&input))?;
@@ -214,8 +296,6 @@ impl Saml<Sp> {
                 validation.now(),
                 validation.clock_skew().as_millis(),
             )?;
-        let session = session_from_verified_flow(flow)?;
-        session.check_and_store_replay(&mut validation)?;
-        Ok(session)
+        session_from_verified_flow(flow)
     }
 }

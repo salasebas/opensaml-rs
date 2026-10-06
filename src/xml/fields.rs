@@ -12,10 +12,46 @@ pub fn login_request_fields() -> Vec<ExtractorField> {
             "AssertionConsumerServiceURL",
             "ProtocolBinding",
             "AssertionConsumerServiceIndex",
+            "ForceAuthn",
+            "IsPassive",
         ]),
         ExtractorField::new("issuer", &["AuthnRequest", "Issuer"]),
         ExtractorField::new("nameIDPolicy", &["AuthnRequest", "NameIDPolicy"])
             .attrs(&["Format", "AllowCreate"]),
+        ExtractorField::new("requestedSubject", &["AuthnRequest", "Subject"]).with_context(),
+        ExtractorField::new("requestedNameId", &["AuthnRequest", "Subject", "NameID"]),
+        ExtractorField::new(
+            "requestedNameIdFormat",
+            &["AuthnRequest", "Subject", "NameID"],
+        )
+        .attrs(&["Format"]),
+        ExtractorField::new(
+            "requestedNameQualifier",
+            &["AuthnRequest", "Subject", "NameID"],
+        )
+        .attrs(&["NameQualifier"]),
+        ExtractorField::new(
+            "requestedSpNameQualifier",
+            &["AuthnRequest", "Subject", "NameID"],
+        )
+        .attrs(&["SPNameQualifier"]),
+        ExtractorField::new(
+            "requestedSpProvidedId",
+            &["AuthnRequest", "Subject", "NameID"],
+        )
+        .attrs(&["SPProvidedID"]),
+        ExtractorField::new("requestedBaseId", &["AuthnRequest", "Subject", "BaseID"])
+            .with_context(),
+        ExtractorField::new(
+            "requestedEncryptedId",
+            &["AuthnRequest", "Subject", "EncryptedID"],
+        )
+        .with_context(),
+        ExtractorField::new(
+            "requestedSubjectConfirmation",
+            &["AuthnRequest", "Subject", "SubjectConfirmation"],
+        )
+        .with_context(),
         ExtractorField::new(
             "authnContextClassRef",
             &["AuthnRequest", "AuthnContextClassRef"],
