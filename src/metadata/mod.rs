@@ -63,6 +63,33 @@ pub(crate) fn as_object_list(value: &Value) -> Vec<&Value> {
     }
 }
 
+fn entity_descriptor_xml<'a>(xml: &'a str, roots: &[dom::Node]) -> Result<&'a str, SamlError> {
+    let [root] = roots else {
+        return Ok(xml);
+    };
+    if root.local_name != "EntitiesDescriptor" {
+        return Ok(xml);
+    }
+    let mut entities = Vec::new();
+    collect_entity_descriptors(root, &mut entities);
+    match entities.as_slice() {
+        [entity] => Ok(&xml[entity.start..entity.end]),
+        [] => Err(SamlError::MissingMetadata("EntityDescriptor".into())),
+        _ => Err(SamlError::Xml(
+            "ERR_MULTIPLE_METADATA_ENTITYDESCRIPTOR".into(),
+        )),
+    }
+}
+
+fn collect_entity_descriptors<'a>(node: &'a dom::Node, found: &mut Vec<&'a dom::Node>) {
+    if node.local_name == "EntityDescriptor" {
+        found.push(node);
+    }
+    for child in &node.children {
+        collect_entity_descriptors(child, found);
+    }
+}
+
 fn location_for_binding(value: Option<&Value>, binding: Binding) -> Option<String> {
     let value = value?;
     for obj in as_object_list(value) {
@@ -83,7 +110,8 @@ pub struct Metadata {
 impl Metadata {
     /// Parse `xml`, adding the role-specific `extra` extractor fields.
     ///
-    /// Rejects documents carrying more than one top-level `<EntityDescriptor>`.
+    /// Rejects documents carrying more than one `<EntityDescriptor>`. A root
+    /// `<EntitiesDescriptor>` is accepted when it contains exactly one entity.
     ///
     /// # Errors
     ///
@@ -118,7 +146,8 @@ impl Metadata {
 
         let mut fields = base_fields();
         fields.extend(extra);
-        let mut meta = extract_with_limits(xml, &fields, limits)?;
+        let extraction_xml = entity_descriptor_xml(xml, &roots)?;
+        let mut meta = extract_with_limits(extraction_xml, &fields, limits)?;
 
         // A single shared certificate is used for both signing and encryption.
         if let Some(shared) = meta.get_str("sharedCertificate") {

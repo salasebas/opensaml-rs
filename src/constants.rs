@@ -240,6 +240,8 @@ pub mod transform_algorithm {
     pub const ENVELOPED_SIGNATURE: &str = "http://www.w3.org/2000/09/xmldsig#enveloped-signature";
     /// Exclusive XML canonicalization (also the canonicalization method).
     pub const EXC_C14N: &str = "http://www.w3.org/2001/10/xml-exc-c14n#";
+    /// Exclusive XML canonicalization, retaining comments.
+    pub const EXC_C14N_WITH_COMMENTS: &str = "http://www.w3.org/2001/10/xml-exc-c14n#WithComments";
 }
 
 /// Query/form parameter names (`wording.urlParams`).

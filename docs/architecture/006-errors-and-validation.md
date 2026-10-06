@@ -193,10 +193,12 @@ impl MetadataSignatureVerification {
 Rules:
 
 - `RequireSignature` requires `verification.verified() == true`.
-- It must prove the consumed `EntityDescriptor` is covered by a signed
-  reference and preserve the signed descriptor XML as trust evidence.
-- It must reject metadata signature transforms that can narrow the referenced
-  node set, such as XPath/XSLT transforms.
-- If coverage cannot be determined, fail closed with `SignedReferenceMismatch`.
+- The signed root must carry an identifier and one enveloped `#id` reference.
+  `RequireSignatureAllowingOtherCanonicalization` also accepts inclusive
+  canonicalization. See `docs/conformance/metadata-and-replay.md`.
+- It must prove that signed root is covered and preserve its XML as trust
+  evidence.
+- If the signature shape or coverage cannot be determined, fail closed with
+  `SignedReferenceMismatch`.
 - If no pinned certificate verifies the metadata signature, fail closed with a
   branchable signature/trust error such as `SignatureVerification`.

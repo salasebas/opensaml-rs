@@ -248,9 +248,11 @@
 //! accept unsigned metadata with
 //! [`MetadataTrustPolicy::UnsignedForCompatibility`] to preserve a samlify-port
 //! or raw import, or require a signature from caller-provided certificates with
-//! [`MetadataTrustPolicy::RequireSignature`]. Prefer signed metadata with pinned
-//! certificates for production trust decisions; the crate does not treat the
-//! public web PKI CA store as SAML metadata trust.
+//! [`MetadataTrustPolicy::RequireSignature`].
+//! [`MetadataTrustPolicy::RequireSignatureAllowingOtherCanonicalization`]
+//! also accepts inclusive canonicalization. Prefer signed metadata with
+//! pinned certificates for production trust decisions; the crate does not treat
+//! the public web PKI CA store as SAML metadata trust.
 //!
 //! # Raw samlify-port API
 //!
