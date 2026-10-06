@@ -96,6 +96,8 @@ pub enum TimeWindowField {
     /// Expiration derived from the typed IdP issuance lifetime could not be
     /// represented for the current issue instant.
     IdpIssuanceExpiration,
+    /// AuthnRequest `IssueInstant` age window.
+    AuthnRequestIssueInstant,
     /// LogoutRequest `NotOnOrAfter`.
     LogoutRequestNotOnOrAfter,
     /// Assertion session `SessionNotOnOrAfter`.
@@ -110,6 +112,7 @@ impl fmt::Display for TimeWindowField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::IdpIssuanceExpiration => f.write_str("IdP issuance expiration"),
+            Self::AuthnRequestIssueInstant => f.write_str("AuthnRequest@IssueInstant"),
             Self::LogoutRequestNotOnOrAfter => f.write_str("LogoutRequest@NotOnOrAfter"),
             Self::SessionNotOnOrAfter => f.write_str("SessionNotOnOrAfter"),
             Self::Conditions => f.write_str("Conditions"),
