@@ -8,6 +8,10 @@ work in the repo, not restate the README.
 
 - `src/` contains the implementation. Put protocol, XML, metadata, binding,
   validation, logout, and crypto-adapter changes there.
+- `docs/module-map.md` names the file for typed SSO, assertion acceptance,
+  raw parse, signature verification, validation presets, logout, and the
+  compatibility crates. Read it before searching `flow.rs`, `idp.rs`, `sp.rs`,
+  or `crypto/verify.rs`.
 - `tests/` contains integration tests and committed fixtures.
 - `examples/` contains runnable examples.
 - XML cryptography is delegated to `bergshamra` behind the default
@@ -100,6 +104,8 @@ job in `.github/workflows/ci.yml`.
   implementations are expected to use them.
 - Comments describe behavior and API usage. Do not justify why an
   implementation was chosen.
+- The normative note for a claimed feature is its row in `docs/conformance/`.
+  A code comment names the behavior.
 - Use inline format arguments, collapse nested `if` statements when clear, and
   prefer method references over redundant closures.
 - In tests, return `Result<(), Box<dyn std::error::Error>>` and use `?` instead
@@ -111,9 +117,8 @@ job in `.github/workflows/ci.yml`.
 - Keep security-sensitive validation fail-closed. Missing, malformed, unsigned,
   or untrusted inputs should produce explicit `SamlError` variants where
   practical.
-- Avoid growing large modules. Prefer new focused modules over extending files
-  that are already large, especially `idp.rs`, `logout.rs`, `flow.rs`, and
-  `sp.rs`.
+- Prefer new focused modules over extending a large module listed in
+  `docs/module-map.md`.
 
 ## Security-Sensitive Areas
 
@@ -137,6 +142,8 @@ Add regression tests for security fixes.
   Commits on the release PR.
 - A breaking change updates `docs/migrations/` in the same change: what breaks,
   who must change, and how to upgrade. Follow `docs/migrations/README.md`.
+  The last guide linked from that README covers the latest published minor.
+  An unreleased break is a new file, linked from that README.
   Compatible features are recorded by their Conventional Commit.
 
 ## Agent skills

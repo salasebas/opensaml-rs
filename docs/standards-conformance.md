@@ -74,11 +74,13 @@ the applicable scope, including:
 - binding;
 - optional capability, attribute profile, or extension, when applicable.
 
-Parsing or serializing a SAML element, supporting a protocol message, or
-implementing one step of a flow does not by itself imply conformance with an
-entire profile, binding, operational mode, or SAML V2.0 as a whole. A broad
-claim such as "SAML V2.0 conformant" requires a documented support matrix that
-shows the exact claimed features and their normative coverage.
+Operational mode and claimed feature are defined in the
+[glossary](../GLOSSARY.md). Parsing or serializing a SAML element, supporting
+a protocol message, or implementing one step of a flow does not by itself
+imply conformance with an entire profile, binding, operational mode, or
+SAML V2.0 as a whole. A broad claim such as "SAML V2.0 conformant" requires
+a documented support matrix that shows the exact claimed features and their
+normative coverage.
 
 This policy applies to every SAML feature that `saml-rs` implements. It neither
 declares the crate's current support nor limits future support. Bindings,

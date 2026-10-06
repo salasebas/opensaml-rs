@@ -1,5 +1,9 @@
 # Typed Web SSO API
 
+> Design record for the typed API. The live file index is
+> [the module map](../module-map.md). A heading that says Proposed, Target,
+> or Today describes this design.
+
 This note explains the typed browser Web SSO calls, and the constraints that
 keep an illegal binding unrepresentable. The steps for a service-provider
 integration are in

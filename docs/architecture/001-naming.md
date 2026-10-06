@@ -1,5 +1,9 @@
 # Naming
 
+> Design record for the typed API. The live file index is
+> [the module map](../module-map.md). A heading that says Proposed, Target,
+> or Today describes this design.
+
 This note explains which public names are canonical for the typed facade, and
 which names were rejected.
 

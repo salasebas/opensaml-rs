@@ -54,8 +54,13 @@ _Avoid_: strict, profile
 
 **Claimed feature**:
 A SAML behaviour saml-rs already implements, bounded by role, direction,
-profile or flow, and binding.
-_Avoid_: SAML V2.0 as a whole
+profile or flow, and binding. An operational mode is a role in
+[SAML V2.0 Conformance Requirements](https://docs.oasis-open.org/security/saml/v2.0/saml-conformance-2.0-os.pdf)
+§3.1: IdP, IdP Lite, SP, SP Lite, ECP, and the SAML authorities. Table 2 is
+the feature matrix for the IdP and SP columns. A claimed feature is one cell
+of that matrix, a profile or message exchange plus a binding. The cells this
+crate records are in `docs/conformance/`.
+_Avoid_: SAML V2.0 as a whole, an operational-mode column
 
 **Recommended**:
 The validation preset for claimed features. For the obligated actor, mandatory

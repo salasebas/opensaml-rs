@@ -1,7 +1,10 @@
 # Typed API architecture
 
-These notes explain why the typed public API has this shape, matched to the
-facade that is implemented now. They are not the steps for wiring a service
+The live file index is [the module map](../module-map.md).
+
+These notes are the design record for the typed public API. They explain why
+the facade has this shape. A heading that says Proposed, Target, or Today
+describes that design. They are not the steps for wiring a service
 provider; that guide is
 [How to add service-provider SSO](../../README.md#how-to-add-service-provider-sso).
 The package is `saml-rs`. Rust imports it as `saml_rs`. The low-level flow
@@ -12,7 +15,7 @@ under discussion.
 
 - Names that are canonical, and names that were rejected:
   [001-naming.md](001-naming.md).
-- Root exports, modules, and the current-to-new API map:
+- Names proposed for the typed facade, and the raw-to-typed name map:
   [002-public-api-map.md](002-public-api-map.md).
 - SP and IdP browser SSO: [003-web-sso-api.md](003-web-sso-api.md).
 - Typed Single Logout: [004-single-logout-api.md](004-single-logout-api.md).
