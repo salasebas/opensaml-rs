@@ -15,8 +15,8 @@ bundle. That bundle is unchanged and does not select the RSA-SHA2 XML-DSig
 profile.
 
 Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected
-by Approved Errata 05. Schema citations are the OASIS assertion and protocol
-schemas.
+by Approved Errata 05. HTTP-POST-SimpleSign is the supported CD04 binding.
+Schema citations are the OASIS assertion and protocol schemas.
 
 Outbound AuthnRequest signing, identifier creation, and logout are not part of
 the service-provider accept combination. Single Logout acceptance is classified
@@ -39,6 +39,8 @@ select the accept combination by setting the fields below.
 | Bearer `Recipient`, `NotOnOrAfter`, and `InResponseTo` | Accepting service provider | Inbound | Mandatory. Errata 05 E26, Profiles §4.1.4.3. An unsolicited response must not carry `InResponseTo` |
 | A present `Destination` identifies the actual recipient | Accepting service provider | Inbound | Mandatory. Core §3.2.2. A signed HTTP-Redirect or HTTP-POST message carries `Destination`, and the recipient verifies it |
 | Check the bearer `Address` | Accepting service provider | Inbound | Optional. Stays off. Profiles §4.1.4.3 |
+| `RelayState` does not exceed 80 bytes | Accepting service provider | Inbound `finish_sso` and `accept_unsolicited_sso` | Mandatory prohibition. Bindings §3.5.3 and HTTP-POST-SimpleSign CD-04 §2.3 |
+| HTTP-POST-SimpleSign verifies the signature over the raw XML octets, then `RelayState` when present, then `SigAlg` | Accepting service provider | Inbound | Mandatory when that binding is used. CD-04 §2.6. An absent `RelayState` omits the parameter |
 
 ## Identity provider
 
@@ -52,3 +54,6 @@ is `AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent`.
 | UTC `IssueInstant` | Identity provider | Inbound | Mandatory. No off switch. An inbound leap-second value stays accepted |
 | A present `Destination` identifies this identity provider's SSO endpoint | Identity provider | Inbound | Mandatory. Core §3.2.1 |
 | `AssertionConsumerServiceURL` or `AssertionConsumerServiceIndex` belongs to the service provider | Identity provider | Inbound | Mandatory. Profiles §4.1.4.1. The check runs when the response is issued |
+| `RelayState` does not exceed 80 bytes | Identity provider | Inbound `receive_sso` | Mandatory prohibition. Bindings §3.4.3, which Approved Errata 05 E1 does not change, §3.5.3, and HTTP-POST-SimpleSign CD-04 §2.3 |
+| HTTP-Redirect verifies the detached signature over `SAMLRequest`, `RelayState` when present, then `SigAlg` | Identity provider | Inbound AuthnRequest | Mandatory when the request is signed with that binding. Bindings §3.4.4.1. The verifier uses the original URL-encoded query values and rebuilds that order. The message is raw-inflated after base64 decoding |
+| HTTP-POST-SimpleSign verifies the signature over the raw XML octets, then `RelayState` when present, then `SigAlg` | Identity provider | Inbound AuthnRequest | Mandatory when that binding is used. CD-04 §2.6 |
