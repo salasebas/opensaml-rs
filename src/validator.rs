@@ -47,17 +47,27 @@ pub(crate) fn logout_request_not_on_or_after_deadline(
         OffsetDateTime::parse(normalized, &Rfc3339).map_err(|_| SamlError::TimeWindowInvalid {
             field: TimeWindowField::LogoutRequestNotOnOrAfter,
         })?;
-    let effective_deadline = deadline
-        .checked_add(Duration::milliseconds(not_on_or_after_skew_ms))
-        .ok_or(SamlError::TimeWindowInvalid {
-            field: TimeWindowField::LogoutRequestNotOnOrAfter,
-        })?;
+    let effective_deadline = effective_not_on_or_after(deadline, not_on_or_after_skew_ms)?;
     if now >= effective_deadline {
         return Err(SamlError::TimeWindowInvalid {
             field: TimeWindowField::LogoutRequestNotOnOrAfter,
         });
     }
     Ok(Some(effective_deadline))
+}
+
+/// `NotOnOrAfter` plus the validation context's `NotOnOrAfter` clock skew.
+///
+/// The instant is still in force while `now` is before the returned deadline.
+pub(crate) fn effective_not_on_or_after(
+    deadline: OffsetDateTime,
+    not_on_or_after_skew_ms: i64,
+) -> Result<OffsetDateTime, SamlError> {
+    deadline
+        .checked_add(Duration::milliseconds(not_on_or_after_skew_ms))
+        .ok_or(SamlError::TimeWindowInvalid {
+            field: TimeWindowField::LogoutRequestNotOnOrAfter,
+        })
 }
 
 /// Validate a `NotBefore` / `NotOnOrAfter` window.

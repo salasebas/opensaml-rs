@@ -103,6 +103,7 @@ fn typed_api_contract_reexports_browser_and_model_types() {
     let _ = std::any::type_name::<saml_rs::LogoutCompleted>();
     let _ = std::any::type_name::<saml_rs::LogoutRequest>();
     let _ = std::any::type_name::<saml_rs::LogoutResponse>();
+    let _ = std::any::type_name::<saml_rs::OutstandingLogout>();
     let _ = std::any::type_name::<saml_rs::NameId>();
     let _ = std::any::type_name::<saml_rs::NameIdPolicy>();
     let _ = std::any::type_name::<saml_rs::Received<saml_rs::SsoResponse>>();
