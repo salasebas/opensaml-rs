@@ -4,6 +4,7 @@ mod algorithms;
 mod builders;
 mod credentials;
 mod descriptors;
+mod metadata_signature_shape;
 mod metadata_trust;
 mod policies;
 

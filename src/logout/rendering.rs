@@ -1,7 +1,8 @@
-use crate::constants::{namespace, status_code};
+use crate::constants::namespace;
 use crate::entity::{EntitySetting, User};
 use crate::error::SamlError;
 use crate::metadata::Metadata;
+use crate::model::Status;
 use crate::template::validate_tag_prefix;
 use crate::xml::write::XmlWriter;
 
@@ -39,6 +40,7 @@ pub(super) fn render_default_logout_response(
     destination: &str,
     in_response_to: Option<&str>,
     issuer: &str,
+    status: &Status,
 ) -> Result<String, SamlError> {
     validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
     validate_tag_prefix("assertion", &setting.tag_prefix_assertion)?;
@@ -47,8 +49,6 @@ pub(super) fn render_default_logout_response(
     let assertion_prefix = &setting.tag_prefix_assertion;
     let root_name = format!("{protocol_prefix}:LogoutResponse");
     let issuer_name = format!("{assertion_prefix}:Issuer");
-    let status_name = format!("{protocol_prefix}:Status");
-    let status_code_name = format!("{protocol_prefix}:StatusCode");
     let xmlns_protocol = format!("xmlns:{protocol_prefix}");
     let xmlns_assertion = format!("xmlns:{assertion_prefix}");
     let mut attrs = vec![
@@ -66,11 +66,24 @@ pub(super) fn render_default_logout_response(
     let mut writer = XmlWriter::new();
     writer.start(&root_name, &attrs);
     writer.text_element(&issuer_name, &[], issuer);
-    writer.start(&status_name, &[]);
-    writer.empty(&status_code_name, &[("Value", status_code::SUCCESS)]);
-    writer.end(&status_name);
+    write_logout_status(&mut writer, protocol_prefix, status);
     writer.end(&root_name);
     Ok(writer.finish())
+}
+
+fn write_logout_status(writer: &mut XmlWriter, protocol_prefix: &str, status: &Status) {
+    let status_name = format!("{protocol_prefix}:Status");
+    let status_code_name = format!("{protocol_prefix}:StatusCode");
+    writer.start(&status_name, &[]);
+    match status.subordinate() {
+        Some(subordinate) => {
+            writer.start(&status_code_name, &[("Value", status.top_level().as_uri())]);
+            writer.empty(&status_code_name, &[("Value", subordinate.as_uri())]);
+            writer.end(&status_code_name);
+        }
+        None => writer.empty(&status_code_name, &[("Value", status.top_level().as_uri())]),
+    }
+    writer.end(&status_name);
 }
 
 pub(super) fn render_default_logout_request(
