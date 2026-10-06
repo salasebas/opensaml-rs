@@ -1,6 +1,6 @@
-//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
+//! Compatibility is the legacy permissive preset.
 //! `RespondSso::allow_unsigned_encrypted_cbc` relaxes Errata 05 E93 and is not that preset.
-
+#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
@@ -26,14 +26,13 @@ use saml_rs::raw::Binding;
 use saml_rs::template::{LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
 use saml_rs::xml::dom::parse;
 use saml_rs::{
-    AcsEndpoint, AssertionSignaturePolicy, AudienceValidationPolicy, AuthnRequest,
-    AuthnRequestValidationPolicy, BrowserInput, CertificatePem, Credentials, EntityId, ForceAuthn,
-    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId,
-    NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
-    RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, ResponseSignaturePolicy,
-    Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
-    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject, TemplatePolicy,
-    VerifiedXmlSignatureCoverage, XmlSignatureProfile,
+    AcsEndpoint, AssertionSignaturePolicy, AudienceValidationPolicy, AuthnRequest, BrowserInput,
+    CertificatePem, Credentials, EntityId, ForceAuthn, FormField, IdpConfig, IdpDescriptor,
+    IdpValidationPolicy, MetadataTrustPolicy, NameId, NameIdFormat, Outbound, PendingAuthnRequest,
+    PendingSnapshot, PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey,
+    ReplayPolicy, RespondSso, ResponseSignaturePolicy, Saml, SamlError, SamlValidationContext,
+    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse, SsoResponseBinding,
+    StartSso, Subject, TemplatePolicy, VerifiedXmlSignatureCoverage, XmlSignatureProfile,
 };
 #[cfg(not(feature = "crypto-fips"))]
 use saml_rs::{XmlEncryptionPolicy, XmlPolicy};
@@ -162,20 +161,11 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
 
 // Field combination exercised by the typed Web Browser SSO accept tests.
 fn recommended_sso_accept_validation() -> SpValidationPolicy {
-    SpValidationPolicy {
-        assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
-        responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
-        xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
-        audience: AudienceValidationPolicy::EvaluatePresentRestrictions,
-        ..SpValidationPolicy::compatibility()
-    }
+    SpValidationPolicy::recommended()
 }
 
 fn recommended_sso_accept_idp_validation() -> IdpValidationPolicy {
-    IdpValidationPolicy {
-        authn_requests: AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent,
-        ..IdpValidationPolicy::compatibility()
-    }
+    IdpValidationPolicy::recommended()
 }
 
 fn signed_idp_metadata() -> Result<String, SamlError> {

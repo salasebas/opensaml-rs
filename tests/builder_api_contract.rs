@@ -3,6 +3,7 @@
     feature = "crypto-aws-lc",
     feature = "crypto-fips"
 ))]
+#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 
 use saml_rs::{
     AcsEndpoint, AuthnRequest, CertificatePem, Credentials, EntityId, IdpConfig, IdpConfigBuilder,

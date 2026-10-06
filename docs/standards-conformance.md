@@ -199,9 +199,11 @@ requirements:
   turning them into inbound rejection rules;
 - keep the conformant default visible in API documentation and tests.
 
-Compatibility is the samlify-port behavior kept for callers leaving the raw
-API. It is not an alternate interpretation of OASIS, and a recommendation
-relaxation does not use that name.
+Recommended is the preset for claimed features. It is not an implementation
+of SAML V2.0 as a whole. Compatibility is the legacy permissive preset: the
+samlify-port behavior kept for callers leaving the raw API. It is not an
+alternate interpretation of OASIS, and a recommendation relaxation does not
+use that name.
 
 ### Optional Capabilities
 

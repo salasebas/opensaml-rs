@@ -33,11 +33,13 @@ let config = SpConfig {
 config.validate()?;
 ```
 
-Builders keep large setup ergonomic while still returning `Result`. Builders use
-strict typed defaults; `SpConfig::new` / `IdpConfig::new`, `try_new`, and public
-`Default` policy values preserve the samlify-port Compatibility defaults so
-callers leaving the raw API do not silently opt into signature requirements
-SAML does not universally require.
+Builders keep large setup ergonomic while still returning `Result`. Builders
+still start on the deprecated `strict()` bundle. `recommended()` is the preset
+for claimed features and is not an implementation of SAML V2.0 as a whole.
+`SpConfig::new` / `IdpConfig::new`, `try_new`, and public `Default` policy
+values stay on Compatibility, the legacy permissive preset, so callers leaving
+the raw API do not silently opt into signature requirements SAML does not
+universally require.
 
 ```rust
 let config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)

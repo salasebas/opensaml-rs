@@ -2,9 +2,13 @@
 
 This record classifies producer rules for typed Web Browser SSO generation:
 service-provider `start_sso`, and identity-provider `respond_sso` and
-`initiate_sso`. It does not publish `recommended()`. `Default`, `new`,
-`try_new`, the config builders, and `strict()` stay on their current presets.
-Raw generation is unchanged.
+`initiate_sso`. `SpValidationPolicy::recommended` leaves AuthnRequest signing
+and identifier creation off. `IdpValidationPolicy::recommended` does not turn
+assertion encryption on. Recommended is the preset for these claimed features.
+It is not an implementation of SAML V2.0 as a whole. Compatibility is the
+legacy permissive preset. `Default`, `new`, and `try_new` stay on
+Compatibility. Config builders stay on the deprecated `strict()` bundle, which
+is unchanged. Raw generation is unchanged.
 
 Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected
 by Approved Errata 05. Schema citations are the OASIS assertion and protocol

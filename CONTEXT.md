@@ -58,9 +58,9 @@ become a receiver rejection.
 _Avoid_: default, full SAML conformance, profile
 
 **Compatibility**:
-The samlify-port behavior kept for a caller leaving the raw API, so the
-builders can preserve that configuration. It does not name a relaxation of an
-OASIS recommendation.
+The legacy permissive preset. It is the samlify-port behavior kept for a
+caller leaving the raw API. It does not claim standards conformance, and it
+does not name a relaxation of an OASIS recommendation.
 _Avoid_: OASIS relaxation, recommended, default
 
 **Raw settings**:

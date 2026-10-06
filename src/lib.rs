@@ -7,9 +7,14 @@
 //! through typed descriptors, and returns pending transaction values that
 //! callers can store with browser session state.
 //!
-//! The dependency-free config builders use strict typed defaults. Opt into
-//! [`SpValidationPolicy::compatibility`] to keep the samlify-port behavior
-//! when leaving the raw API.
+//! [`SpValidationPolicy::recommended`] is the preset for claimed features. It
+//! is not an implementation of SAML V2.0 as a whole.
+//! [`SpValidationPolicy::compatibility`] is the legacy permissive preset, the
+//! samlify-port behavior kept for a caller leaving the raw API. The
+//! dependency-free config builders still start on the deprecated `strict()`
+//! bundle. `Default`, `new`, and `try_new` stay on the legacy permissive
+//! preset.
+//!
 //! Where the compact flow examples below use
 //! [`ReplayPolicy::DisabledForCompatibility`] or unsigned metadata, treat those
 //! as explicit interoperability choices. Production-shaped inbound flows should
@@ -252,8 +257,9 @@
 //! # Raw samlify-port API
 //!
 //! The [`raw`] module is the samlify-port surface. [`SpValidationPolicy::compatibility`]
-//! is the typed name for keeping that behavior on the builders. The two
-//! surfaces keep their own defaults. Advanced callers should import
+//! is the legacy permissive preset for keeping that behavior when leaving the
+//! raw API. The two surfaces keep their own defaults. Config builders still
+//! start on the deprecated `strict()` bundle. Advanced callers should import
 //! [`raw::ServiceProvider`], [`raw::IdentityProvider`], [`raw::HttpRequest`],
 //! and [`raw::BindingContext`] from there rather than using the root re-exports.
 //!

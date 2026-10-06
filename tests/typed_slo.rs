@@ -1,5 +1,5 @@
-//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
-
+//! Compatibility is the legacy permissive preset.
+#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
