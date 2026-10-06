@@ -27,7 +27,6 @@ resolver = "2"
 members = [
     "crates/opensaml",
     "crates/samlify",
-    "crates/rustsaml",
     "crates/samlet",
 ]
 

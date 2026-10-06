@@ -2063,13 +2063,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustsaml"
-version = "0.6.0"
-dependencies = [
- "saml-rs",
-]
-
-[[package]]
 name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
