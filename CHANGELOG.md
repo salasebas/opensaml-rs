@@ -9,6 +9,35 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.6.0](https://github.com/salasebas/saml-rs/compare/v0.5.3...v0.6.0) - 2026-10-06
+
+### Added
+
+- *(sso)* reject a later assertion that matches an outstanding logout ([#168](https://github.com/salasebas/saml-rs/pull/168))
+- *(metadata)* [**breaking**] require the metadata signature shape on signed import
+- *(slo)* let the logout responder choose LogoutResponse status ([#167](https://github.com/salasebas/saml-rs/pull/167))
+- *(conformance)* keep metadata trust and replay as caller arguments ([#149](https://github.com/salasebas/saml-rs/pull/149))
+- *(slo)* honor Recommended rules on typed Single Logout ([#146](https://github.com/salasebas/saml-rs/pull/146))
+- *(sso)* follow Web Browser SSO producer rules when generating ([#144](https://github.com/salasebas/saml-rs/pull/144))
+- *(sso)* honor Recommended when accepting Web Browser SSO ([#143](https://github.com/salasebas/saml-rs/pull/143))
+
+### Fixed
+
+- *(sso)* [**breaking**] reject unrecognized assertion conditions ([#173](https://github.com/salasebas/saml-rs/pull/173))
+
+### Other
+
+- *(migrations)* record the remaining 0.6 upgrade steps ([#176](https://github.com/salasebas/saml-rs/pull/176))
+- separate guides, reference, and explanation ([#174](https://github.com/salasebas/saml-rs/pull/174))
+- Let the identity provider return an error Response with no assertions ([#175](https://github.com/salasebas/saml-rs/pull/175))
+- Enforce HTTP-Redirect signature removal and the RelayState limit ([#172](https://github.com/salasebas/saml-rs/pull/172))
+- Expose ForceAuthn, IsPassive, and Subject on a received AuthnRequest ([#169](https://github.com/salasebas/saml-rs/pull/169))
+- Allow five minutes of clock skew and keep replay until NotOnOrAfter ([#166](https://github.com/salasebas/saml-rs/pull/166))
+- *(deps)* bump bergshamra ([#150](https://github.com/salasebas/saml-rs/pull/150))
+- Publish recommended() and deprecate strict() ([#153](https://github.com/salasebas/saml-rs/pull/153))
+- Point policy docs at the classification records ([#152](https://github.com/salasebas/saml-rs/pull/152))
+- *(api)* [**breaking**] name the CBC signature relaxation for E93 ([#148](https://github.com/salasebas/saml-rs/pull/148))
+
 ## [0.5.3](https://github.com/salasebas/saml-rs/compare/v0.5.2...v0.5.3) - 2026-10-04
 
 ### Fixed
