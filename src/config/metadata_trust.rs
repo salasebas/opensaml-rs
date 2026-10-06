@@ -17,6 +17,7 @@ use crate::xml::XmlLimits;
 
 use super::credentials::CertificatePem;
 use super::descriptors::EntityId;
+use super::metadata_signature_shape::{ensure_import_signature_shape, MetadataSignatureTransforms};
 
 /// Explicit trust policy for imported SAML metadata.
 ///
@@ -54,9 +55,29 @@ use super::descriptors::EntityId;
 #[derive(Debug, Clone, Copy)]
 pub enum MetadataTrustPolicy<'a> {
     /// Accept unsigned metadata to preserve a samlify-port or raw import.
+    ///
+    /// A signature on the document is not treated as verified.
     UnsignedForCompatibility,
     /// Require a valid metadata signature from one of the pinned certificates.
+    ///
+    /// The signature must be enveloped. The signed root must carry an
+    /// identifier, and the signature must contain one reference whose URI is
+    /// `#` plus that identifier. A transform other than enveloped signature or
+    /// exclusive canonicalization is rejected, as is `<ds:Object>`. A root
+    /// `<EntitiesDescriptor>` is held to the same rules as a root
+    /// `<EntityDescriptor>`. See `docs/conformance/metadata-and-replay.md`.
     RequireSignature {
+        /// Caller-pinned certificates trusted to sign the metadata.
+        trusted_certificates: &'a [CertificatePem],
+    },
+    /// Require a pinned metadata signature, and allow inclusive canonicalization.
+    ///
+    /// Metadata §3.1.4 recommends exclusive canonicalization. This option is
+    /// the caller's agreement to accept inclusive canonicalization as well.
+    /// Transforms that can drop part of the signed element, such as XPath or
+    /// XSLT, stay rejected. The identifier, single `#id` reference, enveloped
+    /// signature, `<ds:Object>`, and signed-root coverage checks stay on.
+    RequireSignatureAllowingOtherCanonicalization {
         /// Caller-pinned certificates trusted to sign the metadata.
         trusted_certificates: &'a [CertificatePem],
     },
@@ -112,7 +133,18 @@ where
         }
         MetadataTrustPolicy::RequireSignature {
             trusted_certificates,
-        } => verify_pinned_metadata_signature(metadata, trusted_certificates),
+        } => verify_pinned_metadata_signature(
+            metadata,
+            trusted_certificates,
+            MetadataSignatureTransforms::Profile,
+        ),
+        MetadataTrustPolicy::RequireSignatureAllowingOtherCanonicalization {
+            trusted_certificates,
+        } => verify_pinned_metadata_signature(
+            metadata,
+            trusted_certificates,
+            MetadataSignatureTransforms::AllowOtherCanonicalization,
+        ),
     }
 }
 
@@ -124,16 +156,21 @@ where
 fn verify_pinned_metadata_signature<M>(
     metadata: &M,
     trusted_certificates: &[CertificatePem],
+    transforms: MetadataSignatureTransforms,
 ) -> Result<AppliedMetadataTrust, SamlError>
 where
     M: Deref<Target = Metadata>,
 {
+    ensure_import_signature_shape(metadata.get_metadata(), transforms)?;
     let trusted_certificates: Vec<String> = trusted_certificates
         .iter()
         .map(|certificate| certificate.as_str().to_string())
         .collect();
-    let verification = metadata
-        .verify_signature_detailed_with_limits(&trusted_certificates, XmlLimits::default())?;
+    let verification = crate::crypto::verify::verify_metadata_signature_coverage_with_limits(
+        metadata.get_metadata(),
+        &trusted_certificates,
+        XmlLimits::default(),
+    )?;
     if verification.verified() {
         let signed_entity_descriptor_xml = verification
             .into_signed_entity_descriptor_xml()
@@ -153,12 +190,14 @@ where
     feature = "crypto-fips"
 )))]
 fn verify_pinned_metadata_signature<M>(
-    _metadata: &M,
+    metadata: &M,
     _trusted_certificates: &[CertificatePem],
+    transforms: MetadataSignatureTransforms,
 ) -> Result<AppliedMetadataTrust, SamlError>
 where
     M: Deref<Target = Metadata>,
 {
+    ensure_import_signature_shape(metadata.get_metadata(), transforms)?;
     Err(SamlError::Unsupported(
         "signed metadata verification requires a crypto provider feature".into(),
     ))

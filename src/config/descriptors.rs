@@ -256,7 +256,10 @@ impl IdpDescriptor {
         )
     }
 
-    /// Signed metadata descriptor XML when pinned metadata verification passed.
+    /// Signed metadata root when pinned metadata verification passed.
+    ///
+    /// For a signed group this is the `<EntitiesDescriptor>` that covers the
+    /// imported entity.
     pub fn signed_entity_descriptor_xml(&self) -> Option<&str> {
         match &self.trust {
             AppliedMetadataTrust::SignedByPinnedCertificates {
@@ -344,7 +347,10 @@ impl SpDescriptor {
         )
     }
 
-    /// Signed metadata descriptor XML when pinned metadata verification passed.
+    /// Signed metadata root when pinned metadata verification passed.
+    ///
+    /// For a signed group this is the `<EntitiesDescriptor>` that covers the
+    /// imported entity.
     pub fn signed_entity_descriptor_xml(&self) -> Option<&str> {
         match &self.trust {
             AppliedMetadataTrust::SignedByPinnedCertificates {

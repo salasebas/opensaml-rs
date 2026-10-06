@@ -340,9 +340,11 @@ Rules:
 
 - `RequireSignature` means signed metadata must verify against caller-pinned
   trusted certificates.
-- Verification must prove the consumed `EntityDescriptor` is covered by the
-  signature, and metadata signature references may use only descriptor-preserving
-  transforms.
+- Verification must prove the signed root (`EntityDescriptor` or
+  `EntitiesDescriptor`) is covered by one enveloped `#id` reference.
+  `RequireSignatureAllowingOtherCanonicalization` is the only way to accept
+  inclusive canonicalization. Transforms that can drop signed content stay
+  rejected.
 - `signed_entity_descriptor_xml()` exposes the signed descriptor evidence when
   pinned verification passed.
 - `UnsignedForCompatibility` is explicit and visible in call sites.
