@@ -13,15 +13,14 @@ use super::algorithms::{
 /// itself.
 ///
 /// [`Self::RequireSigned`] is library hardening and stays off unless the caller
-/// sets it. A response signed only on the `<Response>` remains acceptable.
-/// The accept combination is classified in
+/// sets it. A response signed only on the `<Response>` remains acceptable
+/// until then. The accept combination is classified in
 /// `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AssertionSignaturePolicy {
     /// Reject an assertion that is not directly signed.
     ///
-    /// Library hardening for the accepting service provider. It does not
-    /// select [`XmlSignatureProfile::StrictRsaSha2`].
+    /// Library hardening for the accepting service provider.
     RequireSigned,
     /// Do not require a signature directly on the Assertion.
     ///
@@ -36,18 +35,22 @@ pub enum AssertionSignaturePolicy {
 ///
 /// [`Self::RequireForEncryptedCbc`] follows the recommendation for a
 /// CBC-encrypted assertion. [`Self::AllowUnsignedEncryptedCbc`] relaxes that
-/// recommendation alone and is not the Compatibility preset.
+/// recommendation alone and is not the legacy permissive preset.
 /// [`Self::RequireSigned`] requires a signature on every response and is
 /// library hardening. The accept combination is classified in
 /// `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ResponseSignaturePolicy {
-    /// Do not apply the E93 Response-signature recommendation.
+    /// Accept a CBC `EncryptedAssertion` without a Response signature.
     #[default]
     AllowUnsignedEncryptedCbc,
     /// Require a signed Response when an `<EncryptedAssertion>` uses CBC.
+    ///
+    /// Plaintext responses are unchanged.
     RequireForEncryptedCbc,
     /// Require a Response signature on every response.
+    ///
+    /// Library hardening. Also rejects a response signed only on the Assertion.
     RequireSigned,
 }
 
@@ -119,8 +122,8 @@ pub enum LogoutSignaturePolicy {
 pub enum AudienceValidationPolicy {
     /// Evaluate audience restrictions and reject a bearer assertion that omits one.
     ///
-    /// Rejecting the omission is library hardening. [`SpValidationPolicy::strict`]
-    /// keeps this variant.
+    /// Rejecting a missing restriction is library hardening. `strict()` keeps
+    /// this variant.
     #[default]
     Validate,
     /// Evaluate `<AudienceRestriction>` elements that are present.
@@ -143,9 +146,10 @@ pub enum NameIdCreationPolicy {
 
 /// SP-side validation and outbound signing policy.
 ///
-/// `finish_sso` and `accept_unsolicited_sso` read these fields. There is no
-/// `recommended()` constructor. The accept combination is classified in
-/// `docs/conformance/web-browser-sso-acceptance.md`.
+/// [`Self::recommended`] is the preset for claimed Web Browser SSO and Single
+/// Logout features. [`Self::compatibility`] is the legacy permissive preset.
+/// `strict()` is deprecated and keeps its current bundle. Field classification
+/// is in `docs/conformance/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpValidationPolicy {
     /// Assertion signature requirement.
@@ -165,7 +169,45 @@ pub struct SpValidationPolicy {
 }
 
 impl SpValidationPolicy {
-    /// Strict SP validation and outbound signing defaults.
+    /// Validation preset for claimed Web Browser SSO and Single Logout features.
+    ///
+    /// Recommendations start enabled. Optional capabilities and library
+    /// hardening stay off until a caller replaces one field.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use saml_rs::{AssertionSignaturePolicy, SpValidationPolicy, XmlSignatureProfile};
+    ///
+    /// let with_assertion_signature = SpValidationPolicy {
+    ///     assertions: AssertionSignaturePolicy::RequireSigned,
+    ///     ..SpValidationPolicy::recommended()
+    /// };
+    /// assert_eq!(
+    ///     with_assertion_signature.xml_signatures,
+    ///     XmlSignatureProfile::AllowProviderSupportedForCompatibility
+    /// );
+    /// ```
+    pub fn recommended() -> Self {
+        Self {
+            assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
+            responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
+            xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
+            authn_requests: AuthnRequestSigningPolicy::DoNotSignForCompatibility,
+            audience: AudienceValidationPolicy::EvaluatePresentRestrictions,
+            name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
+            logout: LogoutPolicy::recommended(),
+        }
+    }
+
+    /// Deprecated bundle of SP validation choices.
+    ///
+    /// The returned fields are unchanged from earlier releases.
+    #[deprecated(note = "start from recommended() and add only the named hardenings you want")]
+    #[expect(
+        deprecated,
+        reason = "the deprecated strict preset keeps its current logout bundle"
+    )]
     pub fn strict() -> Self {
         Self {
             assertions: AssertionSignaturePolicy::RequireSigned,
@@ -178,10 +220,8 @@ impl SpValidationPolicy {
         }
     }
 
-    /// Samlify-port policy kept for a caller leaving the raw API.
-    ///
-    /// Unsigned choices stay explicit. This preset does not name an OASIS
-    /// recommendation relaxation.
+    /// Legacy permissive preset: samlify-port behavior for a caller leaving
+    /// the raw API.
     pub fn compatibility() -> Self {
         Self {
             assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
@@ -203,9 +243,10 @@ impl Default for SpValidationPolicy {
 
 /// IdP-side validation policy.
 ///
-/// `receive_sso` reads `authn_requests`. There is no `recommended()`
-/// constructor. The accept combination is classified in
-/// `docs/conformance/web-browser-sso-acceptance.md`.
+/// [`Self::recommended`] is the preset for claimed Web Browser SSO and Single
+/// Logout features. [`Self::compatibility`] is the legacy permissive preset.
+/// `strict()` is deprecated and keeps its current bundle. Field classification
+/// is in `docs/conformance/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdpValidationPolicy {
     /// Inbound AuthnRequest signature requirement.
@@ -215,7 +256,26 @@ pub struct IdpValidationPolicy {
 }
 
 impl IdpValidationPolicy {
-    /// Strict IdP validation defaults.
+    /// Validation preset for claimed Web Browser SSO and Single Logout features.
+    ///
+    /// An inbound `AuthnRequest` may be unsigned. A signature that is present
+    /// is verified. Logout requests and responses require a signature.
+    pub fn recommended() -> Self {
+        Self {
+            authn_requests: AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent,
+            logout: LogoutPolicy::recommended(),
+        }
+    }
+
+    /// Deprecated bundle of IdP validation choices.
+    ///
+    /// Inbound `AuthnRequest` and logout messages must be signed. The returned
+    /// fields are unchanged from earlier releases.
+    #[deprecated(note = "start from recommended() and add only the named hardenings you want")]
+    #[expect(
+        deprecated,
+        reason = "the deprecated strict preset keeps its current logout bundle"
+    )]
     pub fn strict() -> Self {
         Self {
             authn_requests: AuthnRequestValidationPolicy::RequireSigned,
@@ -223,10 +283,10 @@ impl IdpValidationPolicy {
         }
     }
 
-    /// Samlify-port policy kept for a caller leaving the raw API.
+    /// Legacy permissive preset.
     ///
-    /// Unsigned choices stay explicit. This preset does not name an OASIS
-    /// recommendation relaxation.
+    /// Samlify-port behavior for a caller leaving the raw API. A signature
+    /// present on an `AuthnRequest` is not verified.
     pub fn compatibility() -> Self {
         Self {
             authn_requests: AuthnRequestValidationPolicy::AllowUnsignedForCompatibility,
@@ -243,8 +303,13 @@ impl Default for IdpValidationPolicy {
 
 /// Logout request and response signature policy.
 ///
-/// `finish_slo` reads `responses`. `receive_slo` reads `requests`. There is
-/// no `recommended()` constructor. The classification is
+/// [`Self::recommended`] requires a signature on requests and responses.
+/// [`Self::compatibility`] is the legacy permissive preset. `strict()` is
+/// deprecated and unchanged.
+///
+/// `finish_slo` reads `responses`. `receive_slo` reads `requests`. With
+/// [`crate::LogoutSigning::FollowLocalPolicy`], `requests` also decides
+/// whether an outbound `LogoutRequest` is signed. See
 /// `docs/conformance/single-logout.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LogoutPolicy {
@@ -255,7 +320,18 @@ pub struct LogoutPolicy {
 }
 
 impl LogoutPolicy {
-    /// Require signed logout requests and responses.
+    /// Require a signature on logout requests and responses.
+    pub fn recommended() -> Self {
+        Self {
+            requests: LogoutSignaturePolicy::RequireSigned,
+            responses: LogoutSignaturePolicy::RequireSigned,
+        }
+    }
+
+    /// Deprecated logout signature bundle.
+    ///
+    /// Logout requests and responses must still be signed.
+    #[deprecated(note = "start from recommended() and add only the named hardenings you want")]
     pub fn strict() -> Self {
         Self {
             requests: LogoutSignaturePolicy::RequireSigned,
@@ -263,7 +339,10 @@ impl LogoutPolicy {
         }
     }
 
-    /// Accept unsigned logout requests and responses, preserving the samlify port.
+    /// Legacy permissive preset.
+    ///
+    /// Unsigned logout requests and responses are accepted. This is the
+    /// samlify-port hatch.
     pub fn compatibility() -> Self {
         Self {
             requests: LogoutSignaturePolicy::AllowUnsignedForCompatibility,

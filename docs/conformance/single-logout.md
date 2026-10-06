@@ -2,10 +2,14 @@
 
 This record classifies rules for typed Single Logout: `start_slo`,
 `respond_slo`, and `finish_slo` on both roles. `receive_slo` reads the same
-request-signature field as the accept combination below. It does not publish
-`recommended()`. `Default`, `new`, `try_new`, the config builders, and
-`strict()` stay on their current presets. Raw logout generation and parsing
-are unchanged.
+request-signature field as the accept combination below.
+`LogoutPolicy::recommended`, and the `logout` field of
+`SpValidationPolicy::recommended` and `IdpValidationPolicy::recommended`,
+publish that accept combination. Recommended is the preset for these claimed
+features. It is not an implementation of SAML V2.0 as a whole. Compatibility
+is the legacy permissive preset. `Default`, `new`, and `try_new` stay on
+Compatibility. Config builders stay on the deprecated `strict()` bundle, which
+is unchanged. Raw logout generation and parsing are unchanged.
 
 Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected
 by Approved Errata 05. HTTP-POST-SimpleSign is the supported CD04 binding.
@@ -20,8 +24,9 @@ the raw API.
 
 `finish_slo` reads `LogoutPolicy::responses`. The accept combination is
 `LogoutSignaturePolicy::RequireSigned` for both `requests` and `responses`.
-`LogoutPolicy::compatibility` remains the samlify-port unsigned hatch.
-`LogoutPolicy::strict` is unchanged.
+`LogoutPolicy::compatibility` remains the legacy permissive unsigned hatch.
+`LogoutPolicy::strict` is deprecated and unchanged. `LogoutPolicy::recommended`
+is the accept combination.
 
 ## LogoutRequest from a session participant
 

@@ -56,10 +56,18 @@ Source: [`examples/sso.rs`](examples/sso.rs). The same calls, checked by
 `cargo test --doc`, are in the
 [crate-root SSO example](https://docs.rs/saml-rs/latest/saml_rs/#sp-initiated-sso).
 
+`SpValidationPolicy::recommended` and `IdpValidationPolicy::recommended` are
+the preset for claimed features. They are not an implementation of SAML V2.0
+as a whole. `compatibility()` is the legacy permissive preset. `Default`,
+`new`, and `try_new` stay on that preset. Config builders still start on the
+deprecated `strict()` bundle. Add a direct Assertion signature or the RSA-SHA2
+XML-DSig profile by name. Neither is implied by `recommended()`, and `strict()`
+does not gain the RSA-SHA2 profile.
+
 Those snippets use `ReplayPolicy::DisabledForCompatibility` and, where noted,
 `MetadataTrustPolicy::UnsignedForCompatibility` so they compile alone. Both
 names preserve a raw or samlify-port choice: no replay cache, and an unsigned
-metadata import. For production inbound validation, use
+metadata import. `recommended()` does not turn either one on. For production inbound validation, use
 `ReplayPolicy::RequireCache` with a caller-owned replay cache. Choose either
 metadata policy in
 [metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and

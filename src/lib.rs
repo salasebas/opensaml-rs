@@ -7,9 +7,11 @@
 //! through typed descriptors, and returns pending transaction values that
 //! callers can store with browser session state.
 //!
-//! The dependency-free config builders use strict typed defaults. Opt into
-//! [`SpValidationPolicy::compatibility`] to keep the samlify-port behavior
-//! when leaving the raw API.
+//! [`SpValidationPolicy::recommended`] is the preset for claimed features.
+//! [`SpValidationPolicy::compatibility`] keeps the samlify-port behavior.
+//! Config builders still start on the deprecated `strict()` bundle. `Default`,
+//! `new`, and `try_new` stay on `compatibility()`.
+//!
 //! Where the compact flow examples below use
 //! [`ReplayPolicy::DisabledForCompatibility`] or unsigned metadata, treat those
 //! as explicit interoperability choices. Production-shaped inbound flows should
@@ -252,8 +254,9 @@
 //! # Raw samlify-port API
 //!
 //! The [`raw`] module is the samlify-port surface. [`SpValidationPolicy::compatibility`]
-//! is the typed name for keeping that behavior on the builders. The two
-//! surfaces keep their own defaults. Advanced callers should import
+//! keeps that behavior when leaving the raw API. The two surfaces keep their
+//! own defaults. Config builders still start on the deprecated `strict()`
+//! bundle. Advanced callers should import
 //! [`raw::ServiceProvider`], [`raw::IdentityProvider`], [`raw::HttpRequest`],
 //! and [`raw::BindingContext`] from there rather than using the root re-exports.
 //!

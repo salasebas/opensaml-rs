@@ -1,4 +1,6 @@
-//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
+//! Compatibility is the legacy permissive preset: the samlify-port behavior kept
+//! for a caller leaving the raw API.
+#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 
 use std::{str::FromStr, time::Duration};
 
@@ -267,6 +269,53 @@ fn raw_settings_keep_audience_and_logout_defaults_that_differ_from_compatibility
     assert!(raw_after.want_logout_request_signed);
     assert!(raw_after.want_logout_response_signed);
     Ok(())
+}
+
+#[test]
+fn recommended_preset_matches_classified_validation_and_strict_stays_unchanged() {
+    let recommended_logout = LogoutPolicy {
+        requests: LogoutSignaturePolicy::RequireSigned,
+        responses: LogoutSignaturePolicy::RequireSigned,
+    };
+    assert_eq!(LogoutPolicy::recommended(), recommended_logout);
+    assert_eq!(
+        SpValidationPolicy::recommended(),
+        SpValidationPolicy {
+            assertions: AssertionSignaturePolicy::AllowUnsignedForCompatibility,
+            responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
+            xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
+            authn_requests: AuthnRequestSigningPolicy::DoNotSignForCompatibility,
+            audience: AudienceValidationPolicy::EvaluatePresentRestrictions,
+            name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
+            logout: recommended_logout,
+        }
+    );
+    assert_eq!(
+        IdpValidationPolicy::recommended(),
+        IdpValidationPolicy {
+            authn_requests: AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent,
+            logout: recommended_logout,
+        }
+    );
+    assert_eq!(
+        SpValidationPolicy::strict(),
+        SpValidationPolicy {
+            assertions: AssertionSignaturePolicy::RequireSigned,
+            responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
+            xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
+            authn_requests: AuthnRequestSigningPolicy::Sign,
+            audience: AudienceValidationPolicy::Validate,
+            name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
+            logout: LogoutPolicy::strict(),
+        }
+    );
+    assert_eq!(
+        IdpValidationPolicy::strict(),
+        IdpValidationPolicy {
+            authn_requests: AuthnRequestValidationPolicy::RequireSigned,
+            logout: LogoutPolicy::strict(),
+        }
+    );
 }
 
 #[test]

@@ -3,6 +3,7 @@
     feature = "crypto-aws-lc",
     feature = "crypto-fips"
 ))]
+#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 
 use std::time::{Duration, SystemTime};
 

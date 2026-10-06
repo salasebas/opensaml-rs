@@ -77,7 +77,7 @@ impl SpConfig {
         }
     }
 
-    /// Validate and create SP configuration with samlify-port Compatibility defaults.
+    /// Validate and create SP configuration with the legacy permissive preset.
     ///
     /// # Errors
     ///
@@ -89,7 +89,10 @@ impl SpConfig {
         Ok(config)
     }
 
-    /// Start a dependency-free SP config builder with strict typed defaults.
+    /// Start a dependency-free SP config builder.
+    ///
+    /// The builder starts on the deprecated [`SpValidationPolicy::strict`]
+    /// bundle. [`Self::try_new`] uses [`SpValidationPolicy::compatibility`].
     pub fn builder(entity_id: EntityId) -> SpConfigBuilder {
         SpConfigBuilder::new(entity_id)
     }
@@ -125,7 +128,7 @@ impl SpConfigBuilder {
             entity_id,
             metadata: SpMetadataConfig::new(Vec::new()),
             credentials: Credentials::default(),
-            validation: SpValidationPolicy::strict(),
+            validation: deprecated_strict_sp_validation(),
             algorithms: AlgorithmPolicy::default(),
             xml: XmlPolicy::default(),
             templates: TemplatePolicy::default(),
@@ -212,8 +215,8 @@ impl SpConfigBuilder {
 ///
 /// # Examples
 ///
-/// The builder starts with strict validation defaults. Use
-/// [`IdpValidationPolicy::compatibility`] to keep the samlify-port behavior,
+/// The builder starts on the deprecated [`IdpValidationPolicy::strict`] bundle.
+/// Use [`IdpValidationPolicy::compatibility`] for the legacy permissive preset,
 /// including when compiling or testing without the default crypto feature.
 ///
 /// ```
@@ -273,7 +276,7 @@ impl IdpConfig {
         }
     }
 
-    /// Validate and create IdP configuration with samlify-port Compatibility defaults.
+    /// Validate and create IdP configuration with the legacy permissive preset.
     ///
     /// # Errors
     ///
@@ -286,8 +289,8 @@ impl IdpConfig {
         Ok(config)
     }
 
-    /// Start a dependency-free IdP config builder with strict typed defaults
-    /// and a five-minute issuance lifetime.
+    /// Start a dependency-free IdP config builder on the deprecated `strict()`
+    /// bundle and a five-minute issuance lifetime.
     pub fn builder(entity_id: EntityId) -> IdpConfigBuilder {
         IdpConfigBuilder::new(entity_id)
     }
@@ -326,7 +329,7 @@ impl IdpConfigBuilder {
             metadata: IdpMetadataConfig::new(Vec::new()),
             credentials: Credentials::default(),
             issuance_lifetime: Duration::from_secs(300),
-            validation: IdpValidationPolicy::strict(),
+            validation: deprecated_strict_idp_validation(),
             algorithms: AlgorithmPolicy::default(),
             xml: XmlPolicy::default(),
             templates: TemplatePolicy::default(),
@@ -706,4 +709,20 @@ impl TryFrom<&IdpConfig> for EntitySetting {
             logout_signature_required(config.validation.logout.responses)?;
         Ok(setting)
     }
+}
+
+#[expect(
+    deprecated,
+    reason = "config builders stay on the deprecated strict preset in this release"
+)]
+fn deprecated_strict_sp_validation() -> SpValidationPolicy {
+    SpValidationPolicy::strict()
+}
+
+#[expect(
+    deprecated,
+    reason = "config builders stay on the deprecated strict preset in this release"
+)]
+fn deprecated_strict_idp_validation() -> IdpValidationPolicy {
+    IdpValidationPolicy::strict()
 }

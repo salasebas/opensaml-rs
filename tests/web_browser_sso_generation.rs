@@ -1,6 +1,6 @@
-//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
+//! Compatibility is the legacy permissive preset.
 //! `RespondSso::allow_unsigned_encrypted_cbc` relaxes Errata 05 E93 and is not that preset.
-
+#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
@@ -317,8 +317,8 @@ fn typed_sso_session_index_is_present_only_when_single_logout_is_supported(
 #[test]
 fn typed_sso_optional_generation_capabilities_stay_off_until_selected(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::compatibility())?;
-    let idp = idp_with(IdpValidationPolicy::compatibility(), false)?;
+    let sp = sp_with(SpValidationPolicy::recommended())?;
+    let idp = idp_with(IdpValidationPolicy::recommended(), false)?;
     let (_, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(
         &idp_descriptor,
@@ -346,7 +346,7 @@ fn typed_sso_optional_generation_capabilities_stay_off_until_selected(
     assert!(forced_xml.contains("ForceAuthn=\"true\""));
     assert!(forced_xml.contains("AllowCreate=\"false\""));
 
-    let mut creating = SpValidationPolicy::compatibility();
+    let mut creating = SpValidationPolicy::recommended();
     creating.name_id_creation = NameIdCreationPolicy::AllowCreate;
     let sp = sp_with(creating)?;
     let (_, idp_descriptor) = descriptors(&sp, &idp)?;
@@ -393,9 +393,9 @@ fn typed_transient_name_id_omits_allow_create_under_producer_rules(
 #[test]
 fn typed_authn_request_signing_stays_optional_and_does_not_reject_unsigned_requests(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut signed_sp_policy = SpValidationPolicy::compatibility();
+    let mut signed_sp_policy = SpValidationPolicy::recommended();
     signed_sp_policy.authn_requests = AuthnRequestSigningPolicy::Sign;
-    let mut requiring_idp_policy = IdpValidationPolicy::compatibility();
+    let mut requiring_idp_policy = IdpValidationPolicy::recommended();
     requiring_idp_policy.authn_requests = AuthnRequestValidationPolicy::RequireSigned;
     let sp = sp_with(signed_sp_policy)?;
     let idp = idp_with(requiring_idp_policy, false)?;
@@ -413,8 +413,8 @@ fn typed_authn_request_signing_stays_optional_and_does_not_reject_unsigned_reque
     assert!(!request.contains("ForceAuthn="));
     assert!(request.contains("AllowCreate=\"false\""));
 
-    let sp = sp_with(SpValidationPolicy::compatibility())?;
-    let idp = idp_with(IdpValidationPolicy::compatibility(), false)?;
+    let sp = sp_with(SpValidationPolicy::recommended())?;
+    let idp = idp_with(IdpValidationPolicy::recommended(), false)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(
         &idp_descriptor,

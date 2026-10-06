@@ -144,8 +144,8 @@ impl RespondSso {
     ///
     /// This relaxes SAML V2.0 Approved Errata 05 E93, which recommends signing
     /// the Response so the ciphertext is integrity protected. It is not the
-    /// Compatibility preset and it does not preserve a samlify-port setting.
-    /// By default, typed IdPs sign such Responses automatically.
+    /// legacy permissive preset. Typed identity providers sign such Responses
+    /// unless this is selected.
     pub fn allow_unsigned_encrypted_cbc(mut self) -> Self {
         self.response_signing = ResponseSigning::AllowUnsignedEncryptedCbc;
         self
@@ -210,8 +210,7 @@ pub enum LogoutSigning {
 ///
 /// [`Self::Compatibility`] is the samlify-port output kept for a caller
 /// leaving the raw API. [`Self::Follow`] applies the producer obligations
-/// recorded for this flow. It is not a validation preset and it does not
-/// publish `recommended()`.
+/// recorded for this flow. It is not a validation preset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum SingleLogoutGeneration {
     /// Keep the samlify-port generation.

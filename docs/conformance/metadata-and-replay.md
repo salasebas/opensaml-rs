@@ -1,9 +1,12 @@
 # Metadata trust and replay
 
 This record classifies metadata trust and replay for the typed browser flows.
-It does not publish `recommended()`. `Default`, `new`, `try_new`, the config
-builders, and `strict()` stay on their current presets. Raw settings stay on
-their historical defaults.
+`recommended()` does not select signed metadata, invent trust anchors, or
+store replay. Recommended is the preset for claimed features. It is not an
+implementation of SAML V2.0 as a whole. Compatibility is the legacy permissive
+preset. `Default`, `new`, and `try_new` stay on Compatibility. Config builders
+stay on the deprecated `strict()` bundle, which is unchanged. Raw settings
+stay on their historical defaults.
 
 Metadata trust is `MetadataTrustPolicy`, passed to
 `IdpDescriptor::from_metadata_xml_for` and

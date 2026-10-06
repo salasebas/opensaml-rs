@@ -2,6 +2,10 @@
 //!
 //! Run with: `cargo run -p saml-rs --example slo`
 //! (the `crypto-bergshamra` feature is on by default).
+#![allow(
+    deprecated,
+    reason = "the example keeps exercising the deprecated strict() preset"
+)]
 
 #[cfg(any(
     feature = "crypto-rustcrypto",

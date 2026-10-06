@@ -1,5 +1,5 @@
-//! Compatibility is the samlify-port behavior kept for a caller leaving the raw API.
-
+//! Compatibility is the legacy permissive preset.
+#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
@@ -46,17 +46,11 @@ fn slo_accept_policy() -> LogoutPolicy {
 }
 
 fn sp_with_slo_accept() -> SpValidationPolicy {
-    SpValidationPolicy {
-        logout: slo_accept_policy(),
-        ..SpValidationPolicy::compatibility()
-    }
+    SpValidationPolicy::recommended()
 }
 
 fn idp_with_slo_accept() -> IdpValidationPolicy {
-    IdpValidationPolicy {
-        logout: slo_accept_policy(),
-        ..IdpValidationPolicy::compatibility()
-    }
+    IdpValidationPolicy::recommended()
 }
 
 fn validation() -> SamlValidationContext<'static> {
@@ -534,6 +528,15 @@ fn existing_logout_policy_constructors_stay_in_place() {
     );
     assert_eq!(SpValidationPolicy::strict().logout, LogoutPolicy::strict());
     assert_eq!(IdpValidationPolicy::strict().logout, LogoutPolicy::strict());
+    assert_eq!(
+        SpValidationPolicy::recommended().logout,
+        LogoutPolicy::recommended()
+    );
+    assert_eq!(
+        IdpValidationPolicy::recommended().logout,
+        LogoutPolicy::recommended()
+    );
+    assert_eq!(LogoutPolicy::recommended(), slo_accept_policy());
     assert_eq!(
         LogoutPolicy::compatibility().requests,
         LogoutSignaturePolicy::AllowUnsignedForCompatibility
