@@ -383,8 +383,8 @@ impl RespondSlo {
 
     /// Set the `LogoutResponse` status. Omitting it emits top-level `Success`.
     ///
-    /// A logout-response template can carry only the top-level code. A
-    /// subordinate code needs the default renderer.
+    /// A logout-response template carries only the top-level code. A
+    /// subordinate code is rejected when a template is set.
     pub fn status(mut self, status: Status) -> Self {
         self.status = Some(status);
         self

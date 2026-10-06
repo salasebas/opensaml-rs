@@ -58,9 +58,8 @@ is the accept combination.
 | Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Session authority | Generate LogoutRequest | Mandatory for these bindings. Profiles §4.4.4.1. Same signing behavior as the participant when producer rules are selected |
 | Send the user agent over TLS | Session authority | Generate LogoutRequest | Not applied. Profiles §4.4.3.1 states that recommendation for the session participant's request. §4.4.3.3 does not repeat it |
 
-Propagating logout to every other participant stays outside one `start_slo`
-or `respond_slo` call. The caller supplies the status, including subordinate
-`PartialLogout` when other participants do not confirm.
+Propagating logout to every other participant is outside one `start_slo` or
+`respond_slo` call. Each call addresses one peer.
 
 ## LogoutResponse
 
@@ -73,7 +72,7 @@ or `respond_slo` call. The caller supplies the status, including subordinate
 | Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Responder | Generate LogoutResponse | Mandatory for these bindings. Profiles §4.4.3.4 requires a signature when the response returns to the identity provider over HTTP POST or Redirect. §4.4.4.2 requires the responder to authenticate. Typed `respond_slo` always signs. There is no off switch, including under the samlify-port preset |
 | Deliver a service-provider response to an `https` `SingleLogoutService` | Session participant | Generate LogoutResponse | Recommendation. Profiles §4.4.3.4 recommends SSL or TLS for that HTTP exchange. Starts enabled when the service provider selects producer rules. `RespondSlo::allow_http_single_logout` relaxes it alone and leaves the response signed. The identity provider's response is §4.4.3.5, which does not repeat the recommendation, so `Saml<Idp>::respond_slo` does not gain the check |
 | Do not generate a leap-second time | Responder | Generate any instant | Mandatory. Core §1.3.3 |
-| Caller-supplied status. Omitting it emits top-level `Success` | Session participant or session authority | Generate LogoutResponse | Core §3.2.2.2: top-level `Success`, `Requester`, `Responder`, or `VersionMismatch`, plus one optional subordinate code. Core §3.7.3.2: the session authority's top-level code reports only its own session; subordinate `PartialLogout` reports incomplete propagation. The caller supplies that outcome. Omitting it emits `Success`; that default is library policy |
+| Top-level `StatusCode`, with an optional subordinate code | Session participant or session authority | Generate LogoutResponse | Core §3.2.2.2 requires `Success`, `Requester`, `Responder`, or `VersionMismatch`, and allows one subordinate code. Core §3.7.3.2: the session authority's top-level code reports only its own session; subordinate `PartialLogout` reports incomplete propagation. `respond_slo` writes the status the caller passes. Omitting it emits top-level `Success`. That omission is library policy, not an OASIS rule |
 
 ## Logout acceptance
 
