@@ -35,19 +35,21 @@ const IDP_SSO_SIMPLESIGN: &str = "https://idp.example.com/sso/simple-sign";
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
 const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
 
-const SIGNED_AUTHN_REQUEST_TEMPLATE: &str = concat!(
-    r#"<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" "#,
-    r#"xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" "#,
-    r#"ID="{ID}" Version="2.0" IssueInstant="{IssueInstant}" Destination="{Destination}">"#,
-    r#"<saml:Issuer>{Issuer}</saml:Issuer>"#,
-    r#"<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">"#,
-    r#"<ds:SignatureValue>protocol-signature</ds:SignatureValue>"#,
-    r#"</ds:Signature>"#,
-    r#"<saml:Assertion><ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">"#,
-    r#"<ds:SignatureValue>assertion-signature</ds:SignatureValue>"#,
-    r#"</ds:Signature></saml:Assertion>"#,
-    r#"</samlp:AuthnRequest>"#,
-);
+const SIGNED_AUTHN_REQUEST_TEMPLATE: &str = r#"
+<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+    ID="{ID}" Version="2.0" IssueInstant="{IssueInstant}" Destination="{Destination}">
+    <saml:Issuer>{Issuer}</saml:Issuer>
+    <ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:SignatureValue>protocol-signature</ds:SignatureValue>
+    </ds:Signature>
+    <saml:Assertion>
+        <ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+            <ds:SignatureValue>assertion-signature</ds:SignatureValue>
+        </ds:Signature>
+    </saml:Assertion>
+</samlp:AuthnRequest>
+"#;
 
 fn credentials() -> Credentials {
     Credentials {

@@ -316,16 +316,20 @@ mod tests {
     #[test]
     fn redirect_removes_only_a_protocol_signature_before_deflate(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let xml = concat!(
-            r#"<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" "#,
-            r#"xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" "#,
-            r#"xmlns:ds="http://www.w3.org/2000/09/xmldsig#">"#,
-            r#"<ds:Signature><ds:SignatureValue>protocol-signature</ds:SignatureValue></ds:Signature>"#,
-            r#"<saml:Assertion><ds:Signature>"#,
-            r#"<ds:SignatureValue>assertion-signature</ds:SignatureValue>"#,
-            r#"</ds:Signature></saml:Assertion>"#,
-            r#"</samlp:AuthnRequest>"#,
-        );
+        let xml = r#"
+            <samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+                <ds:Signature>
+                    <ds:SignatureValue>protocol-signature</ds:SignatureValue>
+                </ds:Signature>
+                <saml:Assertion>
+                    <ds:Signature>
+                        <ds:SignatureValue>assertion-signature</ds:SignatureValue>
+                    </ds:Signature>
+                </saml:Assertion>
+            </samlp:AuthnRequest>
+        "#;
         let unsigned = build_redirect_url(
             "https://idp.example.com/sso",
             ParserType::SamlRequest,
