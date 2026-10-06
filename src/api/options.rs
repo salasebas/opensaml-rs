@@ -1,5 +1,5 @@
 use crate::browser::{LogoutBinding, SsoRequestBinding, SsoResponseBinding};
-use crate::model::RelayStateParam;
+use crate::model::{RelayStateParam, Status};
 use crate::sp::WebBrowserSsoProducer;
 
 /// Explicit `ForceAuthn` value for outbound AuthnRequests.
@@ -348,10 +348,14 @@ impl StartSlo {
 }
 
 /// Options for issuing a LogoutResponse.
+///
+/// [`Self::status`] sets the SAML status. The binding constructors omit it,
+/// which emits top-level `Success` and no subordinate code.
 #[derive(Debug, Clone)]
 pub struct RespondSlo {
     pub(super) binding: LogoutBinding,
     pub(super) relay_state: Option<RelayStateParam>,
+    pub(super) status: Option<Status>,
     rules: SingleLogoutRules,
 }
 
@@ -375,8 +379,24 @@ impl RespondSlo {
         Self {
             binding,
             relay_state: None,
+            status: None,
             rules: SingleLogoutRules::default(),
         }
+    }
+
+    /// Set the `LogoutResponse` status.
+    ///
+    /// The top-level code is the responder's own outcome. A session authority
+    /// uses top-level `Success` only when it terminated its own session, and
+    /// nests [`crate::SubordinateStatusCode::partial_logout`] when other
+    /// session participants do not confirm. One response addresses one peer
+    /// and does not contact those other participants.
+    ///
+    /// A configured logout-response template can carry only the top-level
+    /// `StatusCode` value. A subordinate code requires the default renderer.
+    pub fn status(mut self, status: Status) -> Self {
+        self.status = Some(status);
+        self
     }
 
     /// Set exact RelayState state for the logout response.

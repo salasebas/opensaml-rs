@@ -12,6 +12,7 @@ mod received;
 mod relay;
 mod session;
 mod sso;
+mod status;
 mod subject;
 mod validation;
 
@@ -29,5 +30,6 @@ pub use session::AuthnSession;
 pub use sso::{
     Assertion, SsoResponse, SsoSession, VerifiedXmlSignature, VerifiedXmlSignatureCoverage,
 };
+pub use status::{Status, SubordinateStatusCode, TopLevelStatusCode};
 pub use subject::{NameId, NameIdCreationRequest, NameIdPolicy, Subject, SubjectConfirmation};
 pub use validation::{ClockSkew, ReplayCache, ReplayKey, ReplayPolicy, SamlValidationContext};

@@ -58,10 +58,12 @@ is the accept combination.
 | Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Session authority | Generate LogoutRequest | Mandatory for these bindings. Profiles §4.4.4.1. Same signing behavior as the participant when producer rules are selected |
 | Send the user agent over TLS | Session authority | Generate LogoutRequest | Not applied. Profiles §4.4.3.1 states that recommendation for the session participant's request. §4.4.3.3 does not repeat it |
 
-Propagating logout to every other participant, and `PartialLogout` when some
-of them do not confirm, are session-authority duties in Core §3.7.3.2. One
-`start_slo` or `respond_slo` call addresses one peer and does not see the
-other participants, so those rules are not fields of this flow.
+Propagating logout to every other participant stays outside one `start_slo`
+or `respond_slo` call. Each call addresses one peer. Core §3.7.3.2 still
+requires the session authority's top-level status to describe only its own
+session, and a subordinate `PartialLogout` when other participants do not
+confirm. The caller supplies that status. Omitting it emits top-level
+`Success` and no subordinate code.
 
 ## LogoutResponse
 
@@ -74,6 +76,7 @@ other participants, so those rules are not fields of this flow.
 | Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Responder | Generate LogoutResponse | Mandatory for these bindings. Profiles §4.4.3.4 requires a signature when the response returns to the identity provider over HTTP POST or Redirect. §4.4.4.2 requires the responder to authenticate. Typed `respond_slo` always signs. There is no off switch, including under the samlify-port preset |
 | Deliver a service-provider response to an `https` `SingleLogoutService` | Session participant | Generate LogoutResponse | Recommendation. Profiles §4.4.3.4 recommends SSL or TLS for that HTTP exchange. Starts enabled when the service provider selects producer rules. `RespondSlo::allow_http_single_logout` relaxes it alone and leaves the response signed. The identity provider's response is §4.4.3.5, which does not repeat the recommendation, so `Saml<Idp>::respond_slo` does not gain the check |
 | Do not generate a leap-second time | Responder | Generate any instant | Mandatory. Core §1.3.3 |
+| Caller-supplied status. Omitting it emits top-level `Success` and no subordinate code | Session participant or session authority | Generate LogoutResponse | `Status` is required by `StatusResponseType`. Core §3.2.2.2 requires the top-level `StatusCode` `Value` to be `Success`, `Requester`, `Responder`, or `VersionMismatch`, and allows one optional subordinate `StatusCode`. Core §3.7.3.2: a session authority's top-level code reports only its own session, and subordinate `PartialLogout` reports incomplete propagation. Profiles §4.4.3.4 and §4.4.3.5 require an appropriate status code. The caller supplies the outcome |
 
 ## Logout acceptance
 

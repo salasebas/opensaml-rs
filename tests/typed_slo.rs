@@ -30,7 +30,8 @@ use saml_rs::{
     MetadataTrustPolicy, NameId, NameIdFormat, Outbound, PendingLogoutRequest, PendingSnapshot,
     PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSlo,
     RespondSso, Saml, SamlError, SamlValidationContext, SessionIndex, SloEndpoint, SpConfig,
-    SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoSession, StartSlo, Subject, TemplatePolicy,
+    SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoSession, StartSlo, Status, Subject,
+    SubordinateStatusCode, TemplatePolicy,
 };
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -2729,5 +2730,281 @@ fn typed_facade_allows_explicit_unsigned_logout_request_for_compatibility(
     )?;
 
     assert!(started.outbound.post_form()?.value("SAMLRequest").is_some());
+    Ok(())
+}
+
+fn status_element(xml: &str) -> Result<&str, Box<dyn std::error::Error>> {
+    let start = xml.find("<samlp:Status>").ok_or("missing Status")?;
+    let rest = &xml[start..];
+    let end = rest.find("</samlp:Status>").ok_or("missing Status end")?;
+    Ok(&rest[..end + "</samlp:Status>".len()])
+}
+
+#[test]
+fn typed_session_participant_logout_response_carries_caller_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = idp.start_slo(&sp_descriptor, subject()?, StartSlo::post())?;
+    let received = sp.receive_slo(
+        &idp_descriptor,
+        logout_request_input(&started.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+    let response = sp.respond_slo(
+        &idp_descriptor,
+        &received,
+        RespondSlo::post().status(Status::responder().with_subordinate(
+            SubordinateStatusCode::try_new(saml_rs::constants::status_code::REQUEST_DENIED)?,
+        )),
+    )?;
+
+    let response_xml = outbound_xml(&response, "SAMLResponse")?;
+    let status = status_element(&response_xml)?;
+    assert_eq!(
+        status,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Responder\">",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:RequestDenied\"/>",
+            "</samlp:StatusCode>",
+            "</samlp:Status>"
+        )
+    );
+    Ok(())
+}
+
+fn success_status_element() -> &'static str {
+    concat!(
+        "<samlp:Status>",
+        "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Success\"/>",
+        "</samlp:Status>"
+    )
+}
+
+#[test]
+fn typed_logout_response_omits_status_as_success_for_both_roles(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+
+    let participant_request = idp.start_slo(&sp_descriptor, subject()?, StartSlo::post())?;
+    let participant_received = sp.receive_slo(
+        &idp_descriptor,
+        logout_request_input(&participant_request.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+    let participant_response =
+        sp.respond_slo(&idp_descriptor, &participant_received, RespondSlo::post())?;
+    assert_eq!(
+        status_element(&outbound_xml(&participant_response, "SAMLResponse")?)?,
+        success_status_element()
+    );
+
+    let authority_request = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let authority_received = idp.receive_slo(
+        &sp_descriptor,
+        logout_request_input(&authority_request.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+    let authority_response =
+        idp.respond_slo(&sp_descriptor, &authority_received, RespondSlo::post())?;
+    assert_eq!(
+        status_element(&outbound_xml(&authority_response, "SAMLResponse")?)?,
+        success_status_element()
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_session_authority_logout_response_carries_caller_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let received = idp.receive_slo(
+        &sp_descriptor,
+        logout_request_input(&started.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+
+    let own_session_failed = idp.respond_slo(
+        &sp_descriptor,
+        &received,
+        RespondSlo::post().status(Status::responder()),
+    )?;
+    assert_eq!(
+        status_element(&outbound_xml(&own_session_failed, "SAMLResponse")?)?,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Responder\"/>",
+            "</samlp:Status>"
+        )
+    );
+
+    let partial = idp.respond_slo(
+        &sp_descriptor,
+        &received,
+        RespondSlo::post()
+            .status(Status::success().with_subordinate(SubordinateStatusCode::partial_logout())),
+    )?;
+    assert_eq!(
+        status_element(&outbound_xml(&partial, "SAMLResponse")?)?,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Success\">",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:PartialLogout\"/>",
+            "</samlp:StatusCode>",
+            "</samlp:Status>"
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_logout_response_carries_caller_defined_subordinate_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = idp.start_slo(&sp_descriptor, subject()?, StartSlo::post())?;
+    let received = sp.receive_slo(
+        &idp_descriptor,
+        logout_request_input(&started.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+    let response = sp.respond_slo(
+        &idp_descriptor,
+        &received,
+        RespondSlo::post().status(Status::requester().with_subordinate(
+            SubordinateStatusCode::try_new("urn:example:logout:local-failure")?,
+        )),
+    )?;
+
+    assert_eq!(
+        status_element(&outbound_xml(&response, "SAMLResponse")?)?,
+        concat!(
+            "<samlp:Status>",
+            "<samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Requester\">",
+            "<samlp:StatusCode Value=\"urn:example:logout:local-failure\"/>",
+            "</samlp:StatusCode>",
+            "</samlp:Status>"
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_logout_response_rejects_a_subordinate_status_that_is_not_an_absolute_uri(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for uri in ["", "relative", "urn:example:has space"] {
+        match SubordinateStatusCode::try_new(uri) {
+            Err(SamlError::Invalid(message))
+                if message.contains("non-empty absolute URI without whitespace") => {}
+            other => {
+                return Err(format!(
+                    "expected invalid subordinate status for {uri}, got {other:?}"
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn typed_logout_response_template_carries_only_the_top_level_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = Saml::sp(sp_config()?)?;
+    let idp = Saml::idp(idp_config_with_logout_response_template(
+        saml_rs::template::LOGOUT_RESPONSE_TEMPLATE.to_string(),
+    )?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let received = idp.receive_slo(
+        &sp_descriptor,
+        logout_request_input(&started.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+
+    let response = idp.respond_slo(
+        &sp_descriptor,
+        &received,
+        RespondSlo::post().status(Status::version_mismatch()),
+    )?;
+    let response_xml = outbound_xml(&response, "SAMLResponse")?;
+    let status = status_element(&response_xml)?;
+    assert!(status.contains("urn:oasis:names:tc:SAML:2.0:status:VersionMismatch"));
+    assert_eq!(status.matches("<samlp:StatusCode").count(), 1);
+
+    match idp.respond_slo(
+        &sp_descriptor,
+        &received,
+        RespondSlo::post()
+            .status(Status::success().with_subordinate(SubordinateStatusCode::partial_logout())),
+    ) {
+        Err(SamlError::Invalid(message))
+            if message.contains("cannot carry a subordinate status code") =>
+        {
+            Ok(())
+        }
+        other => Err(format!("expected template subordinate rejection, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn typed_receive_slo_returns_principal_and_every_session_index(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let subject = LogoutSubject::new(
+        NameId::new("alice@example.com", None),
+        vec![
+            SessionIndex::try_new("_session-one")?,
+            SessionIndex::try_new("_session-two")?,
+        ],
+    );
+
+    let from_participant = sp.start_slo(&idp_descriptor, subject.clone(), StartSlo::post())?;
+    let received_by_authority = idp.receive_slo(
+        &sp_descriptor,
+        logout_request_input(&from_participant.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+    assert_eq!(
+        received_by_authority.message().name_id().map(NameId::value),
+        Some("alice@example.com")
+    );
+    assert_eq!(
+        received_by_authority
+            .message()
+            .session_indexes()
+            .iter()
+            .map(SessionIndex::as_str)
+            .collect::<Vec<_>>(),
+        vec!["_session-one", "_session-two"]
+    );
+
+    let from_authority = idp.start_slo(&sp_descriptor, subject, StartSlo::post())?;
+    let received_by_participant = sp.receive_slo(
+        &idp_descriptor,
+        logout_request_input(&from_authority.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+    assert_eq!(
+        received_by_participant
+            .message()
+            .name_id()
+            .map(NameId::value),
+        Some("alice@example.com")
+    );
+    assert_eq!(
+        received_by_participant
+            .message()
+            .session_indexes()
+            .iter()
+            .map(SessionIndex::as_str)
+            .collect::<Vec<_>>(),
+        vec!["_session-one", "_session-two"]
+    );
     Ok(())
 }

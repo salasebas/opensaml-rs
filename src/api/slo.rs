@@ -5,14 +5,14 @@ use crate::entity::{capture_idp_issuance_window, now_iso8601, EntitySetting};
 use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
 use crate::logout::{
-    create_logout_request_with_session_indexes, create_logout_response, parse_logout_request_at,
-    parse_logout_response_at, LogoutFlowValidation, LogoutRequestSessionIndexes,
-    LogoutRequestValidation,
+    create_logout_request_with_session_indexes, create_logout_response_with_status,
+    parse_logout_request_at, parse_logout_response_at, LogoutFlowValidation,
+    LogoutRequestSessionIndexes, LogoutRequestValidation,
 };
 use crate::metadata::Metadata;
 use crate::model::{
     LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, Received, ReplayKey,
-    SamlInstant, SamlValidationContext,
+    SamlInstant, SamlValidationContext, Status,
 };
 
 use super::raw_mapping::{
@@ -96,6 +96,9 @@ impl Saml<Sp> {
     }
 
     /// Respond to a received IdP LogoutRequest.
+    ///
+    /// [`RespondSlo::status`] sets the status. Omitting it leaves top-level
+    /// `Success` and no subordinate code.
     ///
     /// # Errors
     ///
@@ -295,6 +298,10 @@ impl Saml<Idp> {
     }
 
     /// Respond to a received SP LogoutRequest.
+    ///
+    /// [`RespondSlo::status`] sets the status. Omitting it leaves top-level
+    /// `Success` and no subordinate code. The top-level code reports this
+    /// session authority's own session.
     ///
     /// # Errors
     ///
@@ -545,7 +552,8 @@ fn respond_slo_impl(
         .relay_state
         .unwrap_or_else(|| request.relay_state().clone());
     relay_state.validate()?;
-    let context = create_logout_response(
+    let status = options.status.clone().unwrap_or_else(Status::success);
+    let context = create_logout_response_with_status(
         local_setting,
         local_metadata,
         peer_metadata,
@@ -555,6 +563,8 @@ fn respond_slo_impl(
         // SAML Profiles 2.0 §§4.4.3.4 and 4.4.4.2 require front-channel
         // LogoutResponses to authenticate the responder and protect integrity.
         true,
+        None,
+        &status,
     )?;
     Outbound::<LogoutResponse>::try_from(context)
 }

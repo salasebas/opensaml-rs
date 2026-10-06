@@ -1,7 +1,8 @@
-use crate::constants::{status_code, Binding, ParserType};
+use crate::constants::{Binding, ParserType};
 use crate::entity::{generate_id, now_iso8601, BindingContext, EntitySetting, User};
 use crate::error::SamlError;
 use crate::metadata::Metadata;
+use crate::model::Status;
 use crate::template::{
     apply_tag_prefixes, replace_tags_by_optional_value, replace_tags_by_value, validate_tag_prefix,
 };
@@ -381,6 +382,7 @@ struct LogoutResponseInput<'a> {
     relay_state: Option<&'a str>,
     want_signed: bool,
     message_id: Option<&'a str>,
+    status: &'a Status,
 }
 
 /// Like [`create_logout_response`] but uses `message_id` when provided.
@@ -400,6 +402,39 @@ pub fn create_logout_response_with_id(
     want_signed: bool,
     message_id: Option<&str>,
 ) -> Result<BindingContext, SamlError> {
+    let status = Status::success();
+    create_logout_response_with_status(
+        init_setting,
+        init_meta,
+        target_meta,
+        binding,
+        in_response_to,
+        relay_state,
+        want_signed,
+        message_id,
+        &status,
+    )
+}
+
+/// Like [`create_logout_response_with_id`], with the caller-supplied status.
+///
+/// # Errors
+///
+/// Returns the same errors as [`create_logout_response`]. A subordinate status
+/// code is rejected when a logout-response template is configured, because
+/// that template has only a top-level `StatusCode` placeholder.
+#[allow(clippy::too_many_arguments)] // internal path adds the caller-supplied status
+pub(crate) fn create_logout_response_with_status(
+    init_setting: &EntitySetting,
+    init_meta: &Metadata,
+    target_meta: &Metadata,
+    binding: Binding,
+    in_response_to: Option<&str>,
+    relay_state: Option<&str>,
+    want_signed: bool,
+    message_id: Option<&str>,
+    status: &Status,
+) -> Result<BindingContext, SamlError> {
     create_logout_response_inner(LogoutResponseInput {
         init_setting,
         init_meta,
@@ -409,6 +444,7 @@ pub fn create_logout_response_with_id(
         relay_state,
         want_signed,
         message_id,
+        status,
     })
 }
 
@@ -424,6 +460,7 @@ fn create_logout_response_inner(
         relay_state,
         want_signed,
         message_id,
+        status,
     } = input;
 
     if matches!(binding, Binding::Artifact) {
@@ -441,6 +478,12 @@ fn create_logout_response_inner(
     let issue_instant = now_iso8601();
     let issuer = issuer_of(init_setting, init_meta);
     let xml = if let Some(template) = init_setting.logout_response_template.as_deref() {
+        if status.subordinate().is_some() {
+            return Err(SamlError::Invalid(
+                "LogoutResponse template StatusCode placeholder cannot carry a subordinate status code"
+                    .into(),
+            ));
+        }
         validate_tag_prefix("protocol", &init_setting.tag_prefix_protocol)?;
         validate_tag_prefix("assertion", &init_setting.tag_prefix_assertion)?;
         let template = apply_tag_prefixes(
@@ -455,7 +498,7 @@ fn create_logout_response_inner(
                 ("IssueInstant", issue_instant),
                 ("Destination", destination.clone()),
                 ("Issuer", issuer.clone()),
-                ("StatusCode", status_code::SUCCESS.to_string()),
+                ("StatusCode", status.top_level().as_uri().to_string()),
             ],
         );
         replace_tags_by_optional_value(
@@ -470,6 +513,7 @@ fn create_logout_response_inner(
             &destination,
             in_response_to,
             &issuer,
+            status,
         )?
     };
     validate_logout_response_outbound(

@@ -115,4 +115,7 @@ fn typed_api_contract_reexports_browser_and_model_types() {
     let _ = std::any::type_name::<VerifiedXmlSignatureCoverage>();
     let _ = std::any::type_name::<saml_rs::Subject>();
     let _ = std::any::type_name::<saml_rs::SubjectConfirmation>();
+    let _ = std::any::type_name::<saml_rs::Status>();
+    let _ = std::any::type_name::<saml_rs::SubordinateStatusCode>();
+    let _ = std::any::type_name::<saml_rs::TopLevelStatusCode>();
 }
