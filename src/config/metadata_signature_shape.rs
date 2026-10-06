@@ -2,15 +2,10 @@ use crate::constants::transform_algorithm;
 use crate::error::SamlError;
 use crate::xml::dom::{self, Node};
 
-/// Transform rule for a metadata import that requires a signature.
+/// Transform allowlist for a metadata import that requires a signature.
 ///
-/// Metadata §3.1.4 says a signature should not contain a transform other than
-/// the enveloped-signature transform or exclusive canonicalization, with or
-/// without comments. [`Self::Profile`] rejects any other transform.
+/// [`Self::Profile`] is enveloped signature and exclusive canonicalization.
 /// [`Self::AllowOtherCanonicalization`] also accepts inclusive canonicalization.
-/// Neither option accepts a transform that can drop part of the signed element,
-/// and neither relaxes the identifier, single-reference, enveloped-signature,
-/// or `ds:Object` checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MetadataSignatureTransforms {
     /// Enveloped signature and exclusive canonicalization only.
@@ -19,16 +14,10 @@ pub(super) enum MetadataSignatureTransforms {
     AllowOtherCanonicalization,
 }
 
-/// Reject a signed metadata root that does not have the signature shape
-/// `RequireSignature` imports.
+/// Reject a signed metadata root whose shape `RequireSignature` does not import.
 ///
 /// An unsigned root is left for the caller. A signed document must contain
-/// exactly one signature, and that signature must be a direct child of the
-/// root. Metadata §3.1.1 requires an enveloped signature. §3.1.2 requires an
-/// identifier on the signed root and one reference whose URI is `#` plus that
-/// identifier. The same rules apply to a root `<EntityDescriptor>` and a root
-/// `<EntitiesDescriptor>`. Approved Errata 05 E91 rejects a signature that
-/// contains `<ds:Object>`.
+/// exactly one signature, and that signature must be a direct child of the root.
 ///
 /// # Errors
 ///

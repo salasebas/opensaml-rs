@@ -342,9 +342,9 @@ Rules:
   trusted certificates.
 - Verification must prove the signed root (`EntityDescriptor` or
   `EntitiesDescriptor`) is covered by one enveloped `#id` reference.
-  `RequireSignatureAllowingOtherCanonicalization` is the only way to accept
-  inclusive canonicalization. Transforms that can drop signed content stay
-  rejected.
+  Inclusive canonicalization is
+  `RequireSignatureAllowingOtherCanonicalization`. The shape is classified in
+  `docs/conformance/metadata-and-replay.md`.
 - `signed_entity_descriptor_xml()` exposes the signed descriptor evidence when
   pinned verification passed.
 - `UnsignedForCompatibility` is explicit and visible in call sites.

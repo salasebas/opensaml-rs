@@ -112,8 +112,6 @@ impl Metadata {
     ///
     /// Rejects documents carrying more than one `<EntityDescriptor>`. A root
     /// `<EntitiesDescriptor>` is accepted when it contains exactly one entity.
-    /// The original document is kept so signature verification still sees the
-    /// group root.
     ///
     /// # Errors
     ///

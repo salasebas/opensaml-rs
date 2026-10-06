@@ -193,11 +193,9 @@ impl MetadataSignatureVerification {
 Rules:
 
 - `RequireSignature` requires `verification.verified() == true`.
-- The signed root, whether `EntityDescriptor` or `EntitiesDescriptor`, must
-  carry an identifier and an enveloped signature with one `#id` reference.
-  Other transforms are rejected unless
-  `RequireSignatureAllowingOtherCanonicalization` is selected, and that option
-  only adds inclusive canonicalization. `ds:Object` is rejected either way.
+- The signed root must carry an identifier and one enveloped `#id` reference.
+  `RequireSignatureAllowingOtherCanonicalization` also accepts inclusive
+  canonicalization. See `docs/conformance/metadata-and-replay.md`.
 - It must prove that signed root is covered and preserve its XML as trust
   evidence.
 - If the signature shape or coverage cannot be determined, fail closed with

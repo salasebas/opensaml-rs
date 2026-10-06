@@ -60,23 +60,17 @@ pub enum MetadataTrustPolicy<'a> {
     UnsignedForCompatibility,
     /// Require a valid metadata signature from one of the pinned certificates.
     ///
-    /// The signature must be enveloped. The signed root must carry an
-    /// identifier, and the signature must contain one reference whose URI is
-    /// `#` plus that identifier. A transform other than enveloped signature or
-    /// exclusive canonicalization is rejected, as is `<ds:Object>`. A root
-    /// `<EntitiesDescriptor>` is held to the same rules as a root
-    /// `<EntityDescriptor>`. See `docs/conformance/metadata-and-replay.md`.
+    /// The signature must be an enveloped `#id` signature over the metadata
+    /// root. See `docs/conformance/metadata-and-replay.md`.
     RequireSignature {
         /// Caller-pinned certificates trusted to sign the metadata.
         trusted_certificates: &'a [CertificatePem],
     },
-    /// Require a pinned metadata signature, and allow inclusive canonicalization.
+    /// Require a pinned metadata signature, and also accept inclusive
+    /// canonicalization.
     ///
-    /// Metadata §3.1.4 recommends exclusive canonicalization. This option is
-    /// the caller's agreement to accept inclusive canonicalization as well.
-    /// Transforms that can drop part of the signed element, such as XPath or
-    /// XSLT, stay rejected. The identifier, single `#id` reference, enveloped
-    /// signature, `<ds:Object>`, and signed-root coverage checks stay on.
+    /// The identifier and single `#id` reference checks stay on. See
+    /// `docs/conformance/metadata-and-replay.md`.
     RequireSignatureAllowingOtherCanonicalization {
         /// Caller-pinned certificates trusted to sign the metadata.
         trusted_certificates: &'a [CertificatePem],

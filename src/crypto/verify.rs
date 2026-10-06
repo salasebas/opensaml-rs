@@ -941,10 +941,7 @@ impl MetadataSignatureVerification {
         self.verified
     }
 
-    /// The signed metadata root when verification succeeds.
-    ///
-    /// This is the `<EntityDescriptor>` or `<EntitiesDescriptor>` the signature
-    /// covers.
+    /// Signed `<EntityDescriptor>` or `<EntitiesDescriptor>` when verification succeeds.
     pub fn signed_entity_descriptor_xml(&self) -> Option<&str> {
         self.signed_entity_descriptor_xml.as_deref()
     }
@@ -1020,8 +1017,7 @@ pub fn verify_metadata_signature_detailed_with_limits(
 
 /// Verify metadata signature cryptography and signed-root coverage.
 ///
-/// The caller enforces the metadata signature profile before this runs. This
-/// function does not apply that transform allowlist again.
+/// The caller has already enforced the metadata signature profile.
 ///
 /// # Errors
 ///
