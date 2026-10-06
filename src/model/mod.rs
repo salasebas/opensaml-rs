@@ -37,4 +37,6 @@ pub use subject::{
     NameId, NameIdCreationRequest, NameIdPolicy, RequestedSubject, RequestedSubjectIdentifier,
     Subject, SubjectConfirmation,
 };
-pub use validation::{ClockSkew, ReplayCache, ReplayKey, ReplayPolicy, SamlValidationContext};
+pub use validation::{
+    AuthnRequestAgePolicy, ClockSkew, ReplayCache, ReplayKey, ReplayPolicy, SamlValidationContext,
+};

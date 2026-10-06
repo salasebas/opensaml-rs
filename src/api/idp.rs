@@ -30,8 +30,9 @@ impl Saml<Idp> {
     /// Returns [`SamlError`] when browser input or relay state is invalid, the
     /// request binding is unsupported, SP metadata cannot be parsed, XML
     /// parsing or signature/trust validation fails, the request destination
-    /// does not match local metadata, or replay validation detects a duplicate
-    /// or expired request.
+    /// does not match local metadata, an enabled [`crate::AuthnRequestAgePolicy`]
+    /// rejects `IssueInstant`, or replay validation detects a duplicate or
+    /// expired request.
     ///
     /// # Examples
     ///
@@ -98,6 +99,7 @@ impl Saml<Idp> {
             }
         }
         let mut validation = validation;
+        validation.check_authn_request_issue_instant(authn.issue_instant())?;
         validation.check_and_store_message_replay(ReplayKey::AuthnRequestId(authn.id().clone()))?;
         Ok(Received::new(authn).with_relay_state(relay_state))
     }

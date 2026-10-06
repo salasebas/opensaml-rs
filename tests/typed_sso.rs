@@ -26,13 +26,14 @@ use saml_rs::raw::Binding;
 use saml_rs::template::{LoginResponseTemplate, LOGIN_RESPONSE_TEMPLATE};
 use saml_rs::xml::dom::parse;
 use saml_rs::{
-    AcsEndpoint, AssertionSignaturePolicy, AudienceValidationPolicy, AuthnRequest, BrowserInput,
-    CertificatePem, Credentials, EntityId, ForceAuthn, FormField, IdpConfig, IdpDescriptor,
-    IdpValidationPolicy, MetadataTrustPolicy, NameId, NameIdFormat, Outbound, PendingAuthnRequest,
-    PendingSnapshot, PrivateKeyPem, Received, RelayStateParam, ReplayCache, ReplayKey,
-    ReplayPolicy, RespondSso, ResponseSignaturePolicy, Saml, SamlError, SamlValidationContext,
-    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse, SsoResponseBinding,
-    StartSso, Subject, TemplatePolicy, VerifiedXmlSignatureCoverage, XmlSignatureProfile,
+    AcsEndpoint, AssertionSignaturePolicy, AudienceValidationPolicy, AuthnRequest,
+    AuthnRequestAgePolicy, BrowserInput, CertificatePem, ClockSkew, Credentials, EntityId,
+    ForceAuthn, FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy,
+    NameId, NameIdFormat, Outbound, PendingAuthnRequest, PendingSnapshot, PrivateKeyPem, Received,
+    RelayStateParam, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, ResponseSignaturePolicy,
+    Saml, SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy,
+    SsoEndpoint, SsoResponse, SsoResponseBinding, StartSso, Subject, TemplatePolicy,
+    VerifiedXmlSignatureCoverage, XmlSignatureProfile,
 };
 #[cfg(not(feature = "crypto-fips"))]
 use saml_rs::{XmlEncryptionPolicy, XmlPolicy};
@@ -699,6 +700,372 @@ fn typed_facade_accepts_old_normalized_authn_request_issue_instant_in_real_flow(
         "2001-01-01T00:00:00Z"
     );
     Ok(())
+}
+
+const AUTHN_REQUEST_AGE_NOW: &str = "2024-06-15T12:00:00Z";
+
+fn authn_request_age_now() -> Result<SystemTime, time::error::Parse> {
+    OffsetDateTime::parse(AUTHN_REQUEST_AGE_NOW, &Rfc3339).map(SystemTime::from)
+}
+
+fn bounded_authn_request_age(
+    now: SystemTime,
+    max_age: Duration,
+    skew: ClockSkew,
+) -> SamlValidationContext<'static> {
+    SamlValidationContext::new(now, ReplayPolicy::DisabledForCompatibility)
+        .with_clock_skew(skew)
+        .with_authn_request_age(AuthnRequestAgePolicy::Bounded { max_age })
+}
+
+fn bounded_authn_request_age_with_cache(
+    now: SystemTime,
+    cache: &mut MemoryReplayCache,
+) -> SamlValidationContext<'_> {
+    SamlValidationContext::new(now, ReplayPolicy::RequireCache(cache))
+        .with_clock_skew(ClockSkew::strict())
+        .with_authn_request_age(AuthnRequestAgePolicy::Bounded {
+            max_age: Duration::from_secs(60 * 60),
+        })
+        .with_replay_retention(Duration::from_secs(5 * 60))
+}
+
+struct IssuedAuthnRequest {
+    idp: Saml<saml_rs::Idp>,
+    sp_descriptor: SpDescriptor,
+    xml: String,
+}
+
+fn issued_authn_request_for_recommended_idp(
+) -> Result<IssuedAuthnRequest, Box<dyn std::error::Error>> {
+    let (sp, _) = compatibility_facades()?;
+    let idp = Saml::idp(idp_with_validation(IdpValidationPolicy::recommended())?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let xml = authn_request_xml(&started.outbound)?;
+    Ok(IssuedAuthnRequest {
+        idp,
+        sp_descriptor,
+        xml,
+    })
+}
+
+fn receive_issued(
+    issued: &IssuedAuthnRequest,
+    instant: &str,
+    validation: SamlValidationContext<'_>,
+) -> Result<Received<AuthnRequest>, Box<dyn std::error::Error>> {
+    let xml = replace_issue_instant(&issued.xml, Some(instant))?;
+    issued
+        .idp
+        .receive_sso(
+            &issued.sp_descriptor,
+            post_authn_request_input_with_xml(&xml),
+            validation,
+        )
+        .map_err(Into::into)
+}
+
+fn assert_authn_request_age_rejected(
+    result: Result<Received<AuthnRequest>, Box<dyn std::error::Error>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let error = match result {
+        Ok(_) => return Err("expected AuthnRequest IssueInstant age error".into()),
+        Err(error) => error,
+    };
+    let error = error
+        .downcast::<SamlError>()
+        .map_err(|error| format!("expected SamlError, got {error}"))?;
+    match *error {
+        SamlError::TimeWindowInvalid { field } => {
+            assert_eq!(field, TimeWindowField::AuthnRequestIssueInstant);
+            Ok(())
+        }
+        other => Err(format!("expected AuthnRequest IssueInstant age error, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn disabled_authn_request_age_ignores_clock_skew_at_a_fixed_clock(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = authn_request_age_now()?;
+    let validation = SamlValidationContext::new(now, ReplayPolicy::DisabledForCompatibility);
+    assert_eq!(
+        validation.authn_request_age(),
+        AuthnRequestAgePolicy::Disabled
+    );
+    assert_eq!(validation.clock_skew(), ClockSkew::five_minutes());
+
+    let issued = issued_authn_request_for_recommended_idp()?;
+    for instant in [
+        "2001-01-01T00:00:00Z",
+        "2099-01-01T00:00:00Z",
+        "2024-06-15T10:54:59Z",
+        "2024-06-15T12:00:60Z",
+    ] {
+        let received = receive_issued(&issued, instant, validation_at_disabled(now))?;
+        assert_eq!(received.message().issue_instant().as_str(), instant);
+    }
+    Ok(())
+}
+
+fn validation_at_disabled(now: SystemTime) -> SamlValidationContext<'static> {
+    SamlValidationContext::new(now, ReplayPolicy::DisabledForCompatibility)
+}
+
+#[test]
+fn bounded_authn_request_age_rejects_outside_the_inclusive_window(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = authn_request_age_now()?;
+    let issued = issued_authn_request_for_recommended_idp()?;
+    let max_age = Duration::from_secs(60 * 60);
+
+    for instant in ["2024-06-15T11:00:00Z", AUTHN_REQUEST_AGE_NOW] {
+        let received = receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, max_age, ClockSkew::strict()),
+        )?;
+        assert_eq!(received.message().issue_instant().as_str(), instant);
+    }
+    for instant in ["2024-06-15T10:59:59Z", "2024-06-15T12:00:01Z"] {
+        assert_authn_request_age_rejected(receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, max_age, ClockSkew::strict()),
+        ))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn five_minute_skew_widens_only_a_bounded_authn_request_age(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = authn_request_age_now()?;
+    let issued = issued_authn_request_for_recommended_idp()?;
+    let max_age = Duration::from_secs(60 * 60);
+
+    let outside_widened_window =
+        receive_issued(&issued, "2024-06-15T10:54:59Z", validation_at_disabled(now))?;
+    assert_eq!(
+        outside_widened_window.message().issue_instant().as_str(),
+        "2024-06-15T10:54:59Z"
+    );
+
+    for instant in ["2024-06-15T10:55:00Z", "2024-06-15T12:05:00Z"] {
+        let received = receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, max_age, ClockSkew::five_minutes()),
+        )?;
+        assert_eq!(received.message().issue_instant().as_str(), instant);
+        assert_authn_request_age_rejected(receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, max_age, ClockSkew::strict()),
+        ))?;
+    }
+    for instant in ["2024-06-15T10:54:59Z", "2024-06-15T12:05:01Z"] {
+        assert_authn_request_age_rejected(receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, max_age, ClockSkew::five_minutes()),
+        ))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn zero_authn_request_max_age_leaves_the_skew_neighborhood(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = authn_request_age_now()?;
+    let issued = issued_authn_request_for_recommended_idp()?;
+
+    let received = receive_issued(
+        &issued,
+        AUTHN_REQUEST_AGE_NOW,
+        bounded_authn_request_age(now, Duration::ZERO, ClockSkew::strict()),
+    )?;
+    assert_eq!(
+        received.message().issue_instant().as_str(),
+        AUTHN_REQUEST_AGE_NOW
+    );
+    for instant in ["2024-06-15T11:59:59Z", "2024-06-15T12:00:01Z"] {
+        assert_authn_request_age_rejected(receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, Duration::ZERO, ClockSkew::strict()),
+        ))?;
+    }
+
+    for instant in ["2024-06-15T11:55:00Z", "2024-06-15T12:05:00Z"] {
+        let received = receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, Duration::ZERO, ClockSkew::five_minutes()),
+        )?;
+        assert_eq!(received.message().issue_instant().as_str(), instant);
+    }
+    for instant in ["2024-06-15T11:54:59Z", "2024-06-15T12:05:01Z"] {
+        assert_authn_request_age_rejected(receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, Duration::ZERO, ClockSkew::five_minutes()),
+        ))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn inverted_clock_skew_does_not_shrink_authn_request_max_age(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = authn_request_age_now()?;
+    let issued = issued_authn_request_for_recommended_idp()?;
+    let max_age = Duration::from_secs(60 * 60);
+    let inverted = ClockSkew::from_millis(5 * 60 * 1_000, -5 * 60 * 1_000);
+
+    for instant in ["2024-06-15T11:00:00Z", AUTHN_REQUEST_AGE_NOW] {
+        let received = receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, max_age, inverted),
+        )?;
+        assert_eq!(received.message().issue_instant().as_str(), instant);
+    }
+    for instant in ["2024-06-15T10:55:00Z", "2024-06-15T12:05:00Z"] {
+        assert_authn_request_age_rejected(receive_issued(
+            &issued,
+            instant,
+            bounded_authn_request_age(now, max_age, inverted),
+        ))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn bounded_authn_request_age_handles_a_large_duration_and_overflow(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = authn_request_age_now()?;
+    let issued = issued_authn_request_for_recommended_idp()?;
+    let large_age = Duration::from_secs(200 * 365 * 24 * 60 * 60);
+
+    let received = receive_issued(
+        &issued,
+        "1900-01-01T00:00:00Z",
+        bounded_authn_request_age(now, large_age, ClockSkew::strict()),
+    )?;
+    assert_eq!(
+        received.message().issue_instant().as_str(),
+        "1900-01-01T00:00:00Z"
+    );
+    assert_authn_request_age_rejected(receive_issued(
+        &issued,
+        "1700-01-01T00:00:00Z",
+        bounded_authn_request_age(now, large_age, ClockSkew::strict()),
+    ))?;
+    assert_authn_request_age_rejected(receive_issued(
+        &issued,
+        AUTHN_REQUEST_AGE_NOW,
+        bounded_authn_request_age(now, Duration::MAX, ClockSkew::strict()),
+    ))?;
+    assert_authn_request_age_rejected(receive_issued(
+        &issued,
+        "2024-06-15T12:00:60Z",
+        bounded_authn_request_age(now, Duration::from_secs(60 * 60), ClockSkew::five_minutes()),
+    ))?;
+    Ok(())
+}
+
+#[test]
+fn rejected_authn_request_age_does_not_occupy_a_replay_key(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = authn_request_age_now()?;
+    let issued = issued_authn_request_for_recommended_idp()?;
+    let mut cache = MemoryReplayCache::default();
+    let stale = replace_issue_instant(&issued.xml, Some("2001-01-01T00:00:00Z"))?;
+    let fresh = replace_issue_instant(&issued.xml, Some(AUTHN_REQUEST_AGE_NOW))?;
+    let misdirected = stale.replace(
+        "Destination=\"https://idp.example.com/sso/post\"",
+        "Destination=\"https://idp.example.com/sso/other\"",
+    );
+
+    match issued.idp.receive_sso(
+        &issued.sp_descriptor,
+        post_authn_request_input_with_xml(&misdirected),
+        bounded_authn_request_age_with_cache(now, &mut cache),
+    ) {
+        Err(SamlError::DestinationMismatch { .. }) => {}
+        other => return Err(format!("expected DestinationMismatch, got {other:?}").into()),
+    }
+    assert!(cache.seen.is_empty());
+
+    assert_authn_request_age_rejected(
+        issued
+            .idp
+            .receive_sso(
+                &issued.sp_descriptor,
+                post_authn_request_input_with_xml(&stale),
+                bounded_authn_request_age_with_cache(now, &mut cache),
+            )
+            .map_err(Into::into),
+    )?;
+    assert!(cache.seen.is_empty());
+
+    let received = issued.idp.receive_sso(
+        &issued.sp_descriptor,
+        post_authn_request_input_with_xml(&fresh),
+        bounded_authn_request_age_with_cache(now, &mut cache),
+    )?;
+    let replay_key = format!("authn_request_id:{}", received.message().id().as_str());
+    assert!(cache.seen.contains_key(&replay_key));
+
+    let mut disabled_cache = MemoryReplayCache::default();
+    issued.idp.receive_sso(
+        &issued.sp_descriptor,
+        post_authn_request_input_with_xml(&stale),
+        SamlValidationContext::new(now, ReplayPolicy::RequireCache(&mut disabled_cache))
+            .with_replay_retention(Duration::from_secs(5 * 60)),
+    )?;
+    assert!(disabled_cache.seen.contains_key(&replay_key));
+    Ok(())
+}
+
+#[test]
+fn signed_authn_request_age_check_does_not_replace_signature_verification(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp) = facades()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
+    let xml = replace_issue_instant(
+        &authn_request_xml(&started.outbound)?,
+        Some("2001-01-01T00:00:00Z"),
+    )?;
+    let mut cache = MemoryReplayCache::default();
+    let validation = SamlValidationContext::new(
+        authn_request_age_now()?,
+        ReplayPolicy::RequireCache(&mut cache),
+    )
+    .with_clock_skew(ClockSkew::strict())
+    .with_authn_request_age(AuthnRequestAgePolicy::Bounded {
+        max_age: Duration::from_secs(60),
+    })
+    .with_replay_retention(Duration::from_secs(5 * 60));
+
+    match idp.receive_sso(
+        &sp_descriptor,
+        post_authn_request_input_with_xml(&xml),
+        validation,
+    ) {
+        Err(SamlError::SignatureVerification {
+            reason: saml_rs::error::SignatureVerificationReason::XmlSignature,
+        }) => {
+            assert!(cache.seen.is_empty());
+            Ok(())
+        }
+        other => Err(
+            format!("expected XML signature failure before the age check, got {other:?}").into(),
+        ),
+    }
 }
 
 #[test]

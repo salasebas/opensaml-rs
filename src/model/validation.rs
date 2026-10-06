@@ -1,7 +1,7 @@
-use super::{AssertionId, MessageId};
+use super::{AssertionId, MessageId, SamlInstant};
 use crate::error::{SamlError, TimeWindowField};
 use std::time::{Duration, SystemTime};
-use time::OffsetDateTime;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 /// Clock skew applied to SAML time-window checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,10 +196,30 @@ pub enum ReplayPolicy<'a> {
     RequireCache(&'a mut dyn ReplayCache),
 }
 
+/// Maximum age for an inbound `AuthnRequest` `IssueInstant`.
+///
+/// [`Self::Disabled`] skips the comparison. [`Self::Bounded`] accepts an
+/// instant inside an inclusive window of `max_age`, widened by the context
+/// clock skew. The classification is
+/// `docs/conformance/web-browser-sso-acceptance.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthnRequestAgePolicy {
+    /// Do not compare `IssueInstant` with the validation clock.
+    Disabled,
+    /// Accept an `IssueInstant` inside an inclusive window of `max_age`.
+    Bounded {
+        /// Maximum age before clock-skew tolerance is applied.
+        ///
+        /// Zero leaves only the skew neighborhood.
+        max_age: Duration,
+    },
+}
+
 /// Caller-owned validation context for typed inbound SAML messages.
 pub struct SamlValidationContext<'a> {
     now: SystemTime,
     clock_skew: ClockSkew,
+    authn_request_age: AuthnRequestAgePolicy,
     replay: ReplayPolicy<'a>,
     replay_retention: Option<Duration>,
 }
@@ -214,6 +234,7 @@ impl<'a> SamlValidationContext<'a> {
         Self {
             now,
             clock_skew: ClockSkew::five_minutes(),
+            authn_request_age: AuthnRequestAgePolicy::Disabled,
             replay,
             replay_retention: None,
         }
@@ -222,6 +243,20 @@ impl<'a> SamlValidationContext<'a> {
     /// Replace the context clock skew, including [`ClockSkew::strict`].
     pub fn with_clock_skew(mut self, clock_skew: ClockSkew) -> Self {
         self.clock_skew = clock_skew;
+        self
+    }
+
+    /// Select the maximum age of an inbound `AuthnRequest` `IssueInstant`.
+    ///
+    /// [`AuthnRequestAgePolicy::Disabled`] skips the comparison.
+    /// [`AuthnRequestAgePolicy::Bounded`] accepts an instant at or after
+    /// `now - max_age - past_tolerance` and at or before
+    /// `now + future_tolerance`. Both edges are inclusive. Past tolerance is
+    /// the positive `NotOnOrAfter` skew. Future tolerance is the magnitude of
+    /// a negative `NotBefore` skew. Zero skew and inverted skew do not shrink
+    /// `max_age`.
+    pub fn with_authn_request_age(mut self, authn_request_age: AuthnRequestAgePolicy) -> Self {
+        self.authn_request_age = authn_request_age;
         self
     }
 
@@ -242,6 +277,11 @@ impl<'a> SamlValidationContext<'a> {
         self.clock_skew
     }
 
+    /// Maximum age policy for an inbound `AuthnRequest` `IssueInstant`.
+    pub fn authn_request_age(&self) -> AuthnRequestAgePolicy {
+        self.authn_request_age
+    }
+
     /// Replay retention for protocol message IDs without SAML expiry.
     pub fn replay_retention(&self) -> Option<Duration> {
         self.replay_retention
@@ -253,6 +293,31 @@ impl<'a> SamlValidationContext<'a> {
 
     pub(crate) fn replay_policy(&mut self) -> &mut ReplayPolicy<'a> {
         &mut self.replay
+    }
+
+    pub(crate) fn check_authn_request_issue_instant(
+        &self,
+        issue_instant: &SamlInstant,
+    ) -> Result<(), SamlError> {
+        let AuthnRequestAgePolicy::Bounded { max_age } = self.authn_request_age else {
+            return Ok(());
+        };
+        let past_tolerance = positive_millis(self.clock_skew.not_on_or_after_millis());
+        let future_tolerance = negative_millis_magnitude(self.clock_skew.not_before_millis());
+        let past_allowance = max_age
+            .checked_add(past_tolerance)
+            .ok_or_else(authn_request_issue_instant_window)?;
+        let now = self
+            .now_offset()
+            .map_err(|_| authn_request_issue_instant_window())?;
+        let earliest = offset_checked_sub(now, past_allowance)?;
+        let latest = offset_checked_add(now, future_tolerance)?;
+        let issued = OffsetDateTime::parse(issue_instant.as_str(), &Rfc3339)
+            .map_err(|_| authn_request_issue_instant_window())?;
+        if issued < earliest || issued > latest {
+            return Err(authn_request_issue_instant_window());
+        }
+        Ok(())
     }
 
     pub(crate) fn check_and_store_message_replay(
@@ -304,6 +369,49 @@ impl<'a> SamlValidationContext<'a> {
                 field: crate::error::TimeWindowField::ReplayExpiration,
             })
     }
+}
+
+fn positive_millis(millis: i64) -> Duration {
+    u64::try_from(millis)
+        .ok()
+        .filter(|millis| *millis > 0)
+        .map_or(Duration::ZERO, Duration::from_millis)
+}
+
+fn negative_millis_magnitude(millis: i64) -> Duration {
+    if millis < 0 {
+        Duration::from_millis(millis.unsigned_abs())
+    } else {
+        Duration::ZERO
+    }
+}
+
+fn authn_request_issue_instant_window() -> SamlError {
+    SamlError::TimeWindowInvalid {
+        field: TimeWindowField::AuthnRequestIssueInstant,
+    }
+}
+
+fn offset_checked_add(
+    instant: OffsetDateTime,
+    duration: Duration,
+) -> Result<OffsetDateTime, SamlError> {
+    let duration =
+        time::Duration::try_from(duration).map_err(|_| authn_request_issue_instant_window())?;
+    instant
+        .checked_add(duration)
+        .ok_or_else(authn_request_issue_instant_window)
+}
+
+fn offset_checked_sub(
+    instant: OffsetDateTime,
+    duration: Duration,
+) -> Result<OffsetDateTime, SamlError> {
+    let duration =
+        time::Duration::try_from(duration).map_err(|_| authn_request_issue_instant_window())?;
+    instant
+        .checked_sub(duration)
+        .ok_or_else(authn_request_issue_instant_window)
 }
 
 fn system_time_from_offset_datetime(deadline: OffsetDateTime) -> Result<SystemTime, SamlError> {
