@@ -344,12 +344,19 @@ impl SsoSession {
     /// # Errors
     ///
     /// Returns [`SamlError::TimeWindowInvalid`] when no valid replay
-    /// expiration can be derived or the session is already expired. Replay
-    /// expiration uses the earliest upper bound across Conditions, bearer
-    /// SubjectConfirmation data, and every `AuthnStatement`. Returns
-    /// [`SamlError::ReplayDetected`] when any session replay key has already
-    /// been seen. Cache implementations may also return storage-specific
-    /// failures mapped to [`SamlError`].
+    /// expiration can be derived or a stored deadline has already passed.
+    /// Nothing is stored in that case.
+    ///
+    /// The bearer assertion identifier is kept until
+    /// `SubjectConfirmationData@NotOnOrAfter`, plus the context
+    /// `NotOnOrAfter` skew. An earlier `Conditions` or `AuthnStatement`
+    /// instant does not shorten that identifier. The Response identifier is
+    /// also stored, and its deadline remains the earliest of those instants.
+    /// [`ReplayPolicy::DisabledForCompatibility`] stores nothing.
+    ///
+    /// Returns [`SamlError::ReplayDetected`] when any session replay key has
+    /// already been seen. Cache implementations may also return
+    /// storage-specific failures mapped to [`SamlError`].
     pub fn check_and_store_replay(
         &self,
         validation: &mut SamlValidationContext<'_>,
@@ -359,20 +366,24 @@ impl SsoSession {
         match validation.replay_policy() {
             ReplayPolicy::DisabledForCompatibility => Ok(()),
             ReplayPolicy::RequireCache(cache) => {
-                let expires_at = self.replay_expires_at(validation_now, not_on_or_after_skew_ms)?;
-                let since_epoch = expires_at - OffsetDateTime::UNIX_EPOCH;
-                let expires_at = if since_epoch.is_negative() {
-                    SystemTime::UNIX_EPOCH.checked_sub(since_epoch.unsigned_abs())
-                } else {
-                    SystemTime::UNIX_EPOCH.checked_add(since_epoch.unsigned_abs())
-                }
-                .ok_or(SamlError::TimeWindowInvalid {
-                    field: REPLAY_EXPIRATION_FIELD,
-                })?;
-                let keys = self.replay_keys();
-                for key in keys {
-                    cache.check_and_store(key, expires_at)?;
-                }
+                let response_expires = system_time_from_offset(replay_deadline(
+                    self.earliest_replay_instant()?,
+                    validation_now,
+                    not_on_or_after_skew_ms,
+                )?)?;
+                let assertion_expires = system_time_from_offset(replay_deadline(
+                    self.assertion_replay_instant()?,
+                    validation_now,
+                    not_on_or_after_skew_ms,
+                )?)?;
+                cache.check_and_store(
+                    ReplayKey::ResponseId(self.response_id.clone()),
+                    response_expires,
+                )?;
+                cache.check_and_store(
+                    ReplayKey::AssertionId(self.assertion_id.clone()),
+                    assertion_expires,
+                )?;
                 Ok(())
             }
         }
@@ -383,11 +394,7 @@ impl SsoSession {
         &self.raw_flow
     }
 
-    fn replay_expires_at(
-        &self,
-        validation_now: OffsetDateTime,
-        not_on_or_after_skew_ms: i64,
-    ) -> Result<OffsetDateTime, SamlError> {
+    fn earliest_replay_instant(&self) -> Result<OffsetDateTime, SamlError> {
         let mut candidates = Vec::with_capacity(3);
         if let Some(instant) = self.not_on_or_after() {
             candidates.push(parse_replay_expiration(instant.as_str())?);
@@ -404,24 +411,19 @@ impl SsoSession {
         if let Some(instant) = self.bearer_subject_confirmation_expires_at()? {
             candidates.push(instant);
         }
-
-        let raw_expires_at = candidates
+        candidates
             .into_iter()
             .min()
             .ok_or(SamlError::TimeWindowInvalid {
                 field: REPLAY_EXPIRATION_FIELD,
-            })?;
-        let expires_at = raw_expires_at
-            .checked_add(Duration::milliseconds(not_on_or_after_skew_ms))
-            .ok_or(SamlError::TimeWindowInvalid {
-                field: REPLAY_EXPIRATION_FIELD,
-            })?;
-        if validation_now >= expires_at {
-            return Err(SamlError::TimeWindowInvalid {
-                field: REPLAY_EXPIRATION_FIELD,
-            });
+            })
+    }
+
+    fn assertion_replay_instant(&self) -> Result<OffsetDateTime, SamlError> {
+        if let Some(instant) = self.bearer_subject_confirmation_expires_at()? {
+            return Ok(instant);
         }
-        Ok(expires_at)
+        self.earliest_replay_instant()
     }
 
     fn bearer_subject_confirmation_expires_at(&self) -> Result<Option<OffsetDateTime>, SamlError> {
@@ -452,6 +454,36 @@ impl SsoSession {
         }
         Ok(expires_at)
     }
+}
+
+fn replay_deadline(
+    raw_expires_at: OffsetDateTime,
+    validation_now: OffsetDateTime,
+    not_on_or_after_skew_ms: i64,
+) -> Result<OffsetDateTime, SamlError> {
+    let expires_at = raw_expires_at
+        .checked_add(Duration::milliseconds(not_on_or_after_skew_ms))
+        .ok_or(SamlError::TimeWindowInvalid {
+            field: REPLAY_EXPIRATION_FIELD,
+        })?;
+    if validation_now >= expires_at {
+        return Err(SamlError::TimeWindowInvalid {
+            field: REPLAY_EXPIRATION_FIELD,
+        });
+    }
+    Ok(expires_at)
+}
+
+fn system_time_from_offset(expires_at: OffsetDateTime) -> Result<SystemTime, SamlError> {
+    let since_epoch = expires_at - OffsetDateTime::UNIX_EPOCH;
+    let converted = if since_epoch.is_negative() {
+        SystemTime::UNIX_EPOCH.checked_sub(since_epoch.unsigned_abs())
+    } else {
+        SystemTime::UNIX_EPOCH.checked_add(since_epoch.unsigned_abs())
+    };
+    converted.ok_or(SamlError::TimeWindowInvalid {
+        field: REPLAY_EXPIRATION_FIELD,
+    })
 }
 
 fn parse_replay_expiration(value: &str) -> Result<OffsetDateTime, SamlError> {

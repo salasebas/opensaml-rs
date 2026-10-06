@@ -84,7 +84,8 @@ other participants, so those rules are not fields of this flow.
 | UTC `IssueInstant` | Logout recipient | Inbound | Mandatory. No off switch. Inbound leap-second values stay accepted |
 | A present `Destination` matches the recipient endpoint, and a signed message carries `Destination` | Logout recipient | Inbound | Mandatory. Core §3.2.1 and §3.2.2; Bindings §3.4.5.2 and §3.5.5.2; SimpleSign §2.4 when the message is signed |
 | Typed `InResponseTo` matches the pending `LogoutRequest` | Original requester | Inbound `finish_slo` | Mandatory for this typed exchange. Core §3.2.2 |
-| Discard a `LogoutRequest` at or after `NotOnOrAfter` | Logout recipient | Inbound | Library policy. Core §3.7.1 says the recipient may discard the message after that instant. saml-rs rejects it. That rejection is not an OASIS receiver `MUST` and is not part of the accept combination |
+| Allow the validation-context clock skew on `LogoutRequest@NotOnOrAfter` | Logout recipient | Inbound | Recommendation. Approved Errata 05 E92 adds the Core §1.3.3 guidance to this attribute. A new `SamlValidationContext` allows the same five minutes used for assertion conditions. `ClockSkew::strict` is zero. An explicit skew replaces it. This is not a validation-preset field |
+| Discard a `LogoutRequest` at or after its skew-adjusted `NotOnOrAfter` | Logout recipient | Inbound | Library policy. Core §3.7.1 says the recipient may discard the message after that instant. saml-rs rejects it at the exclusive skew-adjusted deadline. That rejection is not an OASIS receiver `MUST` and is not part of the accept combination |
 | Embedded XML-signature algorithm profile | Logout recipient | Inbound | Library hardening. Off unless `XmlSignatureProfile::StrictRsaSha2` is selected. Independent of the logout accept combination |
 
 An `http` `Destination` remains acceptable when it is the recipient's

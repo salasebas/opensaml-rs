@@ -19,6 +19,18 @@ impl ClockSkew {
         }
     }
 
+    /// Five minutes of skew on `NotBefore` and `NotOnOrAfter`.
+    ///
+    /// `NotBefore` is interpreted five minutes early. `NotOnOrAfter` stays
+    /// valid until five minutes after the attribute, and that deadline stays
+    /// exclusive. This is the top of the three-to-five-minute range that SAML
+    /// V2.0 Approved Errata 05 E92 calls reasonable.
+    /// [`SamlValidationContext::new`] starts here.
+    pub fn five_minutes() -> Self {
+        const FIVE_MINUTES_MS: i64 = 5 * 60 * 1_000;
+        Self::from_millis(-FIVE_MINUTES_MS, FIVE_MINUTES_MS)
+    }
+
     /// Build clock skew from the raw SAML drift values, in milliseconds.
     ///
     /// The first argument applies to `NotBefore`; the second applies to
@@ -59,6 +71,10 @@ impl ClockSkew {
 }
 
 impl Default for ClockSkew {
+    /// Zero skew, the same value as [`Self::strict`].
+    ///
+    /// [`SamlValidationContext::new`] does not use this value. A new context
+    /// allows five minutes until the caller sets a skew.
     fn default() -> Self {
         Self::strict()
     }
@@ -195,17 +211,30 @@ pub struct SamlValidationContext<'a> {
 }
 
 impl<'a> SamlValidationContext<'a> {
-    /// Build a validation context with strict clock skew.
+    /// Build a validation context that allows five minutes of clock skew.
+    ///
+    /// `NotBefore` is accepted up to five minutes early. `NotOnOrAfter` stays
+    /// valid until five minutes after the attribute, and that deadline stays
+    /// exclusive. The same skew applies to assertion conditions, bearer
+    /// confirmation times, `AuthnStatement@SessionNotOnOrAfter`, and
+    /// `LogoutRequest@NotOnOrAfter`. Session expiry uses that shared
+    /// `NotOnOrAfter` drift as existing library policy. This is the top
+    /// of the range SAML V2.0 Approved Errata 05 E92 calls reasonable.
+    ///
+    /// [`Self::with_clock_skew`] replaces that allowance.
+    /// [`ClockSkew::strict`] allows none.
     pub fn new(now: SystemTime, replay: ReplayPolicy<'a>) -> Self {
         Self {
             now,
-            clock_skew: ClockSkew::strict(),
+            clock_skew: ClockSkew::five_minutes(),
             replay,
             replay_retention: None,
         }
     }
 
-    /// Set clock skew tolerance for SAML time windows.
+    /// Replace the context clock skew.
+    ///
+    /// An explicit value is left as given, including [`ClockSkew::strict`].
     pub fn with_clock_skew(mut self, clock_skew: ClockSkew) -> Self {
         self.clock_skew = clock_skew;
         self
