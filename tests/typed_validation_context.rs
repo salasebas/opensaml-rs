@@ -90,6 +90,39 @@ fn xml_with_late_subject_and_conditions() -> String {
         )
 }
 
+const SKEW_NOW: &str = "2026-07-15T12:00:00Z";
+const FAR_FUTURE: &str = "2027-01-01T00:00:00Z";
+
+fn xml_with_time_window(
+    not_before: &str,
+    conditions_not_on_or_after: &str,
+    subject_not_on_or_after: &str,
+    session_not_on_or_after: &str,
+) -> String {
+    RESPONSE
+        .replace(
+            "Conditions NotBefore=\"2014-07-17T01:01:18Z\" NotOnOrAfter=\"2024-01-18T06:21:48Z\"",
+            &format!(
+                "Conditions NotBefore=\"{not_before}\" NotOnOrAfter=\"{conditions_not_on_or_after}\""
+            ),
+        )
+        .replace(
+            "SubjectConfirmationData NotOnOrAfter=\"2024-01-18T06:21:48Z\"",
+            &format!("SubjectConfirmationData NotOnOrAfter=\"{subject_not_on_or_after}\""),
+        )
+        .replace(
+            "SessionNotOnOrAfter=\"2024-07-17T09:01:48Z\"",
+            &format!("SessionNotOnOrAfter=\"{session_not_on_or_after}\""),
+        )
+}
+
+fn context_at(now: &str) -> Result<SamlValidationContext<'static>, time::error::Parse> {
+    Ok(SamlValidationContext::new(
+        instant(now)?,
+        ReplayPolicy::DisabledForCompatibility,
+    ))
+}
+
 fn value_str(value: &str) -> Value {
     Value::Str(value.to_string())
 }
@@ -267,7 +300,8 @@ fn typed_validation_context_not_yet_valid_condition_uses_fixed_clock(
     let validation = SamlValidationContext::new(
         instant("2014-07-17T01:01:00Z")?,
         ReplayPolicy::DisabledForCompatibility,
-    );
+    )
+    .with_clock_skew(ClockSkew::strict());
 
     match parse_response_at(RESPONSE, &validation) {
         Err(SamlError::TimeWindowInvalid { field }) => {
@@ -313,6 +347,179 @@ fn typed_validation_context_clock_skew_exposes_named_millis(
 }
 
 #[test]
+fn new_validation_context_allows_five_minutes_on_not_before_and_not_on_or_after(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let validation = context_at(SKEW_NOW)?;
+    assert_eq!(validation.clock_skew().as_millis(), (-300_000, 300_000));
+
+    parse_response_at(
+        &xml_with_time_window("2026-07-15T12:05:00Z", FAR_FUTURE, FAR_FUTURE, FAR_FUTURE),
+        &validation,
+    )?;
+    match parse_response_at(
+        &xml_with_time_window("2026-07-15T12:05:01Z", FAR_FUTURE, FAR_FUTURE, FAR_FUTURE),
+        &validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::Conditions);
+        }
+        other => {
+            return Err(format!("expected NotBefore beyond five minutes, got {other:?}").into());
+        }
+    }
+
+    parse_response_at(
+        &xml_with_time_window(
+            "2020-01-01T00:00:00Z",
+            "2026-07-15T11:55:01Z",
+            FAR_FUTURE,
+            FAR_FUTURE,
+        ),
+        &validation,
+    )?;
+    match parse_response_at(
+        &xml_with_time_window(
+            "2020-01-01T00:00:00Z",
+            "2026-07-15T11:55:00Z",
+            FAR_FUTURE,
+            FAR_FUTURE,
+        ),
+        &validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::Conditions);
+        }
+        other => {
+            return Err(
+                format!("expected NotOnOrAfter exactly five minutes ago, got {other:?}").into(),
+            );
+        }
+    }
+
+    parse_response_at(
+        &xml_with_time_window(
+            "2020-01-01T00:00:00Z",
+            FAR_FUTURE,
+            "2026-07-15T11:55:01Z",
+            FAR_FUTURE,
+        ),
+        &validation,
+    )?;
+    match parse_response_at(
+        &xml_with_time_window(
+            "2020-01-01T00:00:00Z",
+            FAR_FUTURE,
+            "2026-07-15T11:55:00Z",
+            FAR_FUTURE,
+        ),
+        &validation,
+    ) {
+        Err(SamlError::SubjectConfirmationInvalid { reason }) => {
+            assert_eq!(reason, SubjectConfirmationReason::TimeWindowInvalid);
+            Ok(())
+        }
+        other => Err(format!(
+            "expected bearer NotOnOrAfter exactly five minutes ago, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn clock_skew_strict_allows_no_skew() -> Result<(), Box<dyn std::error::Error>> {
+    let validation = context_at(SKEW_NOW)?.with_clock_skew(ClockSkew::strict());
+
+    match parse_response_at(
+        &xml_with_time_window("2026-07-15T12:01:00Z", FAR_FUTURE, FAR_FUTURE, FAR_FUTURE),
+        &validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::Conditions);
+        }
+        other => return Err(format!("expected strict NotBefore rejection, got {other:?}").into()),
+    }
+
+    match parse_response_at(
+        &xml_with_time_window(
+            "2020-01-01T00:00:00Z",
+            "2026-07-15T11:59:00Z",
+            FAR_FUTURE,
+            FAR_FUTURE,
+        ),
+        &validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::Conditions);
+        }
+        other => {
+            return Err(format!("expected strict NotOnOrAfter rejection, got {other:?}").into());
+        }
+    }
+
+    match parse_response_at(
+        &xml_with_time_window(
+            "2020-01-01T00:00:00Z",
+            FAR_FUTURE,
+            "2026-07-15T11:59:00Z",
+            FAR_FUTURE,
+        ),
+        &validation,
+    ) {
+        Err(SamlError::SubjectConfirmationInvalid { reason }) => {
+            assert_eq!(reason, SubjectConfirmationReason::TimeWindowInvalid);
+            Ok(())
+        }
+        other => {
+            Err(format!("expected strict bearer NotOnOrAfter rejection, got {other:?}").into())
+        }
+    }
+}
+
+#[test]
+fn explicit_clock_skew_replaces_five_minute_default() -> Result<(), Box<dyn std::error::Error>> {
+    let validation = context_at(SKEW_NOW)?.with_clock_skew(ClockSkew::from_millis(-60_000, 60_000));
+
+    parse_response_at(
+        &xml_with_time_window("2026-07-15T12:01:00Z", FAR_FUTURE, FAR_FUTURE, FAR_FUTURE),
+        &validation,
+    )?;
+    match parse_response_at(
+        &xml_with_time_window("2026-07-15T12:01:01Z", FAR_FUTURE, FAR_FUTURE, FAR_FUTURE),
+        &validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::Conditions);
+        }
+        other => return Err(format!("expected one-minute NotBefore limit, got {other:?}").into()),
+    }
+
+    parse_response_at(
+        &xml_with_time_window(
+            "2020-01-01T00:00:00Z",
+            "2026-07-15T11:59:01Z",
+            FAR_FUTURE,
+            FAR_FUTURE,
+        ),
+        &validation,
+    )?;
+    match parse_response_at(
+        &xml_with_time_window(
+            "2020-01-01T00:00:00Z",
+            "2026-07-15T11:59:00Z",
+            FAR_FUTURE,
+            FAR_FUTURE,
+        ),
+        &validation,
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::Conditions);
+            Ok(())
+        }
+        other => Err(format!("expected one-minute NotOnOrAfter limit, got {other:?}").into()),
+    }
+}
+
+#[test]
 fn typed_validation_context_extracts_sso_replay_keys_without_session_index(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let session = sso_session()?;
@@ -342,15 +549,46 @@ fn typed_validation_context_replay_cache_stores_new_keys() -> Result<(), Box<dyn
     .with_clock_skew(ClockSkew::strict().with_not_on_or_after_millis(1_000));
 
     session.check_and_store_replay(&mut validation)?;
-    let expected_expires_at = instant("2026-07-04T13:00:01Z")?;
     assert_eq!(cache.seen.len(), 2);
     assert_eq!(
         cache.seen.get("response_id:_response123"),
-        Some(&expected_expires_at)
+        Some(&instant("2026-07-04T13:00:01Z")?)
     );
     assert_eq!(
         cache.seen.get("assertion_id:_assertion123"),
-        Some(&expected_expires_at)
+        Some(&instant("2026-07-04T14:00:01Z")?)
+    );
+    Ok(())
+}
+
+#[test]
+fn require_cache_keeps_assertion_id_until_subject_confirmation_not_on_or_after(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut flow = session_flow();
+    flow.extract.insert(
+        "sessionIndex",
+        value_object(vec![
+            ("sessionIndex", value_str("_earlier")),
+            ("authnInstant", value_str("2026-07-04T12:00:00Z")),
+            ("sessionNotOnOrAfter", value_str("2026-07-04T12:30:00Z")),
+        ]),
+    );
+    let session = SsoSession::try_from(flow)?;
+    let mut cache = MemoryReplayCache::default();
+    let mut validation = SamlValidationContext::new(
+        instant("2026-07-04T12:05:00Z")?,
+        ReplayPolicy::RequireCache(&mut cache),
+    )
+    .with_clock_skew(ClockSkew::strict());
+
+    session.check_and_store_replay(&mut validation)?;
+    assert_eq!(
+        cache.seen.get("assertion_id:_assertion123"),
+        Some(&instant("2026-07-04T14:00:00Z")?)
+    );
+    assert_eq!(
+        cache.seen.get("response_id:_response123"),
+        Some(&instant("2026-07-04T12:30:00Z")?)
     );
     Ok(())
 }
@@ -372,7 +610,8 @@ fn typed_validation_context_replay_expiration_preserves_pre_epoch_nanoseconds(
     let mut validation = SamlValidationContext::new(
         instant("1969-12-31T23:59:59.123456788Z")?,
         ReplayPolicy::RequireCache(&mut cache),
-    );
+    )
+    .with_clock_skew(ClockSkew::strict());
 
     session.check_and_store_replay(&mut validation)?;
     assert_eq!(
@@ -520,7 +759,8 @@ fn typed_validation_context_replay_expiration_uses_subject_confirmation_data(
     let mut validation = SamlValidationContext::new(
         instant("2026-07-04T12:05:00Z")?,
         ReplayPolicy::RequireCache(&mut cache),
-    );
+    )
+    .with_clock_skew(ClockSkew::strict());
 
     session.check_and_store_replay(&mut validation)?;
     assert_eq!(
@@ -540,7 +780,8 @@ fn typed_validation_context_replay_expiration_uses_session_not_on_or_after(
     let mut validation = SamlValidationContext::new(
         instant("2026-07-04T12:05:00Z")?,
         ReplayPolicy::RequireCache(&mut cache),
-    );
+    )
+    .with_clock_skew(ClockSkew::strict());
 
     session.check_and_store_replay(&mut validation)?;
     assert_eq!(
@@ -573,7 +814,8 @@ fn typed_validation_context_replay_expiration_uses_earliest_authn_statement(
     let mut validation = SamlValidationContext::new(
         instant("2026-07-04T12:05:00Z")?,
         ReplayPolicy::RequireCache(&mut cache),
-    );
+    )
+    .with_clock_skew(ClockSkew::strict());
 
     session.check_and_store_replay(&mut validation)?;
     assert_eq!(
@@ -622,7 +864,8 @@ fn typed_validation_context_replay_expiration_at_now_fails_closed(
     let mut validation = SamlValidationContext::new(
         instant("2026-07-04T13:00:00Z")?,
         ReplayPolicy::RequireCache(&mut cache),
-    );
+    )
+    .with_clock_skew(ClockSkew::strict());
 
     match session.check_and_store_replay(&mut validation) {
         Err(SamlError::TimeWindowInvalid { field }) => {

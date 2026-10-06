@@ -168,8 +168,9 @@
 //! applies no library-selected maximum age to it. Optional UTC
 //! `NotOnOrAfter` values are rejected at their skew-adjusted exclusive
 //! deadline as a fail-closed saml-rs policy, not an OASIS receiver `MUST`.
-//! [`ClockSkew`] controls that tolerance, and replay storage uses the same
-//! effective deadline when it is present.
+//! A new [`SamlValidationContext`] allows five minutes of skew on that
+//! deadline. [`ClockSkew::strict`] keeps the tolerance at zero, and replay
+//! storage uses the same effective deadline when it is present.
 //!
 //! ```no_run
 //! use saml_rs::{

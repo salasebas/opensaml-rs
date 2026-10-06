@@ -1206,7 +1206,8 @@ fn typed_facade_rejects_expired_signed_logout_request_before_replay_for_all_bind
         let validation = SamlValidationContext::new(
             system_time("2026-07-15T12:00:00Z")?,
             ReplayPolicy::RequireCache(&mut cache),
-        );
+        )
+        .with_clock_skew(ClockSkew::strict());
         match receive_custom_logout_request(
             &template,
             binding,
@@ -1227,6 +1228,98 @@ fn typed_facade_rejects_expired_signed_logout_request_before_replay_for_all_bind
         }
     }
     Ok(())
+}
+
+#[test]
+fn new_validation_context_allows_five_minutes_on_logout_request_not_on_or_after(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let within = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T11:55:01Z"));
+    let boundary = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T11:55:00Z"));
+    let now = system_time("2026-07-15T12:00:00Z")?;
+
+    receive_custom_logout_request(
+        &within,
+        LogoutBinding::Post,
+        LocalSloRole::Idp,
+        RequestProtection::Signed,
+        SamlValidationContext::new(now, ReplayPolicy::DisabledForCompatibility),
+    )?;
+
+    match receive_custom_logout_request(
+        &boundary,
+        LogoutBinding::Post,
+        LocalSloRole::Idp,
+        RequestProtection::Signed,
+        SamlValidationContext::new(now, ReplayPolicy::DisabledForCompatibility),
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::LogoutRequestNotOnOrAfter);
+            Ok(())
+        }
+        other => Err(format!(
+            "expected LogoutRequest NotOnOrAfter exactly five minutes ago, got {other:?}"
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn clock_skew_strict_allows_no_logout_request_skew() -> Result<(), Box<dyn std::error::Error>> {
+    let template = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T11:59:00Z"));
+
+    match receive_custom_logout_request(
+        &template,
+        LogoutBinding::Post,
+        LocalSloRole::Idp,
+        RequestProtection::Signed,
+        SamlValidationContext::new(
+            system_time("2026-07-15T12:00:00Z")?,
+            ReplayPolicy::DisabledForCompatibility,
+        )
+        .with_clock_skew(ClockSkew::strict()),
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::LogoutRequestNotOnOrAfter);
+            Ok(())
+        }
+        other => Err(format!("expected strict LogoutRequest rejection, got {other:?}").into()),
+    }
+}
+
+#[test]
+fn explicit_clock_skew_replaces_logout_request_five_minute_default(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let within = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T11:59:01Z"));
+    let beyond = logout_request_template("2000-01-01T00:00:00Z", Some("2026-07-15T11:59:00Z"));
+    let now = system_time("2026-07-15T12:00:00Z")?;
+    let skew = ClockSkew::strict().with_not_on_or_after_millis(60_000);
+
+    receive_custom_logout_request(
+        &within,
+        LogoutBinding::Post,
+        LocalSloRole::Idp,
+        RequestProtection::Signed,
+        SamlValidationContext::new(now, ReplayPolicy::DisabledForCompatibility)
+            .with_clock_skew(skew),
+    )?;
+
+    match receive_custom_logout_request(
+        &beyond,
+        LogoutBinding::Post,
+        LocalSloRole::Idp,
+        RequestProtection::Signed,
+        SamlValidationContext::new(now, ReplayPolicy::DisabledForCompatibility)
+            .with_clock_skew(skew),
+    ) {
+        Err(SamlError::TimeWindowInvalid { field }) => {
+            assert_eq!(field, TimeWindowField::LogoutRequestNotOnOrAfter);
+            Ok(())
+        }
+        other => Err(format!(
+            "expected one-minute LogoutRequest NotOnOrAfter limit, got {other:?}"
+        )
+        .into()),
+    }
 }
 
 #[test]
