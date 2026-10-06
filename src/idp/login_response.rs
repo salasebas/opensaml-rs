@@ -1,5 +1,6 @@
 use crate::constants::namespace;
 use crate::error::SamlError;
+use crate::model::Status;
 use crate::template::{write_login_response_attribute_statement, LoginResponseAttribute};
 use crate::xml::write::XmlWriter;
 
@@ -23,7 +24,7 @@ pub(super) struct LoginResponseXml<'a> {
     pub(super) destination: &'a str,
     pub(super) subject_recipient: &'a str,
     pub(super) issuer: &'a str,
-    pub(super) status_code: &'a str,
+    pub(super) status: &'a Status,
     pub(super) subject_confirmation_not_on_or_after: &'a str,
     pub(super) conditions_not_before: &'a str,
     pub(super) conditions_not_on_or_after: &'a str,
@@ -59,12 +60,7 @@ pub(super) fn render_default_login_response(
     let mut writer = XmlWriter::new();
     writer.start(&response_name, &response_attrs);
     writer.text_element(&qname(input.assertion_prefix, "Issuer"), &[], input.issuer);
-    writer.start(&qname(input.protocol_prefix, "Status"), &[]);
-    writer.empty(
-        &qname(input.protocol_prefix, "StatusCode"),
-        &[("Value", input.status_code)],
-    );
-    writer.end(&qname(input.protocol_prefix, "Status"));
+    write_status(&mut writer, input.protocol_prefix, input.status);
 
     writer.start(
         &assertion_name,
@@ -128,6 +124,63 @@ pub(super) fn render_default_login_response(
     writer.end(&assertion_name);
     writer.end(&response_name);
     Ok(writer.finish())
+}
+
+pub(super) struct ErrorLoginResponseXml<'a> {
+    pub(super) protocol_prefix: &'a str,
+    pub(super) assertion_prefix: &'a str,
+    pub(super) response_id: &'a str,
+    pub(super) issue_instant: &'a str,
+    pub(super) destination: &'a str,
+    pub(super) issuer: &'a str,
+    pub(super) status: &'a Status,
+    pub(super) in_response_to: Option<&'a str>,
+}
+
+/// Render a `Response` that carries `status` and no assertion.
+///
+/// Profiles §4.1.4.2: an identity provider that returns an error MUST NOT
+/// include any assertions. `Issuer`, `InResponseTo`, and `Destination` stay
+/// on the response.
+pub(super) fn render_error_login_response(
+    input: &ErrorLoginResponseXml<'_>,
+) -> Result<String, SamlError> {
+    let response_name = qname(input.protocol_prefix, "Response");
+    let protocol_xmlns = format!("xmlns:{}", input.protocol_prefix);
+    let assertion_xmlns = format!("xmlns:{}", input.assertion_prefix);
+    let mut response_attrs = vec![
+        (protocol_xmlns.as_str(), namespace::PROTOCOL),
+        (assertion_xmlns.as_str(), namespace::ASSERTION),
+        ("ID", input.response_id),
+        ("Version", VERSION),
+        ("IssueInstant", input.issue_instant),
+        ("Destination", input.destination),
+    ];
+    if let Some(in_response_to) = input.in_response_to {
+        response_attrs.push(("InResponseTo", in_response_to));
+    }
+
+    let mut writer = XmlWriter::new();
+    writer.start(&response_name, &response_attrs);
+    writer.text_element(&qname(input.assertion_prefix, "Issuer"), &[], input.issuer);
+    write_status(&mut writer, input.protocol_prefix, input.status);
+    writer.end(&response_name);
+    Ok(writer.finish())
+}
+
+fn write_status(writer: &mut XmlWriter, protocol_prefix: &str, status: &Status) {
+    let status_name = qname(protocol_prefix, "Status");
+    let status_code_name = qname(protocol_prefix, "StatusCode");
+    writer.start(&status_name, &[]);
+    match status.subordinate() {
+        Some(subordinate) => {
+            writer.start(&status_code_name, &[("Value", status.top_level().as_uri())]);
+            writer.empty(&status_code_name, &[("Value", subordinate.as_uri())]);
+            writer.end(&status_code_name);
+        }
+        None => writer.empty(&status_code_name, &[("Value", status.top_level().as_uri())]),
+    }
+    writer.end(&status_name);
 }
 
 fn write_authn_statement(writer: &mut XmlWriter, prefix: &str, statement: &AuthnStatementXml<'_>) {

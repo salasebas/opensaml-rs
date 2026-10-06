@@ -86,6 +86,7 @@ pub struct RespondSso {
     pub(super) relay_state: Option<RelayStateParam>,
     response_signing: ResponseSigning,
     pub(super) web_browser_sso_producer: WebBrowserSsoProducer,
+    pub(super) status: Option<Status>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +113,26 @@ impl RespondSso {
             relay_state: None,
             response_signing: ResponseSigning::FollowEncryptedCbcRecommendation,
             web_browser_sso_producer: WebBrowserSsoProducer::Compatibility,
+            status: None,
         }
+    }
+
+    /// Set the `Response` status. Omitting it emits top-level `Success` and
+    /// the assertions of a successful response.
+    ///
+    /// A top-level code other than `Success` is an error `Response`. Profiles
+    /// §4.1.4.2 forbids assertions in that message, so none are written. The
+    /// subject passed to `respond_sso` or `initiate_sso` is not included.
+    /// `Issuer`, `InResponseTo`, and `Destination` follow the same rules as a
+    /// successful response from this builder.
+    ///
+    /// The caller chooses the status, including any subordinate code such as
+    /// `NoPassive` or `AuthnFailed`. This method does not infer a code from
+    /// the request. A login response template cannot carry an error response
+    /// or a subordinate code.
+    pub fn status(mut self, status: Status) -> Self {
+        self.status = Some(status);
+        self
     }
 
     /// Always authenticate the top-level SAML Response.
