@@ -54,3 +54,10 @@ is `AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent`.
 | UTC `IssueInstant` | Identity provider | Inbound | Mandatory. No off switch. An inbound leap-second value stays accepted |
 | A present `Destination` identifies this identity provider's SSO endpoint | Identity provider | Inbound | Mandatory. Core §3.2.1 |
 | `AssertionConsumerServiceURL` or `AssertionConsumerServiceIndex` belongs to the service provider | Identity provider | Inbound | Mandatory. Profiles §4.1.4.1. The check runs when the response is issued |
+| Expose `ForceAuthn` when present; leave it absent when omitted | Identity provider | Inbound `receive_sso` | Optional. Core §3.4.1. Omission stays absent. Presence does not reject the request |
+| Expose `IsPassive` when present; leave it absent when omitted | Identity provider | Inbound `receive_sso` | Optional. Core §3.4.1. Omission stays absent. Presence does not reject the request |
+| `ForceAuthn` and `IsPassive` are unqualified booleans | Identity provider | Inbound `receive_sso` | Mandatory. Schema `AuthnRequestType`. Values are `true`, `false`, `1`, and `0`. A qualified attribute is rejected |
+| Expose a requested `Subject` when present; leave it absent when omitted | Identity provider | Inbound `receive_sso` | Optional. Core §3.4.1 and §3.4.1.4 / E75. A valid subject does not reject the request |
+| No identifier in that `Subject` means the presenter is the requested subject | Identity provider | Inbound `receive_sso` | Core §3.4.1. `<BaseID>` and `<EncryptedID>` stay distinct and are not decoded |
+| Requested `<NameID>` keeps its content and qualifier attributes | Identity provider | Inbound `receive_sso` | Core §3.3.4. A qualified `NameQualifier`, `SPNameQualifier`, or `SPProvidedID` is rejected |
+| One `Subject` and one identifier element | Identity provider | Inbound `receive_sso` | A second `Subject`, a second identifier, or a foreign namespace is rejected |

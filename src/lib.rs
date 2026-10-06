@@ -349,8 +349,8 @@ pub mod validator;
 pub mod xml;
 
 pub use api::{
-    ForceAuthn, Idp, LogoutSigning, RespondSlo, RespondSso, Saml, SamlError, Sp, StartSlo,
-    StartSso, Unknown,
+    ForceAuthn, Idp, IsPassive, LogoutSigning, RespondSlo, RespondSso, Saml, SamlError, Sp,
+    StartSlo, StartSso, Unknown,
 };
 pub use browser::{
     AcsEndpoint, BrowserInput, EndpointUrl, FormField, LogoutBinding, Outbound, Pending,
@@ -390,9 +390,10 @@ pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
     ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, MessageId, NameId,
     NameIdCreationRequest, NameIdPolicy, OutstandingLogout, Received, RelayState, RelayStateParam,
-    ReplayCache, ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex,
-    SsoResponse, SsoSession, Status, Subject, SubjectConfirmation, SubordinateStatusCode,
-    TopLevelStatusCode, VerifiedXmlSignature, VerifiedXmlSignatureCoverage, MAX_RELAY_STATE_BYTES,
+    ReplayCache, ReplayKey, ReplayPolicy, RequestedSubject, RequestedSubjectIdentifier,
+    SamlInstant, SamlValidationContext, SessionIndex, SsoResponse, SsoSession, Status, Subject,
+    SubjectConfirmation, SubordinateStatusCode, TopLevelStatusCode, VerifiedXmlSignature,
+    VerifiedXmlSignatureCoverage, MAX_RELAY_STATE_BYTES,
 };
 #[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;

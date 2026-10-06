@@ -121,7 +121,11 @@ pub(super) fn attributes_from_extract(extract: &Value) -> Attributes {
 }
 
 pub(super) fn subject_confirmations_from_extract(extract: &Value) -> Vec<SubjectConfirmation> {
-    match extract.get("subjectConfirmation") {
+    subject_confirmations_at(extract, "subjectConfirmation")
+}
+
+pub(super) fn subject_confirmations_at(extract: &Value, path: &str) -> Vec<SubjectConfirmation> {
+    match extract.get(path) {
         Some(Value::Str(xml)) => vec![SubjectConfirmation::from_raw_xml(xml.clone())],
         Some(Value::Array(values)) => values
             .iter()

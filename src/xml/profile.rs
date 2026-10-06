@@ -227,6 +227,8 @@ fn root_consumed_attributes(parser_type: ParserType) -> &'static [&'static [u8]]
             b"AssertionConsumerServiceURL",
             b"ProtocolBinding",
             b"AssertionConsumerServiceIndex",
+            b"ForceAuthn",
+            b"IsPassive",
         ],
         ParserType::SamlResponse => &[
             b"ID",
@@ -311,7 +313,7 @@ fn expected_child_namespace(stack: &[ExpandedName], child: &[u8]) -> Option<Name
         if root.is(b"AuthnRequest", NamespaceKind::Protocol) {
             return match child {
                 b"NameIDPolicy" | b"RequestedAuthnContext" => Some(NamespaceKind::Protocol),
-                b"AuthnContextClassRef" => Some(NamespaceKind::Assertion),
+                b"Subject" | b"AuthnContextClassRef" => Some(NamespaceKind::Assertion),
                 _ => None,
             };
         }
@@ -351,6 +353,12 @@ fn expected_child_namespace(stack: &[ExpandedName], child: &[u8]) -> Option<Name
             _ => None,
         };
     }
+    if root.is(b"AuthnRequest", NamespaceKind::Protocol)
+        && parent.is(b"Subject", NamespaceKind::Assertion)
+        && matches!(child, b"BaseID" | b"EncryptedID")
+    {
+        return Some(NamespaceKind::Assertion);
+    }
     if parent.is(b"Subject", NamespaceKind::Assertion) {
         return match child {
             b"NameID" | b"SubjectConfirmation" => Some(NamespaceKind::Assertion),
@@ -376,6 +384,30 @@ fn expected_child_namespace(stack: &[ExpandedName], child: &[u8]) -> Option<Name
         return (child == b"EncryptedData").then_some(NamespaceKind::XmlEncryption);
     }
     None
+}
+
+fn consumed_attributes_for(
+    element: &ExpandedName,
+    stack: &[ExpandedName],
+) -> &'static [&'static [u8]] {
+    if element.is(b"NameID", NamespaceKind::Assertion) && authn_request_subject(stack) {
+        return &[
+            b"Format",
+            b"NameQualifier",
+            b"SPNameQualifier",
+            b"SPProvidedID",
+        ];
+    }
+    consumed_attributes(element)
+}
+
+fn authn_request_subject(stack: &[ExpandedName]) -> bool {
+    stack
+        .first()
+        .is_some_and(|root| root.is(b"AuthnRequest", NamespaceKind::Protocol))
+        && stack
+            .iter()
+            .any(|parent| parent.is(b"Subject", NamespaceKind::Assertion))
 }
 
 fn consumed_attributes(element: &ExpandedName) -> &'static [&'static [u8]] {
@@ -426,7 +458,7 @@ fn validate_element(
         local: local.into_inner().as_bytes().to_vec(),
         namespace: element_namespace,
     };
-    let consumed = consumed_attributes(&expanded);
+    let consumed = consumed_attributes_for(&expanded, stack);
     if expanded.is(b"Assertion", NamespaceKind::Assertion) {
         let attributes = validate_unqualified_attributes(
             reader,

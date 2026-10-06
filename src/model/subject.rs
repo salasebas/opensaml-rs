@@ -1,18 +1,40 @@
 use crate::config::NameIdFormat;
 
-/// NameID value and optional format.
+/// NameID value, format, and optional qualifier attributes.
+///
+/// [`Self::new`] leaves the qualifiers unset. Response generation copies the
+/// value and format only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameId {
     value: String,
     format: Option<NameIdFormat>,
+    name_qualifier: Option<String>,
+    sp_name_qualifier: Option<String>,
+    sp_provided_id: Option<String>,
 }
 
 impl NameId {
     /// Create a NameID value.
     pub fn new(value: impl Into<String>, format: Option<NameIdFormat>) -> Self {
+        Self::with_qualifiers(value, format, None, None, None)
+    }
+
+    /// Create a NameID with qualifier attributes.
+    ///
+    /// `None` omits the attribute. `Some("")` is an empty value.
+    pub fn with_qualifiers(
+        value: impl Into<String>,
+        format: Option<NameIdFormat>,
+        name_qualifier: Option<String>,
+        sp_name_qualifier: Option<String>,
+        sp_provided_id: Option<String>,
+    ) -> Self {
         Self {
             value: value.into(),
             format,
+            name_qualifier,
+            sp_name_qualifier,
+            sp_provided_id,
         }
     }
 
@@ -24,6 +46,21 @@ impl NameId {
     /// NameID format, when extracted.
     pub fn format(&self) -> Option<&NameIdFormat> {
         self.format.as_ref()
+    }
+
+    /// `NameQualifier`, when present.
+    pub fn name_qualifier(&self) -> Option<&str> {
+        self.name_qualifier.as_deref()
+    }
+
+    /// `SPNameQualifier`, when present.
+    pub fn sp_name_qualifier(&self) -> Option<&str> {
+        self.sp_name_qualifier.as_deref()
+    }
+
+    /// `SPProvidedID`, when present.
+    pub fn sp_provided_id(&self) -> Option<&str> {
+        self.sp_provided_id.as_deref()
     }
 }
 
@@ -145,6 +182,64 @@ impl Subject {
     }
 
     /// Subject confirmations.
+    pub fn confirmations(&self) -> &[SubjectConfirmation] {
+        &self.confirmations
+    }
+}
+
+/// Subject requested by an `<AuthnRequest>` (Core §3.4.1).
+///
+/// The identity provider decides whether an assertion subject strongly matches
+/// (Core §3.4.1.4, §3.3.4, Errata 05 E75). This library does not compare them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestedSubject {
+    identifier: RequestedSubjectIdentifier,
+    confirmations: Vec<SubjectConfirmation>,
+}
+
+/// Identifier inside a requested [`RequestedSubject`] (Core §3.4.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestedSubjectIdentifier {
+    /// No `<BaseID>`, `<NameID>`, or `<EncryptedID>`. The presenter is the subject.
+    NoIdentifier,
+    /// `<NameID>` content and attributes.
+    NameId(NameId),
+    /// `<BaseID>`, not decoded.
+    BaseId,
+    /// `<EncryptedID>`, not decrypted.
+    EncryptedId,
+}
+
+impl RequestedSubject {
+    pub(crate) fn new(
+        identifier: RequestedSubjectIdentifier,
+        confirmations: Vec<SubjectConfirmation>,
+    ) -> Self {
+        Self {
+            identifier,
+            confirmations,
+        }
+    }
+
+    /// Requested identifier.
+    pub fn identifier(&self) -> &RequestedSubjectIdentifier {
+        &self.identifier
+    }
+
+    /// `<NameID>` when the identifier is [`RequestedSubjectIdentifier::NameId`].
+    pub fn name_id(&self) -> Option<&NameId> {
+        match &self.identifier {
+            RequestedSubjectIdentifier::NameId(name_id) => Some(name_id),
+            RequestedSubjectIdentifier::NoIdentifier
+            | RequestedSubjectIdentifier::BaseId
+            | RequestedSubjectIdentifier::EncryptedId => None,
+        }
+    }
+
+    /// `<SubjectConfirmation>` elements, in document order.
+    ///
+    /// An empty slice means the presenter is the only attesting entity
+    /// (Core §3.4.1).
     pub fn confirmations(&self) -> &[SubjectConfirmation] {
         &self.confirmations
     }

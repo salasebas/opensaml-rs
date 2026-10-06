@@ -43,7 +43,9 @@ use crate::sp::ServiceProvider;
 
 use raw_mapping::{raw_idp_metadata_config, raw_sp_metadata_config};
 
-pub use options::{ForceAuthn, LogoutSigning, RespondSlo, RespondSso, StartSlo, StartSso};
+pub use options::{
+    ForceAuthn, IsPassive, LogoutSigning, RespondSlo, RespondSso, StartSlo, StartSso,
+};
 
 /// Typed SAML facade for high-level browser SSO/SLO flows.
 pub struct Saml<Role = Unknown>(Role);
