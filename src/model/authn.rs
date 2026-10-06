@@ -12,18 +12,12 @@ use crate::error::SamlError;
 use crate::raw::FlowResult;
 use crate::xml::parse_saml_utc_date_time;
 
-/// `ForceAuthn` on an `<AuthnRequest>`.
+/// `ForceAuthn` on an `<AuthnRequest>` (Core §3.4.1).
 ///
-/// SAML Core §3.4.1. [`Self::Required`] is `true`: the identity provider must
-/// authenticate the presenter directly instead of relying on a previous
-/// security context. [`Self::NotRequired`] is `false`. When the attribute is
-/// omitted, [`AuthnRequest::force_authn`] is `None`. Core's processing default
-/// is then false, and that default belongs to the identity provider
-/// application.
-///
-/// If this value is [`Self::Required`] and [`IsPassive`] is
-/// [`IsPassive::Required`], the identity provider must not freshly
-/// authenticate the presenter unless the `Is passive` constraints can be met.
+/// [`Self::Required`] is `true`. [`Self::NotRequired`] is `false`. Omission
+/// leaves [`AuthnRequest::force_authn`] as `None`. When this and [`IsPassive`]
+/// are both required, do not freshly authenticate the presenter unless
+/// `IsPassive` can be met.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForceAuthn {
     /// `ForceAuthn="true"`.
@@ -49,14 +43,11 @@ impl ForceAuthn {
     }
 }
 
-/// `IsPassive` on an `<AuthnRequest>`.
+/// `IsPassive` on an `<AuthnRequest>` (Core §3.4.1).
 ///
-/// SAML Core §3.4.1. [`Self::Required`] is `true`: the identity provider and
-/// the user agent must not visibly take control of the user interface from
-/// the requester. [`Self::NotRequired`] is `false`. When the attribute is
-/// omitted, [`AuthnRequest::is_passive`] is `None`. Core's processing default
-/// is then false, and that default belongs to the identity provider
-/// application.
+/// [`Self::Required`] is `true`: do not take visible control of the user
+/// interface. [`Self::NotRequired`] is `false`. Omission leaves
+/// [`AuthnRequest::is_passive`] as `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IsPassive {
     /// `IsPassive="true"`.
@@ -76,11 +67,6 @@ impl IsPassive {
 }
 
 /// Parsed AuthnRequest result.
-///
-/// `ForceAuthn`, `IsPassive`, and the requested subject are exposed when the
-/// message carries them. The identity provider application decides whether to
-/// authenticate the presenter again and whether an assertion subject strongly
-/// matches. This type does not collect a credential or read a session.
 #[derive(Debug, Clone)]
 pub struct AuthnRequest {
     id: MessageId,
@@ -138,24 +124,17 @@ impl AuthnRequest {
         self.name_id_policy.as_ref()
     }
 
-    /// `ForceAuthn` when the request sets it.
-    ///
-    /// `None` means the attribute was omitted. See [`ForceAuthn`].
+    /// `ForceAuthn`, when set. See [`ForceAuthn`].
     pub fn force_authn(&self) -> Option<ForceAuthn> {
         self.force_authn
     }
 
-    /// `IsPassive` when the request sets it.
-    ///
-    /// `None` means the attribute was omitted. See [`IsPassive`].
+    /// `IsPassive`, when set. See [`IsPassive`].
     pub fn is_passive(&self) -> Option<IsPassive> {
         self.is_passive
     }
 
-    /// Requested `<Subject>` when the request carries that element.
-    ///
-    /// `None` means the element was omitted. The presenter is then the
-    /// requested subject. See [`RequestedSubject`].
+    /// Requested `<Subject>`, when present. See [`RequestedSubject`].
     pub fn requested_subject(&self) -> Option<&RequestedSubject> {
         self.requested_subject.as_ref()
     }

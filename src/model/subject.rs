@@ -1,11 +1,9 @@
 use crate::config::NameIdFormat;
 
-/// NameID value, format, and qualifier attributes.
+/// NameID value, format, and optional qualifier attributes.
 ///
-/// [`Self::new`] leaves the qualifier attributes unset. A `<NameID>` on a
-/// received `<AuthnRequest>` fills each attribute that the element carries.
-/// SAML Core §3.3.4 strong matching compares the element content and every
-/// attribute value.
+/// [`Self::new`] leaves the qualifiers unset. Response generation copies the
+/// value and format only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameId {
     value: String,
@@ -17,17 +15,13 @@ pub struct NameId {
 
 impl NameId {
     /// Create a NameID value.
-    ///
-    /// Qualifier attributes are unset. Use [`Self::with_qualifiers`] when the
-    /// identifier carries `NameQualifier`, `SPNameQualifier`, or `SPProvidedID`.
     pub fn new(value: impl Into<String>, format: Option<NameIdFormat>) -> Self {
         Self::with_qualifiers(value, format, None, None, None)
     }
 
-    /// Create a NameID, including qualifier attributes that are present.
+    /// Create a NameID with qualifier attributes.
     ///
-    /// Pass `None` for an attribute the element omits. An empty attribute value
-    /// is `Some("")` and is distinct from omission.
+    /// `None` omits the attribute. `Some("")` is an empty value.
     pub fn with_qualifiers(
         value: impl Into<String>,
         format: Option<NameIdFormat>,
@@ -54,20 +48,17 @@ impl NameId {
         self.format.as_ref()
     }
 
-    /// `NameQualifier`, when the identifier carries that attribute.
-    ///
-    /// Response generation copies [`Self::value`] and [`Self::format`] only.
-    /// These qualifier attributes are not written onto an issued assertion.
+    /// `NameQualifier`, when present.
     pub fn name_qualifier(&self) -> Option<&str> {
         self.name_qualifier.as_deref()
     }
 
-    /// `SPNameQualifier`, when the identifier carries that attribute.
+    /// `SPNameQualifier`, when present.
     pub fn sp_name_qualifier(&self) -> Option<&str> {
         self.sp_name_qualifier.as_deref()
     }
 
-    /// `SPProvidedID`, when the identifier carries that attribute.
+    /// `SPProvidedID`, when present.
     pub fn sp_provided_id(&self) -> Option<&str> {
         self.sp_provided_id.as_deref()
     }
@@ -196,33 +187,26 @@ impl Subject {
     }
 }
 
-/// Subject requested by an `<AuthnRequest>`.
+/// Subject requested by an `<AuthnRequest>` (Core §3.4.1).
 ///
-/// SAML Core §3.4.1. The identity provider application decides whether an
-/// assertion subject strongly matches this value (Core §3.4.1.4 and §3.3.4,
-/// as clarified by Approved Errata 05 E75). When it cannot, that application
-/// returns an error response. This library does not compare subjects.
+/// The identity provider decides whether an assertion subject strongly matches
+/// (Core §3.4.1.4, §3.3.4, Errata 05 E75). This library does not compare them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestedSubject {
     identifier: RequestedSubjectIdentifier,
     confirmations: Vec<SubjectConfirmation>,
 }
 
-/// Identifier element inside a requested [`RequestedSubject`].
-///
-/// SAML Core §3.4.1. When the `<Subject>` element includes no `<BaseID>`,
-/// `<NameID>`, or `<EncryptedID>`, the presenter is the requested subject.
+/// Identifier inside a requested [`RequestedSubject`] (Core §3.4.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestedSubjectIdentifier {
-    /// No `<BaseID>`, `<NameID>`, or `<EncryptedID>`.
-    ///
-    /// Core §3.4.1 presumes the presenter is the requested subject.
+    /// No `<BaseID>`, `<NameID>`, or `<EncryptedID>`. The presenter is the subject.
     NoIdentifier,
     /// `<NameID>` content and attributes.
     NameId(NameId),
-    /// `<BaseID>`. The typed flow does not decode the identifier value.
+    /// `<BaseID>`, not decoded.
     BaseId,
-    /// `<EncryptedID>`. The typed flow does not decrypt the identifier.
+    /// `<EncryptedID>`, not decrypted.
     EncryptedId,
 }
 
@@ -237,16 +221,12 @@ impl RequestedSubject {
         }
     }
 
-    /// Identifier the requester asked the identity provider to assert.
+    /// Requested identifier.
     pub fn identifier(&self) -> &RequestedSubjectIdentifier {
         &self.identifier
     }
 
-    /// `<NameID>` when that is the requested identifier.
-    ///
-    /// Returns `None` for [`RequestedSubjectIdentifier::NoIdentifier`],
-    /// [`RequestedSubjectIdentifier::BaseId`], and
-    /// [`RequestedSubjectIdentifier::EncryptedId`].
+    /// `<NameID>` when the identifier is [`RequestedSubjectIdentifier::NameId`].
     pub fn name_id(&self) -> Option<&NameId> {
         match &self.identifier {
             RequestedSubjectIdentifier::NameId(name_id) => Some(name_id),
@@ -258,9 +238,8 @@ impl RequestedSubject {
 
     /// `<SubjectConfirmation>` elements, in document order.
     ///
-    /// When this is empty, Core §3.4.1 presumes the presenter is the only
-    /// attesting entity and that the method comes from the profile or from
-    /// the identity provider's policy.
+    /// An empty slice means the presenter is the only attesting entity
+    /// (Core §3.4.1).
     pub fn confirmations(&self) -> &[SubjectConfirmation] {
         &self.confirmations
     }
