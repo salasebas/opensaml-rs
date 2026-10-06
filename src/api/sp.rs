@@ -218,10 +218,10 @@ impl Saml<Sp> {
     /// # Errors
     ///
     /// Returns [`SamlError`] when the browser binding is not valid for SSO
-    /// responses, the IdP metadata cannot be parsed or trusted, XML parsing or
-    /// signature verification fails, destination, recipient, audience, or time
-    /// validation fails, or replay validation returns `ReplayDetected` or
-    /// `TimeWindowInvalid`.
+    /// responses, `RelayState` exceeds 80 bytes, the IdP metadata cannot be
+    /// parsed or trusted, XML parsing or signature verification fails,
+    /// destination, recipient, audience, or time validation fails, or replay
+    /// validation returns `ReplayDetected` or `TimeWindowInvalid`.
     pub fn accept_unsolicited_sso(
         &self,
         idp: &IdpDescriptor,
@@ -283,6 +283,7 @@ impl Saml<Sp> {
         input: BrowserInput<SsoResponse>,
         validation: &SamlValidationContext<'_>,
     ) -> Result<SsoSession, SamlError> {
+        relay_state_from_input(&input)?;
         let binding = SsoResponseBinding::try_from(input_binding(&input))?;
         let raw_idp = raw_idp_descriptor(idp)?;
         let request = HttpRequest::try_from(input)?;
