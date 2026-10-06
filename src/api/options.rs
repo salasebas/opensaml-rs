@@ -143,12 +143,9 @@ impl RespondSso {
     /// Allow an unsigned Response around a CBC-encrypted Assertion.
     ///
     /// This relaxes SAML V2.0 Approved Errata 05 E93, which recommends signing
-    /// the Response so the ciphertext is integrity protected. The generated
-    /// response has no signature over that ciphertext, so a relying party that
-    /// follows the recommendation rejects it. This method does not change the
-    /// relying party's check. It is not the legacy permissive preset and it
-    /// does not preserve a samlify-port setting. By default, typed IdPs sign
-    /// such Responses automatically.
+    /// the Response so the ciphertext is integrity protected. It is not the
+    /// legacy permissive preset. Typed identity providers sign such Responses
+    /// unless this is selected.
     pub fn allow_unsigned_encrypted_cbc(mut self) -> Self {
         self.response_signing = ResponseSigning::AllowUnsignedEncryptedCbc;
         self
@@ -214,8 +211,6 @@ pub enum LogoutSigning {
 /// [`Self::Compatibility`] is the samlify-port output kept for a caller
 /// leaving the raw API. [`Self::Follow`] applies the producer obligations
 /// recorded for this flow. It is not a validation preset.
-/// [`crate::SpValidationPolicy::recommended`] is that preset for claimed
-/// features.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum SingleLogoutGeneration {
     /// Keep the samlify-port generation.
@@ -336,12 +331,8 @@ impl StartSlo {
     /// endpoint.
     ///
     /// This relaxes the Single Logout recommendation to protect the HTTP
-    /// exchange with TLS. The user agent is sent to an `http` location, so
-    /// the exchange is not protected by TLS, and a peer that publishes only
-    /// `http` can be used. A recipient does not reject that `http`
-    /// `Destination` because of this choice. It does not remove
-    /// `SessionIndex`, the request signature, or session-authority
-    /// `NotOnOrAfter`.
+    /// exchange with TLS. It does not remove `SessionIndex`, the request
+    /// signature, or session-authority `NotOnOrAfter`.
     pub fn allow_http_single_logout(mut self) -> Self {
         self.rules = self.rules.allow_http();
         self
@@ -414,9 +405,7 @@ impl RespondSlo {
     /// endpoint.
     ///
     /// This relaxes the Single Logout recommendation to protect that HTTP
-    /// exchange with TLS. The user agent is sent to an `http` location, so
-    /// the exchange is not protected by TLS. The response remains signed, and
-    /// the identity provider does not gain this check.
+    /// exchange with TLS. The response remains signed.
     pub fn allow_http_single_logout(mut self) -> Self {
         self.rules = self.rules.allow_http();
         self

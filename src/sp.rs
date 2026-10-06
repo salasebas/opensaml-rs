@@ -69,8 +69,6 @@ enum AllowCreateAttribute {
 /// [`Self::Compatibility`] is the samlify-port output kept for a caller
 /// leaving the raw API. [`Self::Follow`] applies the producer obligations
 /// recorded for this flow. It is not a validation preset.
-/// [`crate::SpValidationPolicy::recommended`] is that preset for claimed
-/// features.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum WebBrowserSsoProducer {
     /// Keep the samlify-port generation.

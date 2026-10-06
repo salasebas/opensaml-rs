@@ -91,11 +91,8 @@ impl SpConfig {
 
     /// Start a dependency-free SP config builder.
     ///
-    /// The builder still starts on the deprecated `strict()` bundle.
-    /// [`Self::try_new`] stays on the legacy permissive
-    /// [`SpValidationPolicy::compatibility`] preset. [`SpValidationPolicy::recommended`]
-    /// is the preset for claimed features and is not an implementation of
-    /// SAML V2.0 as a whole.
+    /// The builder starts on the deprecated [`SpValidationPolicy::strict`]
+    /// bundle. [`Self::try_new`] uses [`SpValidationPolicy::compatibility`].
     pub fn builder(entity_id: EntityId) -> SpConfigBuilder {
         SpConfigBuilder::new(entity_id)
     }
@@ -218,11 +215,9 @@ impl SpConfigBuilder {
 ///
 /// # Examples
 ///
-/// The builder still starts on the deprecated `strict()` bundle. Use
-/// [`IdpValidationPolicy::compatibility`] for the legacy permissive preset,
+/// The builder starts on the deprecated [`IdpValidationPolicy::strict`] bundle.
+/// Use [`IdpValidationPolicy::compatibility`] for the legacy permissive preset,
 /// including when compiling or testing without the default crypto feature.
-/// [`IdpValidationPolicy::recommended`] is the preset for claimed features and
-/// is not an implementation of SAML V2.0 as a whole.
 ///
 /// ```
 /// use saml_rs::{EntityId, IdpConfig, IdpValidationPolicy, SsoEndpoint};
