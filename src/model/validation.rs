@@ -21,11 +21,8 @@ impl ClockSkew {
 
     /// Five minutes of skew on `NotBefore` and `NotOnOrAfter`.
     ///
-    /// `NotBefore` is interpreted five minutes early. `NotOnOrAfter` stays
-    /// valid until five minutes after the attribute, and that deadline stays
-    /// exclusive. This is the top of the three-to-five-minute range that SAML
-    /// V2.0 Approved Errata 05 E92 calls reasonable.
-    /// [`SamlValidationContext::new`] starts here.
+    /// [`SamlValidationContext::new`] starts here. Approved Errata 05 E92
+    /// calls three to five minutes reasonable.
     pub fn five_minutes() -> Self {
         const FIVE_MINUTES_MS: i64 = 5 * 60 * 1_000;
         Self::from_millis(-FIVE_MINUTES_MS, FIVE_MINUTES_MS)
@@ -71,10 +68,7 @@ impl ClockSkew {
 }
 
 impl Default for ClockSkew {
-    /// Zero skew, the same value as [`Self::strict`].
-    ///
-    /// [`SamlValidationContext::new`] does not use this value. A new context
-    /// allows five minutes until the caller sets a skew.
+    /// Zero skew. [`SamlValidationContext::new`] does not use this.
     fn default() -> Self {
         Self::strict()
     }
@@ -213,16 +207,9 @@ pub struct SamlValidationContext<'a> {
 impl<'a> SamlValidationContext<'a> {
     /// Build a validation context that allows five minutes of clock skew.
     ///
-    /// `NotBefore` is accepted up to five minutes early. `NotOnOrAfter` stays
-    /// valid until five minutes after the attribute, and that deadline stays
-    /// exclusive. The same skew applies to assertion conditions, bearer
-    /// confirmation times, `AuthnStatement@SessionNotOnOrAfter`, and
-    /// `LogoutRequest@NotOnOrAfter`. Session expiry uses that shared
-    /// `NotOnOrAfter` drift as existing library policy. This is the top
-    /// of the range SAML V2.0 Approved Errata 05 E92 calls reasonable.
-    ///
-    /// [`Self::with_clock_skew`] replaces that allowance.
-    /// [`ClockSkew::strict`] allows none.
+    /// The same skew covers assertion conditions, bearer confirmation,
+    /// `SessionNotOnOrAfter`, and `LogoutRequest@NotOnOrAfter`.
+    /// [`Self::with_clock_skew`] replaces it.
     pub fn new(now: SystemTime, replay: ReplayPolicy<'a>) -> Self {
         Self {
             now,
@@ -232,9 +219,7 @@ impl<'a> SamlValidationContext<'a> {
         }
     }
 
-    /// Replace the context clock skew.
-    ///
-    /// An explicit value is left as given, including [`ClockSkew::strict`].
+    /// Replace the context clock skew, including [`ClockSkew::strict`].
     pub fn with_clock_skew(mut self, clock_skew: ClockSkew) -> Self {
         self.clock_skew = clock_skew;
         self

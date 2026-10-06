@@ -341,22 +341,19 @@ impl SsoSession {
     /// called only after signature, issuer, audience, destination, recipient,
     /// `InResponseTo`, and time validation have already passed.
     ///
+    /// The bearer assertion identifier is kept until
+    /// `SubjectConfirmationData@NotOnOrAfter` plus skew. An earlier
+    /// `Conditions` or `AuthnStatement` instant does not shorten it. The
+    /// Response identifier still expires at the earliest bound.
+    ///
     /// # Errors
     ///
     /// Returns [`SamlError::TimeWindowInvalid`] when no valid replay
     /// expiration can be derived or a stored deadline has already passed.
-    /// Nothing is stored in that case.
-    ///
-    /// The bearer assertion identifier is kept until
-    /// `SubjectConfirmationData@NotOnOrAfter`, plus the context
-    /// `NotOnOrAfter` skew. An earlier `Conditions` or `AuthnStatement`
-    /// instant does not shorten that identifier. The Response identifier is
-    /// also stored, and its deadline remains the earliest of those instants.
-    /// [`ReplayPolicy::DisabledForCompatibility`] stores nothing.
-    ///
-    /// Returns [`SamlError::ReplayDetected`] when any session replay key has
-    /// already been seen. Cache implementations may also return
-    /// storage-specific failures mapped to [`SamlError`].
+    /// Nothing is stored in that case. Returns [`SamlError::ReplayDetected`]
+    /// when any session replay key has already been seen. Cache
+    /// implementations may also return storage-specific failures mapped to
+    /// [`SamlError`].
     pub fn check_and_store_replay(
         &self,
         validation: &mut SamlValidationContext<'_>,
