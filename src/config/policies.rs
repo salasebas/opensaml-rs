@@ -201,61 +201,9 @@ pub enum NameIdCreationPolicy {
 
 /// SP-side validation and outbound signing policy.
 ///
-/// # Web Browser SSO acceptance
-///
 /// `finish_sso` and `accept_unsolicited_sso` read these fields. There is no
-/// `recommended()` constructor. The accept combination for that profile is
-/// the fields below; outbound AuthnRequest signing, identifier creation, and
-/// logout are not part of this accept classification. Single Logout acceptance
-/// is classified on [`LogoutPolicy`].
-///
-/// - `assertions`: [`AssertionSignaturePolicy::AllowUnsignedForCompatibility`].
-///   Actor: accepting service provider. Direction: inbound. Level: library
-///   hardening, off.
-/// - `responses`: [`ResponseSignaturePolicy::RequireForEncryptedCbc`].
-///   Actor: accepting service provider. Direction: inbound. Level:
-///   recommendation, on. Relax it with
-///   [`ResponseSignaturePolicy::AllowUnsignedEncryptedCbc`].
-/// - `xml_signatures`:
-///   [`XmlSignatureProfile::AllowProviderSupportedForCompatibility`].
-///   Actor: accepting service provider. Direction: inbound. Level: library
-///   hardening, off.
-/// - `audience`: [`AudienceValidationPolicy::EvaluatePresentRestrictions`].
-///   Actor: accepting service provider. Direction: inbound. Level: mandatory
-///   when an `<AudienceRestriction>` is present.
-///   [`AudienceValidationPolicy::Validate`] also rejects a missing
-///   restriction. Actor: accepting service provider. Direction: inbound.
-///   Level: library hardening, off in this combination. `strict()` keeps
-///   `Validate`.
-///
-/// These inbound rules have no field and no off switch:
-///
-/// - UTC `IssueInstant` on the Response and the Assertion. Actor: accepting
-///   service provider. Direction: inbound. Level: mandatory (assertion and
-///   protocol schemas; Core §1.3.3 and §3.2.2). Core §1.3.3 forbids a
-///   producer from generating a leap second. Actor: producer. Direction:
-///   outbound. Level: mandatory. It does not require the receiver to reject
-///   an inbound leap-second value.
-/// - HTTP POST protects each assertion with a signature on the Assertion or
-///   the Response. Actor: accepting service provider. Direction: inbound.
-///   Level: mandatory (Errata 05 E26, Profiles §4.1.4.5).
-/// - Bearer `Recipient`, `NotOnOrAfter`, and `InResponseTo`. Actor: accepting
-///   service provider. Direction: inbound. Level: mandatory (Errata 05 E26,
-///   Profiles §4.1.4.3). An unsolicited response must not carry
-///   `InResponseTo` (Profiles §4.1.4.3 and §4.1.5).
-/// - A present `Destination` identifies the actual recipient. Actor:
-///   accepting service provider. Direction: inbound. Level: mandatory (Core
-///   §3.2.2). A signed HTTP Redirect or HTTP POST message carries
-///   `Destination`, and the recipient verifies it (Bindings §3.4.5.2 and
-///   §3.5.5.2). Level: mandatory when the message is signed.
-///
-/// Checking the bearer `Address` stays off. Actor: accepting service
-/// provider. Direction: inbound. Level: optional (Profiles §4.1.4.3).
-/// HTTP POST replay is mandatory for the accepting service provider
-/// (Profiles §4.1.4.5) and remains a caller-supplied
-/// [`crate::ReplayPolicy`]. This combination does not enable it.
-/// Metadata trust is also a caller argument. Both are classified in
-/// `docs/conformance/metadata-and-replay.md`.
+/// `recommended()` constructor. The accept combination is classified in
+/// `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpValidationPolicy {
     /// Assertion signature requirement.
@@ -313,29 +261,9 @@ impl Default for SpValidationPolicy {
 
 /// IdP-side validation policy.
 ///
-/// # Web Browser SSO acceptance
-///
 /// `receive_sso` reads `authn_requests`. There is no `recommended()`
-/// constructor. The accept combination uses
-/// [`AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent`].
-/// Requiring a signature is optional and stays off. Verifying a signature
-/// that is present is mandatory (Core §3.2.1). Logout is not part of this
-/// accept classification. Single Logout acceptance is classified on
-/// [`LogoutPolicy`].
-///
-/// These inbound rules have no field and no off switch:
-///
-/// - UTC `IssueInstant`. Actor: identity provider. Direction: inbound.
-///   Level: mandatory (Core §1.3.3 and §3.2.1). An inbound leap-second value
-///   stays accepted.
-/// - A present `Destination` identifies this identity provider's SSO
-///   endpoint. Actor: identity provider. Direction: inbound. Level:
-///   mandatory (Core §3.2.1). The identity provider discards the request
-///   when it does not.
-/// - `AssertionConsumerServiceURL` or `AssertionConsumerServiceIndex`
-///   belongs to the service provider before the response is sent. Actor:
-///   identity provider. Direction: inbound. Level: mandatory (Profiles
-///   §4.1.4.1). The check runs when the response is issued.
+/// constructor. The accept combination is classified in
+/// `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdpValidationPolicy {
     /// Inbound AuthnRequest signature requirement.
@@ -373,52 +301,9 @@ impl Default for IdpValidationPolicy {
 
 /// Logout request and response signature policy.
 ///
-/// # Single Logout acceptance
-///
 /// `finish_slo` reads `responses`. `receive_slo` reads `requests`. There is
-/// no `recommended()` constructor. The accept combination is
-/// [`LogoutSignaturePolicy::RequireSigned`] for both fields. Callers select
-/// it by setting those fields. [`Self::compatibility`] leaves both at
-/// [`LogoutSignaturePolicy::AllowUnsignedForCompatibility`]. [`Self::strict`]
-/// is unchanged and already uses [`LogoutSignaturePolicy::RequireSigned`].
-///
-/// - `requests`: [`LogoutSignaturePolicy::RequireSigned`]. Actor: the
-///   recipient of a `LogoutRequest` (session participant or session
-///   authority). Direction: inbound. Level: mandatory for HTTP-Redirect,
-///   HTTP-POST, and HTTP-POST-SimpleSign (Profiles §4.4.3.1, §4.4.4.1, and
-///   Core §3.7.3.1 / §3.7.3.2).
-///   [`LogoutSignaturePolicy::AllowUnsignedForCompatibility`] is the
-///   samlify-port hatch, not a named relaxation of a recommendation.
-/// - `responses`: [`LogoutSignaturePolicy::RequireSigned`]. Actor: the
-///   recipient of a `LogoutResponse`. Direction: inbound. Level: mandatory
-///   for those same bindings (Profiles §4.4.3.4 and §4.4.4.2). The
-///   samlify-port hatch is the same unsigned variant.
-///
-/// These inbound rules have no field and no off switch:
-///
-/// - UTC `IssueInstant`. Actor: the logout recipient. Direction: inbound.
-///   Level: mandatory (protocol schema; Core §1.3.3). An inbound leap-second
-///   value stays accepted. Core §1.3.3 forbids a producer from generating
-///   one and does not require the recipient to reject it.
-/// - A present `Destination` identifies the actual recipient. Actor: the
-///   logout recipient. Direction: inbound. Level: mandatory (Core §3.2.1 and
-///   §3.2.2). A signed HTTP-Redirect, HTTP-POST, or HTTP-POST-SimpleSign
-///   message carries `Destination`, and the recipient verifies it. Level:
-///   mandatory when the message is signed.
-/// - `InResponseTo` on a typed `LogoutResponse` matches the pending
-///   `LogoutRequest`. Actor: the original requester. Direction: inbound.
-///   Level: mandatory for this typed exchange (Core §3.2.2).
-///
-/// Rejecting an expired `LogoutRequest@NotOnOrAfter` stays library policy.
-/// Core permits a recipient to discard the message after that instant and
-/// does not require rejection. [`XmlSignatureProfile::StrictRsaSha2`] stays
-/// library hardening and is not selected by this combination.
-///
-/// Producer rules for `start_slo` and `respond_slo` are selected with
-/// [`crate::StartSlo::apply_single_logout_generation_rules`] and
-/// [`crate::RespondSlo::apply_single_logout_generation_rules`]. They are not
-/// fields of this policy. Requiring a logout signature here does not come
-/// from the producer's TLS recommendation.
+/// no `recommended()` constructor. The classification is
+/// `docs/conformance/single-logout.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LogoutPolicy {
     /// LogoutRequest signature behavior.
