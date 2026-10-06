@@ -60,14 +60,20 @@ impl SubordinateStatusCode {
     /// # Errors
     ///
     /// Returns [`SamlError::Invalid`] when `uri` is empty, contains
-    /// whitespace, or is not an absolute URI. Logout response generation
-    /// rejects those values.
+    /// whitespace, is not an absolute URI, or contains a character that an
+    /// XML attribute cannot carry (`&`, `"`, `'`, `<`, or `>`). Logout
+    /// response generation writes this value into `StatusCode/@Value`.
     pub fn try_new(uri: impl Into<String>) -> Result<Self, SamlError> {
         let uri = uri.into();
-        if uri.is_empty() || uri.chars().any(char::is_whitespace) || url::Url::parse(&uri).is_err()
+        if uri.is_empty()
+            || uri.chars().any(char::is_whitespace)
+            || uri
+                .chars()
+                .any(|character| matches!(character, '&' | '"' | '\'' | '<' | '>'))
+            || url::Url::parse(&uri).is_err()
         {
             return Err(SamlError::Invalid(
-                "subordinate status code must be a non-empty absolute URI without whitespace"
+                "subordinate status code must be a non-empty absolute URI without whitespace or XML attribute markup"
                     .into(),
             ));
         }
@@ -80,11 +86,11 @@ impl SubordinateStatusCode {
     }
 }
 
-/// Status of a SAML `StatusResponseType`, including `Response` and `LogoutResponse`.
+/// Status of a SAML `StatusResponseType`.
 ///
-/// The same value is passed to a logout responder and can be passed later by
-/// an identity provider issuing an error `Response`. Omitting it on
-/// `respond_slo` selects [`Self::success`] with no subordinate code.
+/// Logout responders pass this value on `respond_slo`. A later identity-provider
+/// error `Response` reuses this same type.
+/// Omitting it on `respond_slo` selects [`Self::success`] with no subordinate code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     top_level: TopLevelStatusCode,

@@ -2896,10 +2896,15 @@ fn typed_logout_response_carries_caller_defined_subordinate_status(
 #[test]
 fn typed_logout_response_rejects_a_subordinate_status_that_is_not_an_absolute_uri(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for uri in ["", "relative", "urn:example:has space"] {
+    for uri in [
+        "",
+        "relative",
+        "urn:example:has space",
+        "https://idp.example/status?a=1&b=2",
+    ] {
         match SubordinateStatusCode::try_new(uri) {
             Err(SamlError::Invalid(message))
-                if message.contains("non-empty absolute URI without whitespace") => {}
+                if message.contains("absolute URI without whitespace or XML attribute markup") => {}
             other => {
                 return Err(format!(
                     "expected invalid subordinate status for {uri}, got {other:?}"
@@ -3007,4 +3012,33 @@ fn typed_receive_slo_returns_principal_and_every_session_index(
         vec!["_session-one", "_session-two"]
     );
     Ok(())
+}
+
+#[test]
+fn typed_logout_response_template_must_carry_the_supplied_top_level_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = saml_rs::template::LOGOUT_RESPONSE_TEMPLATE
+        .replace("{StatusCode}", saml_rs::constants::status_code::SUCCESS);
+    let sp = Saml::sp(sp_config()?)?;
+    let idp = Saml::idp(idp_config_with_logout_response_template(template)?)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
+    let received = idp.receive_slo(
+        &sp_descriptor,
+        logout_request_input(&started.outbound, LogoutBinding::Post)?,
+        validation(),
+    )?;
+
+    match idp.respond_slo(
+        &sp_descriptor,
+        &received,
+        RespondSlo::post().status(Status::responder()),
+    ) {
+        Err(SamlError::Invalid(message))
+            if message.contains("did not carry the supplied top-level status code") =>
+        {
+            Ok(())
+        }
+        other => Err(format!("expected template status mismatch, got {other:?}").into()),
+    }
 }

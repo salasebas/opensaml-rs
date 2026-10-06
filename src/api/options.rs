@@ -393,7 +393,8 @@ impl RespondSlo {
     /// and does not contact those other participants.
     ///
     /// A configured logout-response template can carry only the top-level
-    /// `StatusCode` value. A subordinate code requires the default renderer.
+    /// `StatusCode` value, and the rendered message must contain that value.
+    /// A subordinate code requires the default renderer.
     pub fn status(mut self, status: Status) -> Self {
         self.status = Some(status);
         self
