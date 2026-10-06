@@ -36,9 +36,12 @@ Rust 1.88 or newer is required.
 
 ## How to add service-provider SSO
 
-Use the typed `Saml` facade for a new browser integration. Build local state
-with `SpConfig::builder`, import the peer from metadata, and keep the returned
-`Pending<_>` value with the browser session until the round trip finishes.
+This guide adds browser single sign-on for a service provider that already
+has a peer identity provider and an assertion consumer endpoint.
+
+Use the typed `Saml` facade. Build local state with `SpConfig::builder`,
+import the peer from metadata, and keep the returned `Pending<_>` value with
+the browser session until the round trip finishes.
 
 1. Build `SpConfig` and call `Saml::sp`.
 2. Import peer IdP metadata into `IdpDescriptor`.
@@ -56,22 +59,24 @@ Source: [`examples/sso.rs`](examples/sso.rs). The same calls, checked by
 `cargo test --doc`, are in the
 [crate-root SSO example](https://docs.rs/saml-rs/latest/saml_rs/#sp-initiated-sso).
 
-`SpValidationPolicy::recommended` and `IdpValidationPolicy::recommended` are
-the preset for claimed features. They are not an implementation of SAML V2.0
-as a whole. `compatibility()` is the legacy permissive preset. `Default`,
-`new`, and `try_new` stay on that preset. Config builders still start on the
-deprecated `strict()` bundle. Add a direct Assertion signature or the RSA-SHA2
-XML-DSig profile by name. Neither is implied by `recommended()`, and `strict()`
-does not gain the RSA-SHA2 profile.
-
 Those snippets use `ReplayPolicy::DisabledForCompatibility` and, where noted,
 `MetadataTrustPolicy::UnsignedForCompatibility` so they compile alone. Both
 names preserve a raw or samlify-port choice: no replay cache, and an unsigned
-metadata import. `recommended()` does not turn either one on. For production inbound validation, use
-`ReplayPolicy::RequireCache` with a caller-owned replay cache. Choose either
-metadata policy in
+metadata import. `recommended()` does not turn either one on.
+
+If inbound responses need replay protection, pass `ReplayPolicy::RequireCache`
+with a caller-owned replay cache. Choose the metadata policy in
 [metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and
 [`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html).
+
+If you want the preset for claimed features, start from
+`SpValidationPolicy::recommended` or `IdpValidationPolicy::recommended`. Add a
+direct Assertion signature or the RSA-SHA2 XML-DSig profile by name when you
+want that hardening. Neither is implied by `recommended()`, and `strict()`
+does not gain the RSA-SHA2 profile. `compatibility()` is the legacy permissive
+preset. `Default`, `new`, and `try_new` stay on that preset. Config builders
+still start on the deprecated `strict()` bundle. Why those presets differ is
+in [validation presets](docs/adr/0002-validation-presets.md).
 
 `finish_sso` returns an `SsoSession`. Read embedded XML signature evidence from
 `verified_xml_signatures()`: one item per verified signature over the Response
@@ -79,16 +84,17 @@ root or the consumed Assertion, including its `SignatureMethod@Algorithm` URI.
 `sig_alg()` is only the detached `SigAlg` from HTTP-Redirect or
 HTTP-POST-SimpleSign. Neither value applies an application algorithm allowlist.
 
-To receive and respond as an identity provider, follow
+If you receive and respond as an identity provider, follow
 [`examples/sso.rs`](examples/sso.rs) and the
 [Identity Provider flows](https://docs.rs/saml-rs/latest/saml_rs/#identity-provider-flows).
-For logout, follow [`examples/slo.rs`](examples/slo.rs) and
+
+If you need logout, follow [`examples/slo.rs`](examples/slo.rs) and
 [Single Logout](https://docs.rs/saml-rs/latest/saml_rs/#single-logout).
 Issuance lifetime and Session Authority logout expiration are on
 [`Saml<Idp>::start_slo`](https://docs.rs/saml-rs/latest/saml_rs/struct.Saml.html#method.start_slo).
 
-If you still need `ServiceProvider`, `IdentityProvider`, `HttpRequest`, or
-`BindingContext`, use `saml_rs::raw`
+If an existing integration still calls `ServiceProvider`, `IdentityProvider`,
+`HttpRequest`, or `BindingContext`, use `saml_rs::raw`
 ([`examples/raw_compat.rs`](examples/raw_compat.rs)).
 
 ## What the typed API covers
@@ -104,8 +110,9 @@ If you still need `ServiceProvider`, `IdentityProvider`, `HttpRequest`, or
 
 Artifact resolution, SOAP and other back-channel profiles, ECP/PAOS, SAML query
 protocols, NameID management, and metadata federation are outside the typed
-`Saml` API. Open an issue with the profile, binding, peer product, and a
-minimal expected flow if you need one of them.
+`Saml` API. A request for one of them needs the profile, binding, peer
+product, and a minimal expected flow on
+[an issue](https://github.com/salasebas/saml-rs/issues).
 
 ## Where to read next
 
@@ -115,6 +122,8 @@ minimal expected flow if you need one of them.
 | Change an existing integration | [Migration guides](docs/migrations/README.md) |
 | Look up a type or method | [docs.rs](https://docs.rs/saml-rs/latest/saml_rs/) |
 | Choose metadata trust or replay policy | [Metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and [`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html) |
+| See which rules a flow claims | [Conformance records](docs/conformance/web-browser-sso-acceptance.md) |
+| See why the presets differ | [Validation presets](docs/adr/0002-validation-presets.md) |
 
 ## Features
 
@@ -136,28 +145,16 @@ With `default-features = false`, the crate still builds messages, parses
 metadata, and extracts fields. Signing, verification, and encryption return
 `SamlError::Unsupported`.
 
-Select at most one of `crypto-rustcrypto`, `crypto-aws-lc`, and `crypto-fips`.
-Combinations are rejected at compile time. Disable the default features before
-selecting AWS-LC or FIPS. `crypto-legacy-algorithms`, `crypto-post-quantum`,
-and `crypto-pkcs11` forward Bergshamra capabilities and do not select a
-provider. The default `crypto-bergshamra` feature enables those capabilities
-together with RustCrypto.
+At most one of `crypto-rustcrypto`, `crypto-aws-lc`, and `crypto-fips` can be
+selected. Combinations are rejected at compile time. AWS-LC and FIPS are
+selected with the default features off. `crypto-legacy-algorithms`,
+`crypto-post-quantum`, and `crypto-pkcs11` forward Bergshamra capabilities
+and do not select a provider. The default `crypto-bergshamra` feature enables
+those capabilities together with RustCrypto.
 
 Bergshamra supports AWS-LC and FIPS on Linux x86_64 and aarch64. This
 repository's provider tests run on Linux x86_64. `saml-rs` initialises
-Bergshamra before the first crypto operation. To surface that failure at
-startup:
-
-```rust
-fn startup() -> Result<(), saml_rs::SamlError> {
-    let provider = saml_rs::initialize_crypto_provider()?;
-    assert_ne!(
-        provider.fips_status(),
-        saml_rs::CryptoFipsStatus::Uninitialized,
-    );
-    Ok(())
-}
-```
+Bergshamra before the first crypto operation.
 
 Initialisation, attestation, unsupported-algorithm, and key-import failures
 map to `SamlError::Crypto`. `crypto-fips` means the selected AWS-LC provider
@@ -177,6 +174,22 @@ With `crypto-bergshamra` enabled:
   stays off until the caller opts in through
   [`XmlEncryptionPolicy`](https://docs.rs/saml-rs/latest/saml_rs/struct.XmlEncryptionPolicy.html).
   AWS-LC decrypts RSA-OAEP with the default options.
+
+## How to surface provider initialisation at startup
+
+Call `initialize_crypto_provider` during startup when that failure should
+appear before the first SAML operation:
+
+```rust
+fn startup() -> Result<(), saml_rs::SamlError> {
+    let provider = saml_rs::initialize_crypto_provider()?;
+    assert_ne!(
+        provider.fips_status(),
+        saml_rs::CryptoFipsStatus::Uninitialized,
+    );
+    Ok(())
+}
+```
 
 ## Security
 

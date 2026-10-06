@@ -1,6 +1,8 @@
-# Public API Map
+# Public API map
 
-This document maps the current raw API to the intended typed API.
+This note records the root exports and the map from the raw API to the typed
+API, so a later change can see which names are canonical. The reasons for the
+role names are in [Naming](001-naming.md).
 
 ## Root Exports
 

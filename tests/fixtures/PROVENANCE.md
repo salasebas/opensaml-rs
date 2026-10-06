@@ -14,10 +14,10 @@ original conformance work.
 | npm integrity | `sha512-vdYr/zohDGBbfWNU4miEzc1jmWOtkLySPViapC6nfGkv9KxzLq4UlGkKyryzwLw4jVlZk88Rw93HaCRVpe+t+g==` |
 
 These files are historical regression and provenance inputs. They are not an
-active compatibility promise, and future behavior should be justified by SAML
-specifications, interoperability evidence, or focused local tests.
+active compatibility promise. New protocol behaviour is justified in
+[standards conformance](../../docs/standards-conformance.md).
 
-Fixture key material is test-only and must not be used outside tests.
+Fixture key material is test-only. It is not for use outside tests.
 
 ## Crypto provider matrix fixture audit
 
@@ -43,7 +43,8 @@ requirement to test these products, or a release gate. Tests consume the
 committed query strings verbatim and never regenerate them with `saml-rs`.
 
 All private keys and certificates in this fixture group are intentionally
-public, test-only material. They must never be trusted or used outside tests.
+public, test-only material. They are not trust anchors and they are not for
+use outside tests.
 The metadata files are minimal documents assembled from the generation
 configuration and the corresponding public test certificate; they are not
 claims about a production deployment.

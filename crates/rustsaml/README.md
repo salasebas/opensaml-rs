@@ -46,9 +46,8 @@ cargo run -p saml-rs --example sso
 
 ## Security
 
-Read the
-[saml-rs security notes](https://github.com/salasebas/saml-rs/blob/main/README.md#security)
-before production use.
+The properties are the
+[saml-rs security notes](https://github.com/salasebas/saml-rs/blob/main/README.md#security).
 
 ## License
 

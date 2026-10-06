@@ -1,12 +1,11 @@
 # Metadata trust and replay
 
-This record classifies metadata trust and replay for the typed browser flows.
+Facts for metadata trust and replay on the typed browser flows.
 `recommended()` does not select signed metadata, invent trust anchors, or
-store replay. Recommended is the preset for claimed features. It is not an
-implementation of SAML V2.0 as a whole. Compatibility is the legacy permissive
-preset. `Default`, `new`, and `try_new` stay on Compatibility. Config builders
-stay on the deprecated `strict()` bundle, which is unchanged. Raw settings
-stay on their historical defaults.
+store replay. `Default`, `new`, and `try_new` stay on Compatibility. Config
+builders stay on the deprecated `strict()` bundle, which is unchanged. Raw
+settings stay on their historical defaults. Why those presets differ is in
+[validation presets](../adr/0002-validation-presets.md).
 
 Metadata trust is `MetadataTrustPolicy`, passed to
 `IdpDescriptor::from_metadata_xml_for` and
@@ -41,7 +40,7 @@ resolution path stay outside this import.
 | No transform other than enveloped signature or exclusive canonicalization, with or without comments | Signer and verifier | Inbound `RequireSignature` | Recommendation. Metadata §3.1.4. `RequireSignature` rejects other transforms. `RequireSignatureAllowingOtherCanonicalization` also accepts inclusive canonicalization, and still rejects a transform that can drop part of the signed element |
 | No `ds:Object` in a metadata signature | Verifier | Inbound `RequireSignature` | Recommendation. Approved Errata 05 E91 says verifiers should reject `ds:Object` because it can carry unsigned data. Both require-signature options reject it. There is no relaxation |
 | When `RequireSignature` is selected, the signature covers the signed root | Metadata consumer | Inbound | Mandatory once that caller option is selected. Metadata §3.1.2 requires the signature to cover the signed element and its children. The import rejects a signature that does not cover the root |
-| A root `EntityDescriptor` or `EntitiesDescriptor` carries `validUntil` or `cacheDuration` | Metadata publisher | Generate a root metadata instance | Mandatory. Metadata §2.3.1 and §2.3.2. This crate's metadata generator does not emit either attribute, and the importer does not reject the omission. That is existing behavior, preserved here, and it is not a preset field |
+| A root `EntityDescriptor` or `EntitiesDescriptor` carries `validUntil` or `cacheDuration` | Metadata publisher | Generate a root metadata instance | Mandatory. Metadata §2.3.1 and §2.3.2. This crate's metadata generator does not emit either attribute, and the importer does not reject the omission. That is existing behaviour, preserved here, and it is not a preset field |
 | Do not use metadata at or after `validUntil` | Metadata consumer | Use metadata | Mandatory when the attribute is present. Errata 05 E94 adds §4.3.2: metadata must be treated as invalid at that time, and invalid metadata must not be used. A nested value may only shorten the parent (E76). Typed import does not evaluate `validUntil` |
 | Base caching on `cacheDuration` | Metadata consumer | Cache resolved metadata | Mandatory for a consumer that caches. Errata 05 E94 replaces §4.3.1: caching follows `cacheDuration`, and a stale copy may still be used. E76 lets a nested value only shorten the parent. Typed import does not cache metadata, so this is not a preset field |
 

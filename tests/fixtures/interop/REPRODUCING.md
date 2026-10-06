@@ -1,12 +1,14 @@
-# Reproducing the external Redirect captures
+# How to reproduce the external Redirect captures
 
-These recipes reproduce the producer path and wire shape, not the exact
+This guide reproduces the producer path and wire shape, not the exact
 committed bytes. Shibboleth generates a fresh key, message ID, timestamp,
 session index, encrypted identifier, port, and signature on every run.
 SimpleSAMLphp uses the committed test key, but the committed message values
 are deliberately fixed by the capture script.
 
-Never use the fixture keys outside tests.
+The fixture keys are test-only. Leave them out of any deployment. Where the
+committed bytes came from is recorded in
+[fixture provenance](../PROVENANCE.md).
 
 ## Shibboleth IdP 5.2.3
 

@@ -1,15 +1,14 @@
 # Single Logout rules
 
-This record classifies rules for typed Single Logout: `start_slo`,
-`respond_slo`, and `finish_slo` on both roles. `receive_slo` reads the same
-request-signature field as the accept combination below.
-`LogoutPolicy::recommended`, and the `logout` field of
+Rules for typed Single Logout: `start_slo`, `respond_slo`, and `finish_slo` on
+both roles. `receive_slo` reads the same request-signature field as the accept
+combination below. `LogoutPolicy::recommended`, and the `logout` field of
 `SpValidationPolicy::recommended` and `IdpValidationPolicy::recommended`,
-publish that accept combination. Recommended is the preset for these claimed
-features. It is not an implementation of SAML V2.0 as a whole. Compatibility
-is the legacy permissive preset. `Default`, `new`, and `try_new` stay on
+publish that accept combination. `Default`, `new`, and `try_new` stay on
 Compatibility. Config builders stay on the deprecated `strict()` bundle, which
-is unchanged. Raw logout generation and parsing are unchanged.
+is unchanged. Raw logout generation and parsing are unchanged. Why those
+presets differ is in
+[validation presets](../adr/0002-validation-presets.md).
 
 Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected
 by Approved Errata 05. HTTP-POST-SimpleSign is the supported CD04 binding.
@@ -55,7 +54,7 @@ is the accept combination.
 | Compare `NotOnOrAfter` with the latest assertion `NotOnOrAfter` | Session authority | Generate LogoutRequest | Outside this operation. Core §3.7.3.2 `SHOULD` compares the request instant with the assertion most recently issued for the session. Typed `start_slo` does not receive that assertion. [ADR 0001](../adr/0001-session-authority-logout-expiration.md) records that the issuance lifetime does not claim that ordering. It is not a preset field and it has no relaxation switch |
 | `SessionIndex` may be omitted | Session authority | Generate LogoutRequest | Optional. Profiles §4.4.4.1 / E38 says the session authority `MAY` omit every `SessionIndex` to end the principal's applicable sessions. The participant's `MUST` include one is not copied onto this role |
 | `Issuer`, `ID`, `Version` `2.0`, UTC `IssueInstant`, principal identifier, and no leap-second time | Session authority | Generate LogoutRequest | Mandatory. Same sources as the participant rows. Enforced by the existing session-authority outbound checks, with and without producer rules |
-| Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Session authority | Generate LogoutRequest | Mandatory for these bindings. Profiles §4.4.4.1. Same signing behavior as the participant when producer rules are selected |
+| Sign the message on HTTP-Redirect, HTTP-POST, and HTTP-POST-SimpleSign | Session authority | Generate LogoutRequest | Mandatory for these bindings. Profiles §4.4.4.1. Same signing behaviour as the participant when producer rules are selected |
 | Send the user agent over TLS | Session authority | Generate LogoutRequest | Not applied. Profiles §4.4.3.1 states that recommendation for the session participant's request. §4.4.3.3 does not repeat it |
 
 Propagating logout to every other participant is outside one `start_slo` or
