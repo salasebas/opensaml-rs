@@ -1,15 +1,10 @@
 use crate::constants::status_code;
 use crate::error::SamlError;
 
-/// Top-level `StatusCode` value on a SAML status response.
+/// Top-level `StatusCode` value.
 ///
-/// SAML Core 2.0 section 3.2.2.2 requires the topmost `StatusCode` `Value` to
-/// be one of these four URIs. A second-level code is not a top-level value.
-///
-/// For a session authority, Core section 3.7.3.2 says this value reports only
-/// that authority's own session: [`Self::Success`] when the authority
-/// terminated it, and [`Self::Requester`], [`Self::Responder`], or
-/// [`Self::VersionMismatch`] when it did not.
+/// Core §3.2.2.2 allows only these four URIs. For logout, Core §3.7.3.2 says
+/// it reports only the session authority's own session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TopLevelStatusCode {
     /// `urn:oasis:names:tc:SAML:2.0:status:Success`.
@@ -34,14 +29,10 @@ impl TopLevelStatusCode {
     }
 }
 
-/// Subordinate `StatusCode` nested inside the top-level code.
+/// Optional second-level `StatusCode`.
 ///
-/// SAML Core 2.0 section 3.2.2.2 makes this element optional. The defined
-/// second-level URIs live in [`crate::constants::status_code`]. A deployment
-/// may also supply its own absolute URI. [`Self::partial_logout`] is the
-/// second-level code Core section 3.7.3.2 requires from a session authority
-/// when other session participants do not confirm logout. It does not replace
-/// the top-level code.
+/// [`Self::partial_logout`] is Core §3.7.3.2 `PartialLogout`. Other absolute
+/// URIs go through [`Self::try_new`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SubordinateStatusCode {
     uri: String,
@@ -59,10 +50,8 @@ impl SubordinateStatusCode {
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError::Invalid`] when `uri` is empty, contains
-    /// whitespace, is not an absolute URI, or contains a character that an
-    /// XML attribute cannot carry (`&`, `"`, `'`, `<`, or `>`). Logout
-    /// response generation writes this value into `StatusCode/@Value`.
+    /// Returns [`SamlError::Invalid`] when `uri` is empty, has whitespace, is
+    /// not absolute, or contains `&`, `"`, `'`, `<`, or `>`.
     pub fn try_new(uri: impl Into<String>) -> Result<Self, SamlError> {
         let uri = uri.into();
         if uri.is_empty()
@@ -86,11 +75,7 @@ impl SubordinateStatusCode {
     }
 }
 
-/// Status of a SAML `StatusResponseType`.
-///
-/// Logout responders pass this value on `respond_slo`. A later identity-provider
-/// error `Response` reuses this same type.
-/// Omitting it on `respond_slo` selects [`Self::success`] with no subordinate code.
+/// Top-level `StatusCode` and an optional subordinate code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     top_level: TopLevelStatusCode,

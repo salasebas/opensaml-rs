@@ -348,9 +348,6 @@ impl StartSlo {
 }
 
 /// Options for issuing a LogoutResponse.
-///
-/// [`Self::status`] sets the SAML status. The binding constructors omit it,
-/// which emits top-level `Success` and no subordinate code.
 #[derive(Debug, Clone)]
 pub struct RespondSlo {
     pub(super) binding: LogoutBinding,
@@ -384,17 +381,10 @@ impl RespondSlo {
         }
     }
 
-    /// Set the `LogoutResponse` status.
+    /// Set the `LogoutResponse` status. Omitting it emits top-level `Success`.
     ///
-    /// The top-level code is the responder's own outcome. A session authority
-    /// uses top-level `Success` only when it terminated its own session, and
-    /// nests [`crate::SubordinateStatusCode::partial_logout`] when other
-    /// session participants do not confirm. One response addresses one peer
-    /// and does not contact those other participants.
-    ///
-    /// A configured logout-response template can carry only the top-level
-    /// `StatusCode` value, and the rendered message must contain that value.
-    /// A subordinate code requires the default renderer.
+    /// A logout-response template can carry only the top-level code. A
+    /// subordinate code needs the default renderer.
     pub fn status(mut self, status: Status) -> Self {
         self.status = Some(status);
         self

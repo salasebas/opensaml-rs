@@ -420,9 +420,8 @@ pub fn create_logout_response_with_id(
 ///
 /// # Errors
 ///
-/// Returns the same errors as [`create_logout_response`]. A subordinate status
-/// code is rejected when a logout-response template is configured, because
-/// that template has only a top-level `StatusCode` placeholder.
+/// Returns the same errors as [`create_logout_response`]. A logout-response
+/// template rejects a subordinate code.
 #[allow(clippy::too_many_arguments)] // internal path adds the caller-supplied status
 pub(crate) fn create_logout_response_with_status(
     init_setting: &EntitySetting,

@@ -97,9 +97,6 @@ impl Saml<Sp> {
 
     /// Respond to a received IdP LogoutRequest.
     ///
-    /// [`RespondSlo::status`] sets the status. Omitting it leaves top-level
-    /// `Success` and no subordinate code.
-    ///
     /// # Errors
     ///
     /// Returns [`SamlError`] when IdP metadata cannot be parsed, relay state is
@@ -298,10 +295,6 @@ impl Saml<Idp> {
     }
 
     /// Respond to a received SP LogoutRequest.
-    ///
-    /// [`RespondSlo::status`] sets the status. Omitting it leaves top-level
-    /// `Success` and no subordinate code. The top-level code reports this
-    /// session authority's own session.
     ///
     /// # Errors
     ///
