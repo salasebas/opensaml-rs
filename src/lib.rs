@@ -313,6 +313,7 @@ compile_error!(
 
 #[doc(hidden)]
 pub mod api;
+mod assertion_acceptance;
 #[doc(hidden)]
 pub mod binding;
 pub mod browser;

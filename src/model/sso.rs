@@ -329,10 +329,17 @@ impl SsoSession {
 
     /// Replay keys available from this validated SSO session.
     pub fn replay_keys(&self) -> Vec<ReplayKey> {
-        vec![
-            ReplayKey::ResponseId(self.response_id.clone()),
-            ReplayKey::AssertionId(self.assertion_id.clone()),
-        ]
+        let mut keys = vec![ReplayKey::ResponseId(self.response_id.clone())];
+        let mut ids = crate::assertion_acceptance::assertion_ids(&self.raw_flow.saml_content);
+        if !ids.iter().any(|id| id == self.assertion_id.as_str()) {
+            ids.insert(0, self.assertion_id.as_str().to_string());
+        }
+        for id in ids {
+            if let Ok(id) = AssertionId::try_new(id) {
+                keys.push(ReplayKey::AssertionId(id));
+            }
+        }
+        keys
     }
 
     /// Check and store this session's replay keys using the caller cache.

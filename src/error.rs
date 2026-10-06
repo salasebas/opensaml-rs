@@ -201,6 +201,22 @@ pub enum SamlError {
         /// Expected SP entity ID.
         expected: String,
     },
+    /// A `<Conditions>` child is not one service-provider acceptance can evaluate.
+    ///
+    /// SAML Core 2.0 §2.5.1.1 treats that condition as Indeterminate, which a
+    /// relying party must reject.
+    #[error("assertion condition is not understood: {element}")]
+    UnrecognizedCondition {
+        /// Local name of the unrecognized condition element.
+        element: String,
+    },
+    /// Assertions in one response do not refer to one principal.
+    ///
+    /// Approved Errata 05 E26 requires the assertions in a Web Browser SSO
+    /// response to refer to the same principal. This receiver compares `NameID`
+    /// value, `Format`, `NameQualifier`, and `SPNameQualifier`.
+    #[error("assertions do not refer to one principal")]
+    PrincipalMismatch,
     /// Response carried a non-success SAML status code.
     #[error("status not success: top={top}, second={second:?}")]
     StatusNotSuccess {

@@ -6,32 +6,26 @@ use crate::binding::{
 };
 use crate::constants::{Binding, ParserType};
 use crate::context::is_valid_xml_with_limits;
+use crate::error::SamlError;
 #[cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
     feature = "crypto-fips"
 ))]
 use crate::error::SignatureVerificationReason;
-use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};
 #[cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
     feature = "crypto-fips"
 ))]
 use crate::model::RelayStateParam;
-use crate::model::{authn_statement_not_on_or_after_values, earliest_authn_session_expiration};
 use crate::util::Value;
-use crate::validator::{
-    check_status_with_limits, conditions_time_bounds, logout_request_not_on_or_after_deadline,
-    verify_time_at,
-};
+use crate::validator::{check_status_with_limits, logout_request_not_on_or_after_deadline};
 use crate::xml::{
     extract_with_limits, fields, validate_protocol_profile, ExtractorField, XmlLimits,
 };
 use std::time::SystemTime;
-use time::{Duration, OffsetDateTime};
-
-const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
+use time::OffsetDateTime;
 
 /// Decoded HTTP request inputs for a binding.
 #[derive(Debug, Default, Clone)]
@@ -170,7 +164,7 @@ impl<'a> Default for FlowOptions<'a> {
 }
 
 impl FlowOptions<'_> {
-    fn validation_now(&self) -> Result<OffsetDateTime, SamlError> {
+    pub(crate) fn validation_now(&self) -> Result<OffsetDateTime, SamlError> {
         self.now.map_or_else(
             || Ok(OffsetDateTime::now_utc()),
             crate::validator::offset_datetime_from_system_time,
@@ -272,6 +266,10 @@ impl FlowResultWithSignatureEvidence {
 
     pub(crate) fn extract(&self) -> &Value {
         &self.flow_result.extract
+    }
+
+    pub(crate) fn saml_content(&self) -> &str {
+        &self.flow_result.saml_content
     }
 }
 
@@ -845,154 +843,6 @@ fn verify_detached(
     ))
 }
 
-fn audience_restriction_contains(
-    audience_restriction: &str,
-    expected: &str,
-    limits: XmlLimits,
-) -> Result<bool, SamlError> {
-    let field = ExtractorField::new("audience", &["AudienceRestriction", "Audience"]);
-    let extracted =
-        extract_with_limits(audience_restriction, std::slice::from_ref(&field), limits)?;
-    Ok(match extracted.get("audience") {
-        Some(Value::Str(audience)) => audience == expected,
-        Some(Value::Array(audiences)) => audiences
-            .iter()
-            .any(|audience| audience.as_str() == Some(expected)),
-        _ => false,
-    })
-}
-
-enum AudienceCheck {
-    Satisfied,
-    Absent,
-    Rejected,
-}
-
-fn audience_restrictions_contain(
-    assertion: Option<&str>,
-    expected: &str,
-    limits: XmlLimits,
-) -> Result<AudienceCheck, SamlError> {
-    let Some(assertion) = assertion else {
-        return Ok(AudienceCheck::Absent);
-    };
-    let field = ExtractorField::new(
-        "audienceRestriction",
-        &["Assertion", "Conditions", "AudienceRestriction"],
-    )
-    .with_context();
-    let extracted = extract_with_limits(assertion, std::slice::from_ref(&field), limits)?;
-
-    match extracted.get("audienceRestriction") {
-        Some(Value::Str(audience_restriction)) => {
-            if audience_restriction_contains(audience_restriction, expected, limits)? {
-                Ok(AudienceCheck::Satisfied)
-            } else {
-                Ok(AudienceCheck::Rejected)
-            }
-        }
-        Some(Value::Array(audience_restrictions)) if !audience_restrictions.is_empty() => {
-            for audience_restriction in audience_restrictions {
-                let Some(audience_restriction) = audience_restriction.as_str() else {
-                    return Ok(AudienceCheck::Rejected);
-                };
-                if !audience_restriction_contains(audience_restriction, expected, limits)? {
-                    return Ok(AudienceCheck::Rejected);
-                }
-            }
-            Ok(AudienceCheck::Satisfied)
-        }
-        _ => Ok(AudienceCheck::Absent),
-    }
-}
-
-fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
-    match extracted.get("subjectConfirmation") {
-        Some(Value::Str(xml)) => vec![xml.as_str()],
-        Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
-        _ => Vec::new(),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SubjectConfirmationCheck {
-    Valid,
-    Invalid(SubjectConfirmationReason),
-}
-
-fn check_bearer_subject_confirmation(
-    xml: &str,
-    opts: &FlowOptions<'_>,
-    expected_recipient: Option<&str>,
-) -> Result<SubjectConfirmationCheck, SamlError> {
-    let fields = [
-        ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
-        ExtractorField::new(
-            "subjectConfirmationData",
-            &["SubjectConfirmation", "SubjectConfirmationData"],
-        )
-        .attrs(&["NotOnOrAfter", "Recipient", "InResponseTo"]),
-    ];
-    let extracted = extract_with_limits(xml, &fields, opts.xml_limits)?;
-
-    if extracted.get_str("subjectConfirmation") != Some(BEARER_SUBJECT_CONFIRMATION_METHOD) {
-        return Ok(SubjectConfirmationCheck::Invalid(
-            SubjectConfirmationReason::InvalidMethod,
-        ));
-    }
-
-    let Some(not_on_or_after) = extracted.get_str("subjectConfirmationData.notOnOrAfter") else {
-        return Ok(SubjectConfirmationCheck::Invalid(
-            SubjectConfirmationReason::MissingNotOnOrAfter,
-        ));
-    };
-    if !verify_time_at(
-        None,
-        Some(not_on_or_after),
-        opts.clock_drifts,
-        opts.validation_now()?,
-    ) {
-        return Ok(SubjectConfirmationCheck::Invalid(
-            SubjectConfirmationReason::TimeWindowInvalid,
-        ));
-    }
-
-    if let Some(expected) = expected_recipient {
-        if extracted.get_str("subjectConfirmationData.recipient") != Some(expected) {
-            return Ok(SubjectConfirmationCheck::Invalid(
-                SubjectConfirmationReason::RecipientMismatch,
-            ));
-        }
-    }
-
-    if let Some(expected) = opts.expected_in_response_to {
-        if extracted.get_str("subjectConfirmationData.inResponseTo") != Some(expected) {
-            return Ok(SubjectConfirmationCheck::Invalid(
-                SubjectConfirmationReason::InResponseToMismatch,
-            ));
-        }
-    }
-
-    Ok(SubjectConfirmationCheck::Valid)
-}
-
-fn validate_subject_confirmation(
-    extracted: &Value,
-    opts: &FlowOptions<'_>,
-    expected_recipient: Option<&str>,
-) -> Result<(), SamlError> {
-    let mut reason = None;
-    for xml in subject_confirmation_xmls(extracted) {
-        match check_bearer_subject_confirmation(xml, opts, expected_recipient)? {
-            SubjectConfirmationCheck::Valid => return Ok(()),
-            SubjectConfirmationCheck::Invalid(current) => reason = Some(current),
-        }
-    }
-    Err(SamlError::SubjectConfirmationInvalid {
-        reason: reason.unwrap_or(SubjectConfirmationReason::MissingBearerConfirmation),
-    })
-}
-
 fn validate_message_destination(
     parser_type: ParserType,
     extracted: &Value,
@@ -1024,7 +874,7 @@ fn validate_message_destination(
 
 fn validate_context(
     parser_type: ParserType,
-    assertion: Option<&str>,
+    saml_content: &str,
     extracted: &Value,
     opts: &FlowOptions<'_>,
     expected_recipient: Option<&str>,
@@ -1064,44 +914,11 @@ fn validate_context(
         message_authenticated,
     )?;
     if parser_type == ParserType::SamlResponse {
-        validate_subject_confirmation(extracted, opts, expected_recipient)?;
-        if let Some(expected) = opts.expected_audience {
-            match audience_restrictions_contain(assertion, expected, opts.xml_limits)? {
-                AudienceCheck::Satisfied => {}
-                AudienceCheck::Absent if !opts.require_audience_restriction => {}
-                AudienceCheck::Absent | AudienceCheck::Rejected => {
-                    return Err(SamlError::AudienceMismatch {
-                        expected: expected.to_string(),
-                    });
-                }
-            }
-        }
-        let session_bounds = authn_statement_not_on_or_after_values(extracted)?;
-        if let Some(raw_expiration) =
-            earliest_authn_session_expiration(session_bounds, TimeWindowField::SessionNotOnOrAfter)?
-        {
-            let expiration = raw_expiration
-                .checked_add(Duration::milliseconds(opts.clock_drifts.1))
-                .ok_or(SamlError::TimeWindowInvalid {
-                    field: TimeWindowField::SessionNotOnOrAfter,
-                })?;
-            if opts.validation_now()? >= expiration {
-                return Err(SamlError::TimeWindowInvalid {
-                    field: TimeWindowField::SessionNotOnOrAfter,
-                });
-            }
-        }
-        let (not_before, not_on_or_after) = conditions_time_bounds(extracted)?;
-        if !verify_time_at(
-            not_before,
-            not_on_or_after,
-            opts.clock_drifts,
-            opts.validation_now()?,
-        ) {
-            return Err(SamlError::TimeWindowInvalid {
-                field: TimeWindowField::Conditions,
-            });
-        }
+        crate::assertion_acceptance::accept_response_assertions(
+            saml_content,
+            opts,
+            expected_recipient,
+        )?;
     }
     if parser_type == ParserType::LogoutRequest {
         logout_request_not_on_or_after_deadline(
@@ -1240,7 +1057,7 @@ fn flow_inner(
     let extracted = extract_with_limits(&saml_content, &fields, opts.xml_limits)?;
     validate_context(
         parser_type,
-        assertion.as_deref(),
+        &saml_content,
         &extracted,
         opts,
         expected_recipient,
