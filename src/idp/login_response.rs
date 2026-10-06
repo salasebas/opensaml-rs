@@ -137,11 +137,6 @@ pub(super) struct ErrorLoginResponseXml<'a> {
     pub(super) in_response_to: Option<&'a str>,
 }
 
-/// Render a `Response` that carries `status` and no assertion.
-///
-/// Profiles §4.1.4.2: an identity provider that returns an error MUST NOT
-/// include any assertions. `Issuer`, `InResponseTo`, and `Destination` stay
-/// on the response.
 pub(super) fn render_error_login_response(
     input: &ErrorLoginResponseXml<'_>,
 ) -> Result<String, SamlError> {

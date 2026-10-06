@@ -501,8 +501,7 @@ impl IdentityProvider {
 
         let mut xml = raw.to_string();
         if error_response {
-            // No assertion remains to sign or encrypt. HTTP-POST signs the
-            // Response. SimpleSign adds its detached signature in `bind_response`.
+            // HTTP-POST signs the Response. There is no assertion to sign.
             if binding == Binding::Post {
                 xml = construct_saml_signature(
                     &xml,

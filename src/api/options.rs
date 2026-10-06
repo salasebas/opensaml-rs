@@ -118,18 +118,10 @@ impl RespondSso {
     }
 
     /// Set the `Response` status. Omitting it emits top-level `Success` and
-    /// the assertions of a successful response.
+    /// its assertions.
     ///
-    /// A top-level code other than `Success` is an error `Response`. Profiles
-    /// §4.1.4.2 forbids assertions in that message, so none are written. The
-    /// subject passed to `respond_sso` or `initiate_sso` is not included.
-    /// `Issuer`, `InResponseTo`, and `Destination` follow the same rules as a
-    /// successful response from this builder.
-    ///
-    /// The caller chooses the status, including any subordinate code such as
-    /// `NoPassive` or `AuthnFailed`. This method does not infer a code from
-    /// the request. A login response template cannot carry an error response
-    /// or a subordinate code.
+    /// Any other top-level code omits assertions. A login response template
+    /// cannot carry that response or a subordinate code.
     pub fn status(mut self, status: Status) -> Self {
         self.status = Some(status);
         self
