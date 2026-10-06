@@ -11,7 +11,7 @@ semver_check = false
 name = "saml-rs"
 version_group = "saml-rs"
 changelog_path = "CHANGELOG.md"
-changelog_include = ["opensaml", "samlify", "rustsaml", "samlet"]
+changelog_include = ["opensaml", "samlify", "samlet"]
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 git_release_enable = true
@@ -28,14 +28,6 @@ semver_check = false
 
 [[package]]
 name = "samlify"
-version_group = "saml-rs"
-changelog_update = false
-git_tag_enable = false
-git_release_enable = false
-semver_check = false
-
-[[package]]
-name = "rustsaml"
 version_group = "saml-rs"
 changelog_update = false
 git_tag_enable = false
