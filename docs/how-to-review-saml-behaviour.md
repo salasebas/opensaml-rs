@@ -11,8 +11,9 @@ bindings, profiles, or metadata. Why each check exists is explained in
 3. Check whether a binding or profile narrows or adds requirements.
 4. Prefer a final standard over a draft, unless the feature explicitly targets
    a draft or extension.
-5. Record enough provenance in the issue, pull request, test, or code comment
-   for a later maintainer to verify the interpretation.
+5. Record the normative provenance in the issue or pull request. A code
+   comment states what the caller can do with the item
+   ([coding standards](../CODING_STANDARDS.md)).
 
 ## Answer these before merging
 
@@ -27,8 +28,9 @@ bindings, profiles, or metadata. Why each check exists is explained in
    only lower-level parsing, serialisation, or partial flow support?
 8. Does the normative text require generation, processing, acceptance,
    verification, or rejection?
-9. Is the implementation enforcing only that requirement, without adding a
-   stricter receiver rule?
+9. Is the implementation enforcing only that requirement? A stricter receiver
+   rule is library policy, stated in its own sentence in the pull request
+   ([coding standards](../CODING_STANDARDS.md)).
 10. Is a recommendation default-on and relaxed only through an explicit
     policy?
 11. Is optional behaviour intentionally configured and interoperable?

@@ -53,6 +53,8 @@ work in the repo, not restate the README.
   or security impact, and ask for direction before changing it.
 - Do not present library safety or application policy as an OASIS wire
   requirement, and do not invent validation for unspecified behavior.
+- A stricter receiver rule is recorded as library policy in the pull request.
+  The wording is in `CODING_STANDARDS.md`.
 
 ## Fixture Provenance
 
@@ -98,8 +100,7 @@ job in `.github/workflows/ci.yml`.
 - When possible, make `match` statements exhaustive and avoid wildcard arms.
 - New traits should include doc comments explaining their role and how
   implementations are expected to use them.
-- Comments describe behavior and API usage. Do not justify why an
-  implementation was chosen.
+- Doc comments follow `CODING_STANDARDS.md`.
 - Use inline format arguments, collapse nested `if` statements when clear, and
   prefer method references over redundant closures.
 - In tests, return `Result<(), Box<dyn std::error::Error>>` and use `?` instead
@@ -135,9 +136,8 @@ Add regression tests for security fixes.
 - The published crate is `saml-rs`, and Rust imports use `saml_rs`.
 - Do not edit `CHANGELOG.md` by hand. release-plz writes it from Conventional
   Commits on the release PR.
-- A breaking change updates `docs/migrations/` in the same change: what breaks,
-  who must change, and how to upgrade. Follow `docs/migrations/README.md`.
-  Compatible features are recorded by their Conventional Commit.
+- Caller-visible changes update the migration guide in the same pull request.
+  The bar is in `CODING_STANDARDS.md`. The procedure is in `CONTRIBUTING.md`.
 
 ## Agent skills
 
