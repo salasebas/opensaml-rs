@@ -1,11 +1,8 @@
 //! Service-provider acceptance of every assertion in a login `Response`.
 //!
-//! SAML Core 2.0 §2.5.1.1 rejects an assertion whose `<Conditions>` child is
-//! not understood. `<OneTimeUse>` and `<ProxyRestriction>` are understood and
-//! do not affect validity (Core §§2.5.1.5 and 2.5.1.6). Approved Errata 05 E26
-//! requires every assertion in a Web Browser SSO response to be evaluated, to
-//! share one issuer, and to refer to one principal. One successful bearer
-//! `<SubjectConfirmation>` confirms that assertion.
+//! An unrecognized `<Conditions>` child is rejected. `<OneTimeUse>` and
+//! `<ProxyRestriction>` stay valid. The assertions must share one issuer and
+//! one principal. One successful bearer confirmation confirms that assertion.
 
 use crate::constants::namespace;
 use crate::error::{SamlError, SubjectConfirmationReason, TimeWindowField};

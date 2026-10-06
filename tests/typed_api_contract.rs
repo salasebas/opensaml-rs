@@ -77,6 +77,13 @@ fn typed_api_contract_reexports_typed_binding_building_blocks(
 #[test]
 fn typed_api_contract_reexports_browser_and_model_types() {
     let _: for<'a> fn(&'a AuthnRequest) -> &'a SamlInstant = AuthnRequest::issue_instant;
+    let _: fn(&AuthnRequest) -> Option<saml_rs::ForceAuthn> = AuthnRequest::force_authn;
+    let _: fn(&AuthnRequest) -> Option<saml_rs::IsPassive> = AuthnRequest::is_passive;
+    let _: for<'a> fn(&'a AuthnRequest) -> Option<&'a saml_rs::RequestedSubject> =
+        AuthnRequest::requested_subject;
+    let _: for<'a> fn(&'a saml_rs::NameId) -> Option<&'a str> = saml_rs::NameId::name_qualifier;
+    let _: for<'a> fn(&'a saml_rs::NameId) -> Option<&'a str> = saml_rs::NameId::sp_name_qualifier;
+    let _: for<'a> fn(&'a saml_rs::NameId) -> Option<&'a str> = saml_rs::NameId::sp_provided_id;
     let _: for<'a> fn(&'a saml_rs::SsoResponse) -> &'a SamlInstant =
         saml_rs::SsoResponse::issue_instant;
     let _: for<'a> fn(&'a saml_rs::SsoSession) -> &'a SamlInstant =
@@ -103,6 +110,7 @@ fn typed_api_contract_reexports_browser_and_model_types() {
     let _ = std::any::type_name::<saml_rs::LogoutCompleted>();
     let _ = std::any::type_name::<saml_rs::LogoutRequest>();
     let _ = std::any::type_name::<saml_rs::LogoutResponse>();
+    let _ = std::any::type_name::<saml_rs::OutstandingLogout>();
     let _ = std::any::type_name::<saml_rs::NameId>();
     let _ = std::any::type_name::<saml_rs::NameIdPolicy>();
     let _ = std::any::type_name::<saml_rs::Received<saml_rs::SsoResponse>>();
@@ -113,6 +121,12 @@ fn typed_api_contract_reexports_browser_and_model_types() {
     let _ = std::any::type_name::<saml_rs::SsoSession>();
     let _ = std::any::type_name::<VerifiedXmlSignature>();
     let _ = std::any::type_name::<VerifiedXmlSignatureCoverage>();
+    let _ = std::any::type_name::<saml_rs::RequestedSubject>();
+    let _ = std::any::type_name::<saml_rs::RequestedSubjectIdentifier>();
     let _ = std::any::type_name::<saml_rs::Subject>();
     let _ = std::any::type_name::<saml_rs::SubjectConfirmation>();
+    let _ = std::any::type_name::<saml_rs::IsPassive>();
+    let _ = std::any::type_name::<saml_rs::Status>();
+    let _ = std::any::type_name::<saml_rs::SubordinateStatusCode>();
+    let _ = std::any::type_name::<saml_rs::TopLevelStatusCode>();
 }

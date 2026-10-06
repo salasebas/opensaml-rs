@@ -175,7 +175,6 @@ fn verified_content_not_covered() -> SamlError {
     SamlError::SignedReferenceMismatch
 }
 
-const EXC_C14N_WITH_COMMENTS: &str = "http://www.w3.org/2001/10/xml-exc-c14n#WithComments";
 const XML_C14N_10: &str = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315";
 const XML_C14N_10_WITH_COMMENTS: &str =
     "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments";
@@ -187,7 +186,7 @@ fn metadata_signature_transform_allowed(algorithm: &str) -> bool {
         algorithm,
         transform_algorithm::ENVELOPED_SIGNATURE
             | transform_algorithm::EXC_C14N
-            | EXC_C14N_WITH_COMMENTS
+            | transform_algorithm::EXC_C14N_WITH_COMMENTS
             | XML_C14N_10
             | XML_C14N_10_WITH_COMMENTS
             | XML_C14N_11
@@ -213,7 +212,10 @@ fn ensure_metadata_reference_transforms_preserve_descriptor(
 }
 
 fn ensure_metadata_signature_transforms_preserve_descriptor(root: &Node) -> Result<(), SamlError> {
-    if root.local_name != "EntityDescriptor" {
+    if !matches!(
+        root.local_name.as_str(),
+        "EntityDescriptor" | "EntitiesDescriptor"
+    ) {
         return Ok(());
     }
 
@@ -238,10 +240,8 @@ fn verified_root_content(
     Err(verified_content_not_covered())
 }
 
-/// A response covers its assertions when the signature covers the response, or
-/// every direct assertion is itself signed. An unsigned sibling is a wrapping
-/// attempt. Approved Errata 05 E26 allows several assertions in one response
-/// when they are protected that way.
+/// The response signature covers every assertion, or every assertion is signed.
+/// An unsigned sibling is a wrapping attempt.
 fn assertion_has_bearer_confirmation(assertion: &Node) -> bool {
     const BEARER: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
     assertion
@@ -296,7 +296,10 @@ fn verified_content(
             return Err(verified_content_not_covered());
         }
     }
-    if root.local_name == "EntityDescriptor" {
+    if matches!(
+        root.local_name.as_str(),
+        "EntityDescriptor" | "EntitiesDescriptor"
+    ) {
         if target_matches_node(targets, root) {
             return Ok(Some(xml[root.start..root.end].to_string()));
         }
@@ -329,7 +332,10 @@ fn verified_targets_cover_accepted_content(root: &Node, targets: &[VerifiedTarge
             return response_is_covered(targets, root);
         }
     }
-    if root.local_name == "EntityDescriptor" {
+    if matches!(
+        root.local_name.as_str(),
+        "EntityDescriptor" | "EntitiesDescriptor"
+    ) {
         return target_matches_node(targets, root);
     }
     if matches!(
@@ -986,7 +992,7 @@ impl MetadataSignatureVerification {
         self.verified
     }
 
-    /// The signed `<EntityDescriptor>` XML when verification succeeds.
+    /// Signed `<EntityDescriptor>` or `<EntitiesDescriptor>` when verification succeeds.
     pub fn signed_entity_descriptor_xml(&self) -> Option<&str> {
         self.signed_entity_descriptor_xml.as_deref()
     }
@@ -1057,7 +1063,22 @@ pub fn verify_metadata_signature_detailed_with_limits(
 ) -> Result<MetadataSignatureVerification, SamlError> {
     let doc = dom::parse_with_limits(xml, limits)?;
     ensure_metadata_signature_transforms_preserve_descriptor(&doc.root)?;
+    verify_metadata_signature_coverage_with_limits(xml, trusted_certificates, limits)
+}
 
+/// Verify metadata signature cryptography and signed-root coverage.
+///
+/// The caller has already enforced the metadata signature profile.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when XML parsing, certificate loading, cryptographic
+/// verification, or signed-root coverage checks fail.
+pub(crate) fn verify_metadata_signature_coverage_with_limits(
+    xml: &str,
+    trusted_certificates: &[String],
+    limits: XmlLimits,
+) -> Result<MetadataSignatureVerification, SamlError> {
     let (verified, signed_entity_descriptor_xml) =
         verify_signature_with_limits(xml, trusted_certificates, limits)?;
     if !verified {
@@ -1098,7 +1119,7 @@ mod tests {
         for algorithm in [
             transform_algorithm::ENVELOPED_SIGNATURE,
             transform_algorithm::EXC_C14N,
-            EXC_C14N_WITH_COMMENTS,
+            transform_algorithm::EXC_C14N_WITH_COMMENTS,
             XML_C14N_10,
             XML_C14N_10_WITH_COMMENTS,
             XML_C14N_11,

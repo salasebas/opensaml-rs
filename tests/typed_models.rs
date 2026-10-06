@@ -793,6 +793,9 @@ fn typed_models_authn_request_from_flow_result_exposes_typed_fields(
             .and_then(saml_rs::NameIdPolicy::allow_create),
         Some(true)
     );
+    assert_eq!(request.force_authn(), None);
+    assert_eq!(request.is_passive(), None);
+    assert_eq!(request.requested_subject(), None);
     assert_eq!(request.raw_flow().saml_content, "<samlp:AuthnRequest/>");
     Ok(())
 }

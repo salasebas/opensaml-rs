@@ -1,24 +1,8 @@
 use crate::browser::{LogoutBinding, SsoRequestBinding, SsoResponseBinding};
-use crate::model::RelayStateParam;
+use crate::model::{RelayStateParam, Status};
 use crate::sp::WebBrowserSsoProducer;
 
-/// Explicit `ForceAuthn` value for outbound AuthnRequests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ForceAuthn {
-    /// Emit `ForceAuthn="true"`.
-    Required,
-    /// Emit `ForceAuthn="false"`.
-    NotRequired,
-}
-
-impl ForceAuthn {
-    pub(super) fn as_bool(self) -> bool {
-        match self {
-            Self::Required => true,
-            Self::NotRequired => false,
-        }
-    }
-}
+pub use crate::model::{ForceAuthn, IsPassive};
 
 /// Options for starting SP-initiated Web SSO.
 #[derive(Debug, Clone)]
@@ -352,6 +336,7 @@ impl StartSlo {
 pub struct RespondSlo {
     pub(super) binding: LogoutBinding,
     pub(super) relay_state: Option<RelayStateParam>,
+    pub(super) status: Option<Status>,
     rules: SingleLogoutRules,
 }
 
@@ -375,8 +360,18 @@ impl RespondSlo {
         Self {
             binding,
             relay_state: None,
+            status: None,
             rules: SingleLogoutRules::default(),
         }
+    }
+
+    /// Set the `LogoutResponse` status. Omitting it emits top-level `Success`.
+    ///
+    /// A logout-response template carries only the top-level code. A
+    /// subordinate code is rejected when a template is set.
+    pub fn status(mut self, status: Status) -> Self {
+        self.status = Some(status);
+        self
     }
 
     /// Set exact RelayState state for the logout response.

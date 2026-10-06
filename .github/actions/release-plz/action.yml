@@ -1,0 +1,61 @@
+name: release-plz
+description: Run release-plz, checking semver against the default feature set
+
+inputs:
+  command:
+    description: release-plz command (`release` or `release-pr`)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Pins track release-plz/action v0.5.139 (release-plz 0.3.169,
+    # cargo-semver-checks 0.50).
+    - name: Install release tools
+      uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2.87.16 zizmor: ignore[impostor-commit,ref-version-mismatch]
+      with:
+        tool: cargo-semver-checks@0.50,release-plz@0.3.169
+
+    # release-plz invokes cargo-semver-checks with its default feature
+    # heuristic, which turns on every crypto provider at once. Those
+    # providers do not compile together. CI checks the same default set.
+    - name: Limit semver checks to default features
+      shell: bash
+      run: |
+        set -euo pipefail
+        real="$(command -v cargo-semver-checks)"
+        mv "$real" "${real}.real"
+        cat > "$real" << EOF
+        #!/bin/sh
+        exec '${real}.real' "\$@" --default-features
+        EOF
+        chmod +x "$real"
+
+    - name: Configure Git user from GitHub token
+      uses: release-plz/git-config@59144859caf016f8b817a2ac9b051578729173c4 # v0.1.2
+
+    - name: Reject unknown release-plz command
+      if: inputs.command != 'release' && inputs.command != 'release-pr'
+      shell: bash
+      run: |
+        echo "unsupported release-plz command" >&2
+        exit 1
+
+    - name: Run release-plz release-pr
+      if: inputs.command == 'release-pr'
+      shell: bash
+      run: |
+        release-plz release-pr \
+          --git-token "$GITHUB_TOKEN" \
+          --repo-url "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}" \
+          --forge github \
+          -o json
+
+    - name: Run release-plz release
+      if: inputs.command == 'release'
+      shell: bash
+      run: |
+        release-plz release \
+          --git-token "$GITHUB_TOKEN" \
+          --forge github \
+          -o json

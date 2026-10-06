@@ -201,20 +201,16 @@ pub enum SamlError {
         /// Expected SP entity ID.
         expected: String,
     },
-    /// A `<Conditions>` child is not one service-provider acceptance can evaluate.
-    ///
-    /// SAML Core 2.0 §2.5.1.1 treats that condition as Indeterminate, which a
-    /// relying party must reject.
+    /// A `<Conditions>` child is not one this service provider can evaluate.
     #[error("assertion condition is not understood: {element}")]
     UnrecognizedCondition {
         /// Local name of the unrecognized condition element.
         element: String,
     },
-    /// Assertions in one response do not refer to one principal.
+    /// Assertions in one response do not share one principal.
     ///
-    /// Approved Errata 05 E26 requires the assertions in a Web Browser SSO
-    /// response to refer to the same principal. This receiver compares `NameID`
-    /// value, `Format`, `NameQualifier`, and `SPNameQualifier`.
+    /// The comparison is `NameID` value, `Format`, `NameQualifier`, and
+    /// `SPNameQualifier`.
     #[error("assertions do not refer to one principal")]
     PrincipalMismatch,
     /// Response carried a non-success SAML status code.
@@ -237,6 +233,10 @@ pub enum SamlError {
         /// Stable validation reason for callers and logs.
         reason: SubjectConfirmationReason,
     },
+    /// A later assertion matches an outstanding logout that is still before
+    /// `NotOnOrAfter`.
+    #[error("assertion matches an outstanding logout")]
+    AssertionMatchesOutstandingLogout,
     /// A duplicate SAML message or assertion key was detected.
     #[error("replayed SAML message or assertion: {key}")]
     ReplayDetected {
