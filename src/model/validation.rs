@@ -198,19 +198,15 @@ pub enum ReplayPolicy<'a> {
 
 /// Maximum age for an inbound `AuthnRequest` `IssueInstant`.
 ///
-/// Core §1.3.3 requires a UTC `IssueInstant` and does not define a maximum
-/// age. [`SamlValidationContext::new`] starts at [`Self::Disabled`].
-/// [`Self::Bounded`] is library hardening and can reject a conformant request.
-/// It is not a field of [`crate::IdpValidationPolicy`] and it is not selected
-/// by `recommended()` or Compatibility. The classification is
+/// [`Self::Disabled`] skips the comparison. [`Self::Bounded`] accepts an
+/// instant inside an inclusive window of `max_age`, widened by the context
+/// clock skew. The classification is
 /// `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthnRequestAgePolicy {
     /// Do not compare `IssueInstant` with the validation clock.
     Disabled,
     /// Accept an `IssueInstant` inside an inclusive window of `max_age`.
-    ///
-    /// The context clock skew widens that window. It does not shrink it.
     Bounded {
         /// Maximum age before clock-skew tolerance is applied.
         ///
@@ -232,11 +228,8 @@ impl<'a> SamlValidationContext<'a> {
     /// Build a validation context that allows five minutes of clock skew.
     ///
     /// The same skew covers assertion conditions, bearer confirmation,
-    /// `SessionNotOnOrAfter`, and `LogoutRequest@NotOnOrAfter`. It does not
-    /// limit an `AuthnRequest` `IssueInstant` unless
-    /// [`Self::with_authn_request_age`] selects
-    /// [`AuthnRequestAgePolicy::Bounded`]. [`Self::with_clock_skew`] replaces
-    /// it.
+    /// `SessionNotOnOrAfter`, and `LogoutRequest@NotOnOrAfter`.
+    /// [`Self::with_clock_skew`] replaces it.
     pub fn new(now: SystemTime, replay: ReplayPolicy<'a>) -> Self {
         Self {
             now,
@@ -255,14 +248,13 @@ impl<'a> SamlValidationContext<'a> {
 
     /// Select the maximum age of an inbound `AuthnRequest` `IssueInstant`.
     ///
-    /// [`AuthnRequestAgePolicy::Disabled`] is the starting value and skips the
-    /// comparison. [`AuthnRequestAgePolicy::Bounded`] accepts an instant at or
-    /// after `now - max_age - past_tolerance` and at or before
+    /// [`AuthnRequestAgePolicy::Disabled`] skips the comparison.
+    /// [`AuthnRequestAgePolicy::Bounded`] accepts an instant at or after
+    /// `now - max_age - past_tolerance` and at or before
     /// `now + future_tolerance`. Both edges are inclusive. Past tolerance is
     /// the positive `NotOnOrAfter` skew. Future tolerance is the magnitude of
     /// a negative `NotBefore` skew. Zero skew and inverted skew do not shrink
-    /// `max_age`. Core §1.3.3 does not define this limit, so a bounded window
-    /// can reject a conformant request.
+    /// `max_age`.
     pub fn with_authn_request_age(mut self, authn_request_age: AuthnRequestAgePolicy) -> Self {
         self.authn_request_age = authn_request_age;
         self
