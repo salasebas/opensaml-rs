@@ -201,6 +201,18 @@ pub enum SamlError {
         /// Expected SP entity ID.
         expected: String,
     },
+    /// A `<Conditions>` child is not one this service provider can evaluate.
+    #[error("assertion condition is not understood: {element}")]
+    UnrecognizedCondition {
+        /// Local name of the unrecognized condition element.
+        element: String,
+    },
+    /// Assertions in one response do not share one principal.
+    ///
+    /// The comparison is `NameID` value, `Format`, `NameQualifier`, and
+    /// `SPNameQualifier`. An omitted `Format` is unspecified.
+    #[error("assertions do not refer to one principal")]
+    PrincipalMismatch,
     /// Response carried a non-success SAML status code.
     #[error("status not success: top={top}, second={second:?}")]
     StatusNotSuccess {

@@ -148,7 +148,8 @@ impl Saml<Sp> {
     /// Returns [`SamlError`] when the response does not match the pending
     /// request, including issuer, binding, relay state, destination, recipient,
     /// or `InResponseTo` mismatches; when XML, signature, certificate trust,
-    /// audience, or time-window validation fails; or when replay validation
+    /// audience, condition, or time validation fails; when the assertions do
+    /// not share one issuer and one principal; or when replay validation
     /// returns `ReplayDetected` or `TimeWindowInvalid`.
     ///
     /// # Examples
@@ -220,7 +221,8 @@ impl Saml<Sp> {
     /// Returns [`SamlError`] when the browser binding is not valid for SSO
     /// responses, `RelayState` exceeds 80 bytes, the IdP metadata cannot be
     /// parsed or trusted, XML parsing or signature verification fails,
-    /// destination, recipient, audience, or time validation fails, or replay
+    /// destination, recipient, audience, condition, or time validation fails,
+    /// the assertions do not share one issuer and one principal, or replay
     /// validation returns `ReplayDetected` or `TimeWindowInvalid`.
     pub fn accept_unsolicited_sso(
         &self,

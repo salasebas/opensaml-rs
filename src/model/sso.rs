@@ -329,10 +329,18 @@ impl SsoSession {
 
     /// Replay keys available from this validated SSO session.
     pub fn replay_keys(&self) -> Vec<ReplayKey> {
-        vec![
-            ReplayKey::ResponseId(self.response_id.clone()),
-            ReplayKey::AssertionId(self.assertion_id.clone()),
-        ]
+        let mut keys = vec![ReplayKey::ResponseId(self.response_id.clone())];
+        let mut ids = crate::assertion_acceptance::assertion_ids(&self.raw_flow.saml_content)
+            .unwrap_or_default();
+        if !ids.iter().any(|id| id == self.assertion_id.as_str()) {
+            ids.insert(0, self.assertion_id.as_str().to_string());
+        }
+        for id in ids {
+            if let Ok(id) = AssertionId::try_new(id) {
+                keys.push(ReplayKey::AssertionId(id));
+            }
+        }
+        keys
     }
 
     /// Check and store this session's replay keys using the caller cache.
@@ -344,7 +352,9 @@ impl SsoSession {
     /// The bearer assertion identifier is kept until
     /// `SubjectConfirmationData@NotOnOrAfter` plus skew. An earlier
     /// `Conditions` or `AuthnStatement` instant does not shorten it. The
-    /// Response identifier still expires at the earliest bound.
+    /// Response identifier still expires at the earliest bound. Every direct
+    /// assertion identifier is stored. Another assertion uses its own bearer
+    /// `NotOnOrAfter` when that attribute is present.
     ///
     /// # Errors
     ///
@@ -363,6 +373,8 @@ impl SsoSession {
         match validation.replay_policy() {
             ReplayPolicy::DisabledForCompatibility => Ok(()),
             ReplayPolicy::RequireCache(cache) => {
+                let replays =
+                    crate::assertion_acceptance::assertion_replays(&self.raw_flow.saml_content)?;
                 let response_expires = system_time_from_offset(replay_deadline(
                     self.earliest_replay_instant()?,
                     validation_now,
@@ -381,6 +393,23 @@ impl SsoSession {
                     ReplayKey::AssertionId(self.assertion_id.clone()),
                     assertion_expires,
                 )?;
+                for replay in replays {
+                    if replay.id == self.assertion_id.as_str() {
+                        continue;
+                    }
+                    let expires_at = match replay.bearer_not_on_or_after {
+                        Some(instant) => system_time_from_offset(replay_deadline(
+                            parse_replay_expiration(&instant)?,
+                            validation_now,
+                            not_on_or_after_skew_ms,
+                        )?)?,
+                        None => assertion_expires,
+                    };
+                    cache.check_and_store(
+                        ReplayKey::AssertionId(AssertionId::try_new(replay.id)?),
+                        expires_at,
+                    )?;
+                }
                 Ok(())
             }
         }

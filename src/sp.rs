@@ -14,12 +14,8 @@ use crate::flow::{
 use crate::idp::IdentityProvider;
 use crate::metadata::{generate_sp_metadata, SpMetadata, SpMetadataConfig};
 use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
-use crate::util::Value;
 use crate::xml::write::XmlWriter;
-use crate::xml::{extract_with_limits, ExtractorField, XmlLimits};
 use std::time::SystemTime;
-
-const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
 /// A SAML 2.0 Service Provider: runtime [`EntitySetting`] plus parsed [`SpMetadata`].
 #[derive(Debug, Clone)]
@@ -169,43 +165,6 @@ fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
     writer.empty("samlp:NameIDPolicy", &name_id_policy_attrs);
     writer.end("samlp:AuthnRequest");
     writer.finish()
-}
-
-fn subject_confirmation_xmls(extracted: &Value) -> Vec<&str> {
-    match extracted.get("subjectConfirmation") {
-        Some(Value::Str(xml)) => vec![xml.as_str()],
-        Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn reject_unsolicited_request_bound_bearer_confirmations(
-    extracted: &Value,
-    limits: XmlLimits,
-) -> Result<(), SamlError> {
-    let fields = [
-        ExtractorField::new("subjectConfirmation", &["SubjectConfirmation"]).attrs(&["Method"]),
-        ExtractorField::new(
-            "subjectConfirmationData",
-            &["SubjectConfirmation", "SubjectConfirmationData"],
-        )
-        .attrs(&["InResponseTo"]),
-    ];
-    for xml in subject_confirmation_xmls(extracted) {
-        let confirmation = extract_with_limits(xml, &fields, limits)?;
-        let is_bearer =
-            confirmation.get_str("subjectConfirmation") == Some(BEARER_SUBJECT_CONFIRMATION_METHOD);
-        let is_request_bound = confirmation
-            .get_str("subjectConfirmationData")
-            .is_some_and(|actual| !actual.is_empty());
-        if is_bearer && is_request_bound {
-            return Err(SamlError::in_response_to_mismatch(
-                None,
-                confirmation.get_str("subjectConfirmationData"),
-            ));
-        }
-    }
-    Ok(())
 }
 
 impl ServiceProvider {
@@ -782,8 +741,8 @@ impl ServiceProvider {
             ));
         }
         if matches!(correlation, LoginResponseCorrelation::Unsolicited) {
-            reject_unsolicited_request_bound_bearer_confirmations(
-                result.extract(),
+            crate::assertion_acceptance::reject_unsolicited_bearer_in_response_to(
+                result.saml_content(),
                 self.setting.xml_limits,
             )?;
         }

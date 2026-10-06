@@ -240,9 +240,31 @@ fn verified_root_content(
     Err(verified_content_not_covered())
 }
 
-/// Return the source of the content covered by a verified reference: the lone
-/// `<Assertion>`, a consumed root element, or the whole `<Response>` when
-/// assertions are encrypted.
+/// The response signature covers every assertion, or every assertion is signed.
+/// An unsigned sibling is rejected.
+fn assertion_has_bearer_confirmation(assertion: &Node) -> bool {
+    const BEARER: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
+    assertion
+        .children
+        .iter()
+        .filter(|child| child.local_name == "Subject")
+        .flat_map(|subject| subject.children.iter())
+        .filter(|child| child.local_name == "SubjectConfirmation")
+        .any(|confirmation| confirmation.attr("Method") == Some(BEARER))
+}
+
+fn response_assertions_covered(root: &Node, targets: &[VerifiedTarget]) -> bool {
+    let assertions = children_named(root, "Assertion");
+    !assertions.is_empty()
+        && (response_is_covered(targets, root)
+            || assertions
+                .iter()
+                .all(|assertion| id_target_matches_node(targets, assertion)))
+}
+
+/// Return the source of the content covered by a verified reference: the first
+/// bearer `<Assertion>`, a consumed root element, or the whole `<Response>`
+/// when assertions are encrypted.
 fn verified_content(
     root: &Node,
     xml: &str,
@@ -253,15 +275,19 @@ fn verified_content(
     }
     if root.local_name.contains("Response") {
         let assertions = children_named(root, "Assertion");
-        if assertions.len() > 1 {
-            return Err(SamlError::PotentialWrappingAttack);
-        }
-        if assertions.len() == 1 {
-            let a = assertions[0];
-            if id_target_matches_node(targets, a) || response_is_covered(targets, root) {
-                return Ok(Some(xml[a.start..a.end].to_string()));
+        if !assertions.is_empty() {
+            if !response_assertions_covered(root, targets) {
+                if assertions.len() > 1 {
+                    return Err(SamlError::PotentialWrappingAttack);
+                }
+                return Err(verified_content_not_covered());
             }
-            return Err(verified_content_not_covered());
+            let chosen = assertions
+                .iter()
+                .find(|assertion| assertion_has_bearer_confirmation(assertion))
+                .copied()
+                .unwrap_or(assertions[0]);
+            return Ok(Some(xml[chosen.start..chosen.end].to_string()));
         }
         if has_child(root, "EncryptedAssertion") {
             if response_is_covered(targets, root) {
@@ -299,12 +325,8 @@ fn verified_targets_cover_accepted_content(root: &Node, targets: &[VerifiedTarge
     }
     if root.local_name.contains("Response") {
         let assertions = children_named(root, "Assertion");
-        if assertions.len() > 1 {
-            return false;
-        }
-        if assertions.len() == 1 {
-            return id_target_matches_node(targets, assertions[0])
-                || response_is_covered(targets, root);
+        if !assertions.is_empty() {
+            return response_assertions_covered(root, targets);
         }
         if has_child(root, "EncryptedAssertion") {
             return response_is_covered(targets, root);
@@ -331,9 +353,34 @@ fn assertion_is_directly_covered(root: &Node, targets: &[VerifiedTarget]) -> boo
     }
     if root.local_name.contains("Response") {
         let assertions = children_named(root, "Assertion");
-        return assertions.len() == 1 && id_target_matches_node(targets, assertions[0]);
+        return !assertions.is_empty()
+            && assertions
+                .iter()
+                .all(|assertion| id_target_matches_node(targets, assertion));
     }
     false
+}
+
+fn references_cover_direct_assertion(
+    document: &BergshamraDocument<'_>,
+    references: &[VerifiedReference],
+) -> bool {
+    let Some(root) = document.document_element() else {
+        return false;
+    };
+    let Some(root_element) = document.element(root) else {
+        return false;
+    };
+    if root_element.matches_name_ns(crate::constants::namespace::ASSERTION, "Assertion") {
+        return reference_covers_node(references, root);
+    }
+    root_element.matches_name_ns(crate::constants::namespace::PROTOCOL, "Response")
+        && document.children_iter(root).any(|child| {
+            document.element(child).is_some_and(|element| {
+                element.matches_name_ns(crate::constants::namespace::ASSERTION, "Assertion")
+                    && reference_covers_node(references, child)
+            })
+        })
 }
 
 fn bergshamra_child_element(
@@ -859,6 +906,10 @@ pub(crate) fn verify_signatures_detailed_with_profile(
                                 // no XML. Enforce the profile for either case.
                                 if strict_xml_signature_profile
                                     && (signature.is_some()
+                                        || references_cover_direct_assertion(
+                                            &document,
+                                            &references,
+                                        )
                                         || verified_targets_cover_accepted_content(
                                             root,
                                             &signature_targets,
