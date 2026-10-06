@@ -12,14 +12,10 @@ use super::algorithms::{
 /// Whether an accepting service provider requires a signature on the Assertion
 /// itself.
 ///
-/// Web Browser SSO over HTTP POST requires each assertion to be protected by
-/// a digital signature on the `<Assertion>` or on the enclosing `<Response>`
-/// (SAML V2.0 Approved Errata 05 E26, Profiles §4.1.4.5). Errata 05 E93 says a
-/// deployment may also sign both, for non-repudiation, and places that outside
-/// SAML. [`Self::RequireSigned`] is that library hardening: inbound
-/// acceptance, selected by name, off unless the caller sets it.
-/// [`Self::AllowUnsignedForCompatibility`] leaves the hardening off and still
-/// accepts a standards-valid response signed only on the `<Response>`.
+/// [`Self::RequireSigned`] is library hardening and stays off unless the caller
+/// sets it. A response signed only on the `<Response>` remains acceptable.
+/// The accept combination is classified in
+/// `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AssertionSignaturePolicy {
     /// Reject an assertion that is not directly signed.
@@ -35,63 +31,38 @@ pub enum AssertionSignaturePolicy {
     AllowUnsignedForCompatibility,
 }
 
-/// Whether an accepting service provider requires authentication of the
+/// Whether an accepting service provider requires a signature on the
 /// `<Response>`.
 ///
-/// Approved Errata 05 E93 replaces Core §6.2 and adds a note to Profiles
-/// §4.1.4.3: when CBC-mode encryption protects an `<EncryptedAssertion>`, the
-/// relying party should require integrity protection, and the `<Response>`
-/// should be signed, before the ciphertext is processed. That recommendation
-/// obligates the accepting service provider on inbound acceptance.
-/// [`Self::RequireForEncryptedCbc`] follows it.
-/// [`Self::AllowUnsignedEncryptedCbc`] relaxes that recommendation alone.
-/// The name is the E93 relaxation, not the Compatibility preset.
-/// [`SpValidationPolicy::compatibility`] still selects it because the samlify
-/// port did not require the signature. It does not remove the HTTP POST rule
-/// that each assertion must be protected by a signature on the Assertion or
-/// the Response.
-///
-/// [`Self::RequireSigned`] requires a Response signature on every response.
-/// The profile allows an Assertion signature instead, so this variant is
-/// library hardening and is not part of the Web Browser SSO accept
-/// combination below.
+/// [`Self::RequireForEncryptedCbc`] follows the recommendation for a
+/// CBC-encrypted assertion. [`Self::AllowUnsignedEncryptedCbc`] relaxes that
+/// recommendation alone and is not the Compatibility preset.
+/// [`Self::RequireSigned`] requires a signature on every response and is
+/// library hardening. The accept combination is classified in
+/// `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ResponseSignaturePolicy {
     /// Do not apply the E93 Response-signature recommendation.
-    ///
-    /// Inbound acceptance. This is the named relaxation of that
-    /// recommendation, not the Compatibility preset.
     #[default]
     AllowUnsignedEncryptedCbc,
     /// Require a signed Response when an `<EncryptedAssertion>` uses CBC.
-    ///
-    /// Inbound acceptance, recommendation, accepting service provider.
     RequireForEncryptedCbc,
-    /// Require Response authentication for every response.
-    ///
-    /// Library hardening for the accepting service provider.
+    /// Require a Response signature on every response.
     RequireSigned,
 }
 
-/// Inbound embedded XML-signature algorithm and reference profile.
+/// Inbound embedded XML-signature algorithm profile for accepted SSO and
+/// Single Logout messages.
 ///
-/// The selected profile applies to every embedded signature that authenticates
-/// an accepted SSO or Single Logout message. SAML V2.0 Conformance §4.1
-/// requires RSAwithSHA1, and Core §5.4.1 says processors should support
-/// `rsa-sha1`. Core §5.4.4 lets a verifier reject other transforms; it does
-/// not require that rejection. [`Self::StrictRsaSha2`] is therefore library
-/// hardening for the accepting party, inbound, and it is independent of
-/// [`AssertionSignaturePolicy`]. [`SpValidationPolicy::strict`] keeps the
-/// provider-supported profile.
+/// [`Self::StrictRsaSha2`] is library hardening. Selecting it does not require
+/// a signature directly on the Assertion. The accept combination is classified
+/// in `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum XmlSignatureProfile {
     /// Require one local `#id` reference, RSA-SHA256/384/512, a SHA-256/384/512
     /// digest, and exclusive canonicalization. Each transform element, when
     /// present, must belong to the XML-DSig namespace and use enveloped-signature
     /// or exclusive canonicalization.
-    ///
-    /// Library hardening. Selecting it does not require a signature directly
-    /// on the Assertion.
     StrictRsaSha2,
     /// Accept every algorithm and same-document reference shape supported by
     /// the selected cryptographic provider.
@@ -111,33 +82,19 @@ pub enum AuthnRequestSigningPolicy {
 
 /// Whether an identity provider requires a signed inbound `<AuthnRequest>`.
 ///
-/// Web Browser SSO says the request may be signed (Profiles §4.1.4.1) and
-/// that `WantAuthnRequestsSigned` may document a requirement (Profiles
-/// §4.1.6). Requiring a signature is an optional inbound capability for the
-/// identity provider. It stays off unless the caller selects
-/// [`Self::RequireSigned`]. Core §3.2.1 requires the responder to verify a
-/// signature that is present. [`Self::AllowUnsignedVerifyIfPresent`] does
-/// that and still accepts an unsigned request.
-/// [`Self::AllowUnsignedForCompatibility`] does not verify a present
-/// signature.
+/// [`Self::RequireSigned`] is optional and stays off.
+/// [`Self::AllowUnsignedVerifyIfPresent`] verifies a signature that is present
+/// and still accepts an unsigned request.
+/// [`Self::AllowUnsignedForCompatibility`] does not verify a present signature.
+/// The accept combination is classified in
+/// `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AuthnRequestValidationPolicy {
     /// Reject unsigned AuthnRequests.
-    ///
-    /// Optional inbound capability for the identity provider.
     RequireSigned,
     /// Accept an unsigned AuthnRequest and verify a signature that is present.
-    ///
-    /// Verifying a present signature is mandatory for the identity provider
-    /// (Core §3.2.1). Requiring a signature stays off.
     AllowUnsignedVerifyIfPresent,
-    /// Accept unsigned AuthnRequests without verifying a signature that is
-    /// present.
-    ///
-    /// Samlify-port hatch for the mandatory present-signature check.
-    ///
-    /// A caller leaving the raw API keeps this behavior through
-    /// [`IdpValidationPolicy::compatibility`].
+    /// Accept unsigned AuthnRequests without verifying a signature that is present.
     #[default]
     AllowUnsignedForCompatibility,
 }
@@ -154,38 +111,23 @@ pub enum LogoutSignaturePolicy {
 
 /// Whether an accepting service provider evaluates `<AudienceRestriction>`.
 ///
-/// Core §2.5.1.4, as clarified by Approved Errata 05 E46, makes an audience
-/// restriction Valid only when the relying party is a member of one of its
-/// audiences, and multiple restrictions form a conjunction. Core §2.5.1.1
-/// says the relying party must reject an assertion whose conditions are
-/// Invalid or Indeterminate. That is a mandatory inbound rule for the
-/// accepting service provider when a restriction is present.
-/// [`Self::EvaluatePresentRestrictions`] enforces that rule.
-/// [`Self::Validate`] also rejects a bearer assertion that omits the
-/// element. Errata 05 E26 (Profiles §4.1.4.2) requires the identity provider
-/// to include one. Core condition processing does not make that omission
-/// Invalid, so the extra rejection is library hardening.
-/// [`Self::SkipForCompatibility`] skips the check. It is the samlify-port
-/// hatch, not the named relaxation of a recommendation.
+/// [`Self::EvaluatePresentRestrictions`] checks restrictions that are present.
+/// [`Self::Validate`] also rejects a bearer assertion that omits one.
+/// [`Self::SkipForCompatibility`] skips the check. The accept combination is
+/// classified in `docs/conformance/web-browser-sso-acceptance.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AudienceValidationPolicy {
-    /// Evaluate audience restrictions and reject a bearer assertion that
-    /// omits one.
+    /// Evaluate audience restrictions and reject a bearer assertion that omits one.
     ///
-    /// The present-restriction check is mandatory. Rejecting an omission is
-    /// library hardening. [`SpValidationPolicy::strict`] keeps this variant.
+    /// Rejecting the omission is library hardening. [`SpValidationPolicy::strict`]
+    /// keeps this variant.
     #[default]
     Validate,
     /// Evaluate `<AudienceRestriction>` elements that are present.
     ///
-    /// Mandatory inbound rule for the accepting service provider when a
-    /// restriction is present (Core §2.5.1.1 and §2.5.1.4, Errata 05 E46).
     /// A bearer assertion that omits the element is not rejected.
     EvaluatePresentRestrictions,
     /// Skip audience evaluation, preserving the samlify port.
-    ///
-    /// Samlify-port hatch for the mandatory audience check. A caller leaving
-    /// the raw API keeps this through [`SpValidationPolicy::compatibility`].
     SkipForCompatibility,
 }
 

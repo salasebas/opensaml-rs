@@ -689,25 +689,10 @@ pub fn verify_signature_with_limits(
         have_key = true;
         let mut manager = KeysManager::new();
         manager.add_key(key);
-        // Trust model (audited against bergshamra 0.8.0):
-        // - Metadata certificates are pinned key material, not a public CA
-        //   chain. Verification uses only the metadata-pinned key; inline
-        //   KeyInfo (X509Certificate/KeyValue) is never imported as key
-        //   material.
-        // - Set `trusted_keys_only`, `strict_verification`,
-        //   `require_reference_digests`, and `hmac_min_out_len` explicitly
-        //   instead of relying on upstream defaults.
-        // - `strict_verification`: same-document references must target the
-        //   document element, an ancestor, or a sibling of the Signature (XSW
-        //   guard); the surrounding preflight and result checks reject
-        //   external or unresolved SAML references.
-        // - `with_insecure(true)`: intentionally skips Bergshamra's X.509
-        //   certificate validation (chain/trust/time), which is irrelevant to
-        //   our leaf-key pinning model. `trusted_keys_only` still confines
-        //   verification to metadata-pinned keys, and this setting does not
-        //   skip signature, digest, reference, duplicate-ID, or XSW checks.
-        // - Inbound SAML verification must never use
-        //   `DsigContext::new_permissive()`.
+        // Metadata certificates are the only verification keys. Inline KeyInfo
+        // is not imported. `with_insecure(true)` skips X.509 chain and time
+        // checks only; signature, digest, reference, duplicate-ID, and XSW
+        // checks stay on. Do not replace this with `DsigContext::new_permissive()`.
         let ctx = DsigContext::new(manager)
             .with_trusted_keys_only(true)
             .with_strict_verification(true)
