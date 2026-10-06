@@ -241,7 +241,7 @@ fn verified_root_content(
 }
 
 /// The response signature covers every assertion, or every assertion is signed.
-/// An unsigned sibling is a wrapping attempt.
+/// An unsigned sibling is rejected.
 fn assertion_has_bearer_confirmation(assertion: &Node) -> bool {
     const BEARER: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
     assertion

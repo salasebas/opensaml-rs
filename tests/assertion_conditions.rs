@@ -5,22 +5,27 @@
     feature = "crypto-fips"
 ))]
 
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use saml_rs::binding::{base64_decode, base64_encode};
+use saml_rs::constants::name_id_format::{PERSISTENT, UNSPECIFIED};
 use saml_rs::constants::signature_algorithm::RSA_SHA256;
-use saml_rs::crypto::{construct_saml_signature, keys::load_private_key};
+use saml_rs::crypto::{
+    construct_message_signature, construct_saml_signature, keys::load_private_key,
+};
 use saml_rs::{
     AcsEndpoint, AuthnRequest, BrowserInput, CertificatePem, Credentials, EntityId, FormField,
     IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId, Outbound,
-    PendingAuthnRequest, PrivateKeyPem, ReplayPolicy, RespondSso, Saml, SamlError,
-    SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse,
-    SsoSession, StartSso, Subject,
+    PendingAuthnRequest, PrivateKeyPem, ReplayCache, ReplayKey, ReplayPolicy, RespondSso, Saml,
+    SamlError, SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint,
+    SsoResponse, SsoSession, StartSso, Subject,
 };
 
 const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
 const IDP_ENTITY_ID: &str = "https://idp.example.com/metadata";
 const SP_ACS_POST: &str = "https://sp.example.com/acs/post";
+const SP_ACS_SIMPLE: &str = "https://sp.example.com/acs/simple";
 const IDP_SSO_POST: &str = "https://idp.example.com/sso/post";
 const OTHER_AUDIENCE: &str = "https://other.example/metadata";
 const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
@@ -43,6 +48,22 @@ fn credentials() -> Credentials {
 
 fn validation() -> SamlValidationContext<'static> {
     SamlValidationContext::new(SystemTime::now(), ReplayPolicy::DisabledForCompatibility)
+}
+
+#[derive(Default)]
+struct MemoryReplayCache {
+    seen: HashMap<String, SystemTime>,
+}
+
+impl ReplayCache for MemoryReplayCache {
+    fn check_and_store(&mut self, key: ReplayKey, expires_at: SystemTime) -> Result<(), SamlError> {
+        let cache_key = key.cache_key();
+        if self.seen.contains_key(&cache_key) {
+            return Err(SamlError::ReplayDetected { key: cache_key });
+        }
+        self.seen.insert(cache_key, expires_at);
+        Ok(())
+    }
 }
 
 fn subject() -> Subject {
@@ -225,23 +246,163 @@ fn assertion_ids(xml: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
 }
 
 fn accept(exchange: &Exchange, xml: &str) -> Result<SsoSession, Box<dyn std::error::Error>> {
+    accept_with(exchange, xml, validation())
+}
+
+fn accept_with<'a>(
+    exchange: &Exchange,
+    xml: &str,
+    validation: SamlValidationContext<'a>,
+) -> Result<SsoSession, Box<dyn std::error::Error>> {
     let fields = fields_with_xml(exchange.response_fields.clone(), xml)?;
     let input = BrowserInput::<SsoResponse>::post(fields);
     if let Some(pending) = &exchange.pending {
-        return Ok(exchange.sp.finish_sso(
-            &exchange.idp_descriptor,
-            pending,
-            input,
-            validation(),
-        )?);
+        return Ok(exchange
+            .sp
+            .finish_sso(&exchange.idp_descriptor, pending, input, validation)?);
     }
     Ok(exchange
         .sp
-        .accept_unsolicited_sso(&exchange.idp_descriptor, input, validation())?)
+        .accept_unsolicited_sso(&exchange.idp_descriptor, input, validation)?)
 }
 
 fn resigned(xml: &str) -> Result<String, Box<dyn std::error::Error>> {
     resign_response(xml)
+}
+
+fn replace_element_id(
+    xml: &str,
+    element: &str,
+    new_id: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let start = xml.find(element).ok_or("missing element")?;
+    let id_at = xml[start..].find("ID=\"").ok_or("missing element ID")? + start;
+    let value_start = id_at + "ID=\"".len();
+    let value_end = xml[value_start..]
+        .find('"')
+        .ok_or("unterminated element ID")?
+        + value_start;
+    let mut altered = xml.to_string();
+    altered.replace_range(value_start..value_end, new_id);
+    Ok(altered)
+}
+
+fn set_name_id_format(
+    xml: &str,
+    index: usize,
+    format: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut rest = xml;
+    let mut offset = 0;
+    for _ in 0..index {
+        let start = rest.find("<saml:NameID").ok_or("missing NameID")?;
+        let end = rest[start..].find('>').ok_or("unterminated NameID")? + start;
+        offset += end + 1;
+        rest = &xml[offset..];
+    }
+    let start = xml[offset..].find("<saml:NameID").ok_or("missing NameID")? + offset;
+    let end = xml[start..].find('>').ok_or("unterminated NameID")? + start;
+    let opening = xml[start..=end].to_string();
+    let replaced = match (opening.find(" Format=\""), format) {
+        (Some(format_at), Some(format)) => {
+            let value_start = format_at + " Format=\"".len();
+            let value_end = opening[value_start..]
+                .find('"')
+                .ok_or("unterminated Format")?
+                + value_start;
+            let mut opening = opening;
+            opening.replace_range(value_start..value_end, format);
+            opening
+        }
+        (Some(format_at), None) => {
+            let value_start = format_at + " Format=\"".len();
+            let value_end = opening[value_start..]
+                .find('"')
+                .ok_or("unterminated Format")?
+                + value_start
+                + 1;
+            let mut opening = opening;
+            opening.replace_range(format_at..value_end, "");
+            opening
+        }
+        (None, Some(format)) => {
+            opening.replace("<saml:NameID", &format!("<saml:NameID Format=\"{format}\""))
+        }
+        (None, None) => opening,
+    };
+    let mut altered = xml.to_string();
+    altered.replace_range(start..=end, &replaced);
+    Ok(altered)
+}
+
+fn simple_sign_fields(
+    fields: &[FormField],
+    xml: &str,
+) -> Result<Vec<FormField>, Box<dyn std::error::Error>> {
+    let sig_alg = fields
+        .iter()
+        .find(|field| field.name() == "SigAlg")
+        .map(FormField::value)
+        .ok_or("missing SigAlg")?;
+    let relay_state = fields
+        .iter()
+        .find(|field| field.name() == "RelayState")
+        .map(FormField::value);
+    let octet = match relay_state {
+        Some(relay_state) => {
+            format!("SAMLResponse={xml}&RelayState={relay_state}&SigAlg={sig_alg}")
+        }
+        None => format!("SAMLResponse={xml}&SigAlg={sig_alg}"),
+    };
+    let key = load_private_key(PRIVKEY, None)?;
+    let signature = construct_message_signature(&octet, &key, sig_alg)?;
+    let mut signed = vec![
+        FormField::new("SAMLResponse", base64_encode(xml.as_bytes())),
+        FormField::new("SigAlg", sig_alg),
+        FormField::new("Signature", signature),
+    ];
+    if let Some(relay_state) = relay_state {
+        signed.insert(1, FormField::new("RelayState", relay_state));
+    }
+    Ok(signed)
+}
+
+fn exchange_simple_sign() -> Result<Exchange, Box<dyn std::error::Error>> {
+    let sp = Saml::sp(
+        SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+            .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?.mark_default())
+            .acs_endpoint(AcsEndpoint::simple_sign(SP_ACS_SIMPLE)?)
+            .credentials(credentials())
+            .validation(SpValidationPolicy::recommended())
+            .build()?,
+    )?;
+    let idp = Saml::idp(
+        IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+            .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
+            .credentials(credentials())
+            .validation(IdpValidationPolicy::recommended())
+            .build()?,
+    )?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let response = idp.initiate_sso(&sp_descriptor, subject(), RespondSso::simple_sign())?;
+    Ok(Exchange {
+        sp,
+        idp_descriptor,
+        pending: None,
+        response_fields: post_fields(&response)?,
+    })
+}
+
+fn accept_simple_sign(
+    exchange: &Exchange,
+    xml: &str,
+) -> Result<SsoSession, Box<dyn std::error::Error>> {
+    let fields = simple_sign_fields(&exchange.response_fields, xml)?;
+    Ok(exchange.sp.accept_unsolicited_sso(
+        &exchange.idp_descriptor,
+        BrowserInput::<SsoResponse>::simple_sign(fields),
+        validation(),
+    )?)
 }
 
 #[cfg(feature = "crypto-rustcrypto")]
@@ -640,4 +801,89 @@ fn accept_unsolicited_sso_rejects_a_different_principal() -> Result<(), Box<dyn 
         },
         Ok(_) => Err("expected PrincipalMismatch".into()),
     }
+}
+
+#[test]
+fn an_omitted_name_id_format_matches_unspecified() -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = exchange_for(SpValidationPolicy::recommended(), false)?;
+    let duplicated = duplicate_assertion(
+        &response_xml(&exchange.response_fields)?,
+        "_second_assertion",
+    )?;
+    let xml = resigned(&set_name_id_format(
+        &set_name_id_format(&duplicated, 0, Some(UNSPECIFIED))?,
+        1,
+        None,
+    )?)?;
+    let session = accept(&exchange, &xml)?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    Ok(())
+}
+
+#[test]
+fn a_different_name_id_format_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = exchange_for(SpValidationPolicy::recommended(), false)?;
+    let xml = resigned(&set_name_id_format(
+        &duplicate_assertion(
+            &response_xml(&exchange.response_fields)?,
+            "_second_assertion",
+        )?,
+        1,
+        Some(PERSISTENT),
+    )?)?;
+    match accept(&exchange, &xml) {
+        Err(error) => match error.downcast_ref::<SamlError>() {
+            Some(SamlError::PrincipalMismatch) => Ok(()),
+            _ => Err(format!("expected PrincipalMismatch, got {error}").into()),
+        },
+        Ok(_) => Err("expected PrincipalMismatch".into()),
+    }
+}
+
+#[test]
+fn replay_stores_every_assertion_identifier() -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = exchange_for(SpValidationPolicy::recommended(), false)?;
+    let original = response_xml(&exchange.response_fields)?;
+    let xml = resigned(&duplicate_assertion(&original, "_second_assertion")?)?;
+    let mut cache = MemoryReplayCache::default();
+    accept_with(
+        &exchange,
+        &xml,
+        SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(&mut cache)),
+    )?;
+    if !cache.seen.contains_key("assertion_id:_second_assertion") {
+        return Err("second assertion identifier was not stored".into());
+    }
+
+    let reused = resigned(&replace_element_id(
+        &replace_element_id(&original, "<saml:Assertion", "_second_assertion")?,
+        "<samlp:Response",
+        "_other_response",
+    )?)?;
+    match accept_with(
+        &exchange,
+        &reused,
+        SamlValidationContext::new(SystemTime::now(), ReplayPolicy::RequireCache(&mut cache)),
+    ) {
+        Err(error) => match error.downcast_ref::<SamlError>() {
+            Some(SamlError::ReplayDetected { key }) if key == "assertion_id:_second_assertion" => {
+                Ok(())
+            }
+            _ => Err(format!("expected ReplayDetected, got {error}").into()),
+        },
+        Ok(_) => Err("expected ReplayDetected".into()),
+    }
+}
+
+#[test]
+fn several_assertions_are_accepted_over_simple_sign() -> Result<(), Box<dyn std::error::Error>> {
+    let exchange = exchange_simple_sign()?;
+    let xml = duplicate_assertion(
+        &response_xml(&exchange.response_fields)?,
+        "_second_assertion",
+    )?;
+    let session = accept_simple_sign(&exchange, &xml)?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    assert_ne!(session.assertion_id().as_str(), "_second_assertion");
+    Ok(())
 }

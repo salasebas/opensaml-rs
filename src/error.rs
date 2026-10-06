@@ -210,7 +210,7 @@ pub enum SamlError {
     /// Assertions in one response do not share one principal.
     ///
     /// The comparison is `NameID` value, `Format`, `NameQualifier`, and
-    /// `SPNameQualifier`.
+    /// `SPNameQualifier`. An omitted `Format` is unspecified.
     #[error("assertions do not refer to one principal")]
     PrincipalMismatch,
     /// Response carried a non-success SAML status code.

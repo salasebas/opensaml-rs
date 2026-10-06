@@ -319,12 +319,7 @@ fn decode_message(
 }
 
 fn assertion_shortcut(xml: &str, limits: XmlLimits) -> Result<Option<String>, SamlError> {
-    let field = ExtractorField::new("assertion", &["Response", "Assertion"]).with_context();
-    Ok(
-        extract_with_limits(xml, std::slice::from_ref(&field), limits)?
-            .get_str("assertion")
-            .map(str::to_string),
-    )
+    crate::assertion_acceptance::first_login_assertion_xml(xml, limits)
 }
 
 #[cfg(any(

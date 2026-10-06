@@ -14,7 +14,8 @@ use crate::xml::dom::{self, Node};
 use crate::xml::{extract_with_limits, fields, ExtractorField, XmlLimits};
 use quick_xml::events::Event;
 use quick_xml::reader::NsReader;
-use time::Duration;
+use time::format_description::well_known::Rfc3339;
+use time::{Duration, OffsetDateTime};
 
 const BEARER_SUBJECT_CONFIRMATION_METHOD: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
@@ -28,7 +29,7 @@ enum ElementNamespace {
 #[derive(Debug, PartialEq, Eq)]
 struct Principal {
     name_id: String,
-    format: Option<String>,
+    format: String,
     name_qualifier: Option<String>,
     sp_name_qualifier: Option<String>,
 }
@@ -132,27 +133,115 @@ pub(crate) fn reject_unsolicited_bearer_in_response_to(
     Ok(())
 }
 
+/// Source of the first bearer `<Assertion>`, or the first `<Assertion>`.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when `xml` cannot be parsed under `limits`.
+pub(crate) fn first_login_assertion_xml(
+    xml: &str,
+    limits: XmlLimits,
+) -> Result<Option<String>, SamlError> {
+    let document = dom::parse_with_limits(xml, limits)?;
+    let assertions = direct_assertions(&document.root);
+    let Some(chosen) = assertions
+        .iter()
+        .find(|assertion| node_has_bearer(assertion))
+        .copied()
+        .or_else(|| assertions.first().copied())
+    else {
+        return Ok(None);
+    };
+    Ok(Some(xml[chosen.start..chosen.end].to_string()))
+}
+
+/// Replay identity of one direct assertion in an already accepted response.
+pub(crate) struct AssertionReplayId {
+    /// Assertion `ID`.
+    pub id: String,
+    /// Bearer `SubjectConfirmationData@NotOnOrAfter`, when that confirmation has one.
+    pub bearer_not_on_or_after: Option<String>,
+}
+
+/// Direct assertion identifiers in an already accepted response.
+///
+/// # Errors
+///
+/// Returns [`SamlError`] when `xml` cannot be parsed.
+pub(crate) fn assertion_replays(xml: &str) -> Result<Vec<AssertionReplayId>, SamlError> {
+    let document = dom::parse_with_limits(xml, XmlLimits::unbounded())?;
+    let nodes = if document.root.local_name == "Assertion" {
+        vec![&document.root]
+    } else {
+        direct_assertions(&document.root)
+    };
+    Ok(nodes
+        .into_iter()
+        .filter_map(|assertion| {
+            Some(AssertionReplayId {
+                id: assertion.attr("ID")?.to_string(),
+                bearer_not_on_or_after: latest_bearer_not_on_or_after(assertion),
+            })
+        })
+        .collect())
+}
+
 /// Assertion `ID` values in document order.
 ///
-/// Returns an empty list when `xml` is not a response this parser can read.
-pub(crate) fn assertion_ids(xml: &str) -> Vec<String> {
-    let mut limits = XmlLimits::default();
-    limits.max_bytes = limits.max_bytes.max(xml.len());
-    limits.max_text_bytes = limits.max_text_bytes.max(xml.len());
-    let Ok(document) = dom::parse_with_limits(xml, limits) else {
-        return Vec::new();
-    };
-    if document.root.local_name == "Assertion" {
-        return document
-            .root
-            .attr("ID")
-            .map(|id| vec![id.to_string()])
-            .unwrap_or_default();
-    }
-    direct_assertions(&document.root)
+/// # Errors
+///
+/// Returns [`SamlError`] when `xml` cannot be parsed.
+pub(crate) fn assertion_ids(xml: &str) -> Result<Vec<String>, SamlError> {
+    Ok(assertion_replays(xml)?
         .into_iter()
-        .filter_map(|assertion| assertion.attr("ID").map(str::to_string))
-        .collect()
+        .map(|replay| replay.id)
+        .collect())
+}
+
+fn node_has_bearer(assertion: &Node) -> bool {
+    assertion
+        .children
+        .iter()
+        .filter(|child| child.local_name == "Subject")
+        .flat_map(|subject| subject.children.iter())
+        .filter(|child| child.local_name == "SubjectConfirmation")
+        .any(|confirmation| confirmation.attr("Method") == Some(BEARER_SUBJECT_CONFIRMATION_METHOD))
+}
+
+fn latest_bearer_not_on_or_after(assertion: &Node) -> Option<String> {
+    let mut latest: Option<(OffsetDateTime, String)> = None;
+    let mut unparsed = None;
+    for confirmation in assertion
+        .children
+        .iter()
+        .filter(|child| child.local_name == "Subject")
+        .flat_map(|subject| subject.children.iter())
+        .filter(|child| child.local_name == "SubjectConfirmation")
+    {
+        if confirmation.attr("Method") != Some(BEARER_SUBJECT_CONFIRMATION_METHOD) {
+            continue;
+        }
+        let Some(value) = confirmation
+            .children
+            .iter()
+            .find(|child| child.local_name == "SubjectConfirmationData")
+            .and_then(|data| data.attr("NotOnOrAfter"))
+        else {
+            continue;
+        };
+        match OffsetDateTime::parse(value, &Rfc3339) {
+            Ok(instant) => {
+                let replace = latest
+                    .as_ref()
+                    .is_none_or(|(current, _)| *current < instant);
+                if replace {
+                    latest = Some((instant, value.to_string()));
+                }
+            }
+            Err(_) => unparsed = Some(value.to_string()),
+        }
+    }
+    latest.map(|(_, value)| value).or(unparsed)
 }
 
 fn direct_assertions(root: &Node) -> Vec<&Node> {
@@ -223,7 +312,10 @@ fn principal_of(assertion: &Node) -> Result<Principal, SamlError> {
     };
     Ok(Principal {
         name_id: name_id.text.clone(),
-        format: name_id.attr("Format").map(str::to_string),
+        format: name_id
+            .attr("Format")
+            .map(str::to_string)
+            .unwrap_or_else(|| crate::constants::name_id_format::UNSPECIFIED.to_string()),
         name_qualifier: name_id.attr("NameQualifier").map(str::to_string),
         sp_name_qualifier: name_id.attr("SPNameQualifier").map(str::to_string),
     })
