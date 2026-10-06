@@ -389,10 +389,10 @@ pub use metadata::MetadataSignatureVerification;
 pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
     ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, MessageId, NameId,
-    NameIdCreationRequest, NameIdPolicy, Received, RelayState, RelayStateParam, ReplayCache,
-    ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex, SsoResponse,
-    SsoSession, Status, Subject, SubjectConfirmation, SubordinateStatusCode, TopLevelStatusCode,
-    VerifiedXmlSignature, VerifiedXmlSignatureCoverage, MAX_RELAY_STATE_BYTES,
+    NameIdCreationRequest, NameIdPolicy, OutstandingLogout, Received, RelayState, RelayStateParam,
+    ReplayCache, ReplayKey, ReplayPolicy, SamlInstant, SamlValidationContext, SessionIndex,
+    SsoResponse, SsoSession, Status, Subject, SubjectConfirmation, SubordinateStatusCode,
+    TopLevelStatusCode, VerifiedXmlSignature, VerifiedXmlSignatureCoverage, MAX_RELAY_STATE_BYTES,
 };
 #[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;

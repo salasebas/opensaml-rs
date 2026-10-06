@@ -98,6 +98,10 @@ Rules:
   carries RelayState, fail unless the samlify-port Compatibility preset permits it.
 - `finish_sso` must use caller-owned `now`, clock skew, and replay policy.
 - `finish_sso` must not accept unsolicited responses.
+- `finish_sso_with_outstanding_logout` applies a caller-supplied outstanding
+  logout. `finish_sso` omits that check. The library does not keep a session
+  store. The acceptance rule is in
+  `docs/conformance/web-browser-sso-acceptance.md`.
 
 ## IdP-Initiated Login
 
@@ -129,6 +133,8 @@ Rules:
 - This method should reject responses with non-empty `InResponseTo`.
 - The name must stay explicit. Avoid generic `parse_login_response` as the
   typed default.
+- `accept_unsolicited_sso_with_outstanding_logout` applies that same logout.
+  `accept_unsolicited_sso` omits it.
 
 ## IdP Receiving AuthnRequest
 
