@@ -168,8 +168,9 @@
 //! applies no library-selected maximum age to it. Optional UTC
 //! `NotOnOrAfter` values are rejected at their skew-adjusted exclusive
 //! deadline as a fail-closed saml-rs policy, not an OASIS receiver `MUST`.
-//! [`ClockSkew`] controls that tolerance, and replay storage uses the same
-//! effective deadline when it is present.
+//! A new [`SamlValidationContext`] allows five minutes of skew on that
+//! deadline. [`ClockSkew::strict`] keeps the tolerance at zero, and replay
+//! storage uses the same effective deadline when it is present.
 //!
 //! ```no_run
 //! use saml_rs::{
@@ -247,9 +248,11 @@
 //! accept unsigned metadata with
 //! [`MetadataTrustPolicy::UnsignedForCompatibility`] to preserve a samlify-port
 //! or raw import, or require a signature from caller-provided certificates with
-//! [`MetadataTrustPolicy::RequireSignature`]. Prefer signed metadata with pinned
-//! certificates for production trust decisions; the crate does not treat the
-//! public web PKI CA store as SAML metadata trust.
+//! [`MetadataTrustPolicy::RequireSignature`].
+//! [`MetadataTrustPolicy::RequireSignatureAllowingOtherCanonicalization`]
+//! also accepts inclusive canonicalization. Prefer signed metadata with
+//! pinned certificates for production trust decisions; the crate does not treat
+//! the public web PKI CA store as SAML metadata trust.
 //!
 //! # Raw samlify-port API
 //!
@@ -386,10 +389,11 @@ pub use metadata::MetadataSignatureVerification;
 pub use model::{
     Assertion, AssertionId, Attribute, AttributeValue, Attributes, AuthnRequest, AuthnSession,
     ClockSkew, LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject, MessageId, NameId,
-    NameIdCreationRequest, NameIdPolicy, Received, RelayState, RelayStateParam, ReplayCache,
-    ReplayKey, ReplayPolicy, RequestedSubject, RequestedSubjectIdentifier, SamlInstant,
-    SamlValidationContext, SessionIndex, SsoResponse, SsoSession, Subject, SubjectConfirmation,
-    VerifiedXmlSignature, VerifiedXmlSignatureCoverage, MAX_RELAY_STATE_BYTES,
+    NameIdCreationRequest, NameIdPolicy, OutstandingLogout, Received, RelayState, RelayStateParam,
+    ReplayCache, ReplayKey, ReplayPolicy, RequestedSubject, RequestedSubjectIdentifier,
+    SamlInstant, SamlValidationContext, SessionIndex, SsoResponse, SsoSession, Status, Subject,
+    SubjectConfirmation, SubordinateStatusCode, TopLevelStatusCode, VerifiedXmlSignature,
+    VerifiedXmlSignatureCoverage, MAX_RELAY_STATE_BYTES,
 };
 #[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;

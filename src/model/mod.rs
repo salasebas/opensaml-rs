@@ -8,10 +8,12 @@ mod endpoint;
 mod extract;
 mod identifiers;
 mod logout;
+mod outstanding_logout;
 mod received;
 mod relay;
 mod session;
 mod sso;
+mod status;
 mod subject;
 mod validation;
 
@@ -23,12 +25,14 @@ pub use authn::{AuthnRequest, ForceAuthn, IsPassive};
 pub use endpoint::EndpointUrl;
 pub use identifiers::{AssertionId, MessageId, SamlInstant, SessionIndex};
 pub use logout::{LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject};
+pub use outstanding_logout::OutstandingLogout;
 pub use received::Received;
 pub use relay::{RelayState, RelayStateParam, MAX_RELAY_STATE_BYTES};
 pub use session::AuthnSession;
 pub use sso::{
     Assertion, SsoResponse, SsoSession, VerifiedXmlSignature, VerifiedXmlSignatureCoverage,
 };
+pub use status::{Status, SubordinateStatusCode, TopLevelStatusCode};
 pub use subject::{
     NameId, NameIdCreationRequest, NameIdPolicy, RequestedSubject, RequestedSubjectIdentifier,
     Subject, SubjectConfirmation,

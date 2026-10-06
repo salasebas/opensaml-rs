@@ -221,6 +221,10 @@ pub enum SamlError {
         /// Stable validation reason for callers and logs.
         reason: SubjectConfirmationReason,
     },
+    /// A later assertion matches an outstanding logout that is still before
+    /// `NotOnOrAfter`.
+    #[error("assertion matches an outstanding logout")]
+    AssertionMatchesOutstandingLogout,
     /// A duplicate SAML message or assertion key was detected.
     #[error("replayed SAML message or assertion: {key}")]
     ReplayDetected {
