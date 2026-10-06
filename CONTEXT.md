@@ -35,6 +35,12 @@ The protocol participant operating the endpoint at which a SAML message was
 received.
 _Avoid_: Parser, XML consumer
 
+**Outstanding logout**:
+A `LogoutRequest` the actual recipient has accepted and that is still before
+its `NotOnOrAfter`, for one principal and session. A later assertion for that
+same principal and session is not accepted.
+_Avoid_: session store, revoked cookie
+
 **Validation preset**:
 A named bundle of validation choices. The presets are Compatibility and
 Recommended.
