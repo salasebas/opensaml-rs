@@ -19,7 +19,7 @@ pub(crate) use extract::authn_statement_not_on_or_after_values;
 pub(crate) use session::earliest_authn_session_expiration;
 
 pub use attributes::{Attribute, AttributeValue, Attributes};
-pub use authn::AuthnRequest;
+pub use authn::{AuthnRequest, ForceAuthn, IsPassive};
 pub use endpoint::EndpointUrl;
 pub use identifiers::{AssertionId, MessageId, SamlInstant, SessionIndex};
 pub use logout::{LogoutCompleted, LogoutRequest, LogoutResponse, LogoutSubject};
@@ -29,5 +29,8 @@ pub use session::AuthnSession;
 pub use sso::{
     Assertion, SsoResponse, SsoSession, VerifiedXmlSignature, VerifiedXmlSignatureCoverage,
 };
-pub use subject::{NameId, NameIdCreationRequest, NameIdPolicy, Subject, SubjectConfirmation};
+pub use subject::{
+    NameId, NameIdCreationRequest, NameIdPolicy, RequestedSubject, RequestedSubjectIdentifier,
+    Subject, SubjectConfirmation,
+};
 pub use validation::{ClockSkew, ReplayCache, ReplayKey, ReplayPolicy, SamlValidationContext};

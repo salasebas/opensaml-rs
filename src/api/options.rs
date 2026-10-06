@@ -2,23 +2,7 @@ use crate::browser::{LogoutBinding, SsoRequestBinding, SsoResponseBinding};
 use crate::model::RelayStateParam;
 use crate::sp::WebBrowserSsoProducer;
 
-/// Explicit `ForceAuthn` value for outbound AuthnRequests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ForceAuthn {
-    /// Emit `ForceAuthn="true"`.
-    Required,
-    /// Emit `ForceAuthn="false"`.
-    NotRequired,
-}
-
-impl ForceAuthn {
-    pub(super) fn as_bool(self) -> bool {
-        match self {
-            Self::Required => true,
-            Self::NotRequired => false,
-        }
-    }
-}
+pub use crate::model::{ForceAuthn, IsPassive};
 
 /// Options for starting SP-initiated Web SSO.
 #[derive(Debug, Clone)]
