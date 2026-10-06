@@ -34,10 +34,6 @@ Create a GitHub issue in `salasebas/saml-rs`.
 
 Run `gh issue view <number> --comments`.
 
-When the ticket is a parent spec, read its sub-issues and the matching page
-in `docs/conformance/` before editing. Where the issue body and that page
-disagree, the page and the code are the current behavior.
-
 ## Wayfinding operations
 
 Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
