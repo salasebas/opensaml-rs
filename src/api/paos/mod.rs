@@ -384,11 +384,11 @@ impl Saml<Sp> {
     ///
     /// # Examples
     ///
-    /// The builders start on [`SpValidationPolicy::recommended`] and
-    /// [`IdpValidationPolicy::recommended`]. This example passes
-    /// [`SpValidationPolicy::compatibility`] and
-    /// [`IdpValidationPolicy::compatibility`] so it builds without a crypto
-    /// provider.
+    /// The builders start on [`crate::SpValidationPolicy::recommended`] and
+    /// [`crate::IdpValidationPolicy::recommended`]. This example passes
+    /// [`crate::SpValidationPolicy::compatibility`] and
+    /// [`crate::IdpValidationPolicy::compatibility`] so it builds without a
+    /// crypto provider.
     ///
     /// ```
     /// use saml_rs::{
