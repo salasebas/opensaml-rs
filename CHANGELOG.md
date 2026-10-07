@@ -9,6 +9,21 @@ Entries before the rebrand use the package names that were current at the time.
 
 ## Unreleased
 
+## [0.6.1](https://github.com/salasebas/saml-rs/compare/v0.6.0...v0.6.1) - 2026-10-07
+
+### Added
+
+- *(security)* add an opt-in AuthnRequest IssueInstant age policy ([#178](https://github.com/salasebas/saml-rs/pull/178))
+
+### Fixed
+
+- *(api)* append AuthnRequestIssueInstant on TimeWindowField ([#185](https://github.com/salasebas/saml-rs/pull/185))
+
+### Other
+
+- warn that the following release removes strict() ([#182](https://github.com/salasebas/saml-rs/pull/182))
+- stop publishing the deprecated rustsaml crate ([#179](https://github.com/salasebas/saml-rs/pull/179))
+
 ## [0.6.0](https://github.com/salasebas/saml-rs/compare/v0.5.3...v0.6.0) - 2026-10-06
 
 ### Added
