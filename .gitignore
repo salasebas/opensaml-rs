@@ -16,6 +16,7 @@ temp/
 
 # Local agent / editor tooling (not part of the project)
 .agents/
+.claude
 .cursor/
 .kiro/
 skills-lock.json
