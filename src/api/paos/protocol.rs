@@ -9,6 +9,7 @@ use crate::xml::XmlLimits;
 pub(super) const PAOS_VERSION: &str = "urn:liberty:paos:2003-08";
 pub(super) const ECP_PROFILE: &str = "urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp";
 pub(super) const PAOS_MEDIA_TYPE: &str = "application/vnd.paos+xml";
+pub(super) const PAOS_BINDING: &str = "urn:oasis:names:tc:SAML:2.0:bindings:PAOS";
 pub(super) const SOAP_MEDIA_TYPE: &str = "text/xml; charset=utf-8";
 const SOAP_ACTOR_NEXT: &str = "http://schemas.xmlsoap.org/soap/actor/next";
 const SOAP_ENVELOPE_NS: &str = "http://schemas.xmlsoap.org/soap/envelope/";
@@ -146,13 +147,13 @@ pub(super) fn read_soap_body(
     limits: XmlLimits,
 ) -> Result<SoapBody, SamlError> {
     let document = parse_with_limits(envelope_xml, limits)?;
-    let (root_is_soap_envelope, child_is_soap) = soap_direct_children(envelope_xml)?;
-    if document.root.local_name != "Envelope" || !root_is_soap_envelope {
+    let scan = scan_envelope(envelope_xml)?;
+    if document.root.local_name != "Envelope" || !scan.root_is_soap_envelope {
         return Err(SamlError::ProtocolProfile(
             "SOAP message must be an Envelope".into(),
         ));
     }
-    if child_is_soap.len() != document.root.children.len() {
+    if scan.child_is_soap.len() != document.root.children.len() {
         return Err(SamlError::Xml(
             "SOAP child count did not match the envelope".into(),
         ));
@@ -161,7 +162,7 @@ pub(super) fn read_soap_body(
     // Body. Anything else is not this profile's exchange.
     let mut saw_header = false;
     let mut saw_body = false;
-    for (node, is_soap) in document.root.children.iter().zip(&child_is_soap) {
+    for (node, is_soap) in document.root.children.iter().zip(&scan.child_is_soap) {
         if !is_soap || (node.local_name != "Header" && node.local_name != "Body") {
             return Err(SamlError::ProtocolProfile(
                 "SOAP envelope must contain only a Header and a Body".into(),
@@ -182,10 +183,9 @@ pub(super) fn read_soap_body(
             saw_body = true;
         }
     }
-    let body = soap_child(&document.root, &child_is_soap, "Body")
+    let body = soap_child(&document.root, &scan.child_is_soap, "Body")
         .ok_or_else(|| SamlError::ProtocolProfile("SOAP envelope is missing a Body".into()))?;
-    let elements: Vec<&Node> = body.children.iter().collect();
-    let [element] = elements.as_slice() else {
+    let [element] = body.children.as_slice() else {
         return Err(SamlError::ProtocolProfile(format!(
             "SOAP body must contain one {element_name}"
         )));
@@ -195,14 +195,22 @@ pub(super) fn read_soap_body(
             "SOAP body must contain one {element_name}"
         )));
     }
-    if !soap_body_child_in_protocol_namespace(envelope_xml, elements.len())? {
-        return Err(SamlError::ProtocolProfile(format!(
-            "SOAP body element must use the {PROTOCOL_NS} namespace"
-        )));
+    match scan.body_child_in_protocol.as_slice() {
+        [true] => {}
+        [false] => {
+            return Err(SamlError::ProtocolProfile(format!(
+                "SOAP body element must use the {PROTOCOL_NS} namespace"
+            )));
+        }
+        _ => {
+            return Err(SamlError::Xml(
+                "SAML element count did not match the SOAP body".into(),
+            ));
+        }
     }
-    let element_xml = xml_slice(envelope_xml, element)?.to_string();
-    let relay_state = match soap_child(&document.root, &child_is_soap, "Header") {
-        Some(header) => relay_state_header(envelope_xml, header)?,
+    let element_xml = scan.with_inherited_namespaces(xml_slice(envelope_xml, element)?)?;
+    let relay_state = match soap_child(&document.root, &scan.child_is_soap, "Header") {
+        Some(header) => relay_state_header(header, &scan.relay_state_in_ecp)?,
         None => RelayStateParam::absent(),
     };
     Ok(SoapBody {
@@ -217,42 +225,130 @@ fn envelope(header_xml: &str, body_xml: &str) -> String {
     )
 }
 
-fn soap_direct_children(xml: &str) -> Result<(bool, Vec<bool>), SamlError> {
+/// Namespace-resolved facts about one SOAP envelope, in document order.
+#[derive(Default)]
+struct EnvelopeScan {
+    root_is_soap_envelope: bool,
+    /// Whether each child of the root is a SOAP 1.1 element.
+    child_is_soap: Vec<bool>,
+    /// Whether each child of the first SOAP `Body` is in the SAML protocol namespace.
+    body_child_in_protocol: Vec<bool>,
+    /// Whether each `RelayState` child of the first SOAP `Header` is in the ECP namespace.
+    relay_state_in_ecp: Vec<bool>,
+    /// Byte length of the first `Body` child's qualified name.
+    body_child_name_len: usize,
+    /// Start-tag text for the `Envelope` and `Body` namespace declarations the
+    /// first `Body` child uses and does not declare itself.
+    inherited_declarations: String,
+}
+
+impl EnvelopeScan {
+    /// `element_xml` with the namespace declarations it inherited from the
+    /// envelope written on its own start tag.
+    fn with_inherited_namespaces(&self, element_xml: &str) -> Result<String, SamlError> {
+        if self.inherited_declarations.is_empty() {
+            return Ok(element_xml.to_string());
+        }
+        let name_end = 1 + self.body_child_name_len;
+        let (name, rest) = element_xml
+            .split_at_checked(name_end)
+            .ok_or_else(|| SamlError::Xml("SOAP element name fell outside the element".into()))?;
+        Ok(format!("{name}{}{rest}", self.inherited_declarations))
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Section {
+    NotSeen,
+    Open,
+    Closed,
+}
+
+/// A namespace prefix as written, empty for the default namespace.
+type Prefix = String;
+
+fn scan_envelope(xml: &str) -> Result<EnvelopeScan, SamlError> {
     use quick_xml::events::Event;
-    use quick_xml::name::ResolveResult;
     use quick_xml::reader::NsReader;
 
     let mut reader = NsReader::from_str(xml);
     let mut buf = Vec::new();
     let mut depth = 0usize;
-    let mut root_is_soap_envelope = false;
     let mut saw_root = false;
-    let mut children = Vec::new();
+    let mut header = Section::NotSeen;
+    let mut body = Section::NotSeen;
+    let mut scan = EnvelopeScan::default();
+    // Declarations on Envelope and Body, with the raw attribute value.
+    let mut in_scope: Vec<(Prefix, String)> = Vec::new();
+    let mut declared: Vec<Prefix> = Vec::new();
+    let mut used: Vec<Prefix> = Vec::new();
     loop {
         let (resolved, event) = reader
             .read_resolved_event_into(&mut buf)
             .map_err(|err| SamlError::Xml(err.to_string()))?;
-        let in_soap_namespace = matches!(
-            resolved,
-            ResolveResult::Bound(namespace) if namespace.as_ref() == SOAP_ENVELOPE_NS
-        );
         match &event {
             Event::Start(element) | Event::Empty(element) => {
                 let next_depth = depth + 1;
+                let opens = matches!(event, Event::Start(_));
                 let local_name = element.local_name();
-                if !saw_root && next_depth == 1 {
+                let local_name = local_name.as_ref();
+                let is_soap = is_bound_to(&resolved, SOAP_ENVELOPE_NS);
+                if next_depth == 1 && !saw_root {
                     saw_root = true;
-                    root_is_soap_envelope = in_soap_namespace && local_name.as_ref() == "Envelope";
-                } else if saw_root && next_depth == 2 {
-                    children.push(in_soap_namespace);
+                    scan.root_is_soap_envelope = is_soap && local_name == "Envelope";
+                    namespace_declarations(element, &mut in_scope)?;
+                } else if next_depth == 2 {
+                    scan.child_is_soap.push(is_soap);
+                    if is_soap && local_name == "Header" && header == Section::NotSeen {
+                        header = if opens {
+                            Section::Open
+                        } else {
+                            Section::Closed
+                        };
+                    } else if is_soap && local_name == "Body" && body == Section::NotSeen {
+                        body = if opens {
+                            Section::Open
+                        } else {
+                            Section::Closed
+                        };
+                        namespace_declarations(element, &mut in_scope)?;
+                    }
+                } else if next_depth == 3 && header == Section::Open {
+                    if local_name == "RelayState" {
+                        scan.relay_state_in_ecp
+                            .push(is_bound_to(&resolved, ECP_PROFILE));
+                    }
+                } else if next_depth == 3 && body == Section::Open {
+                    scan.body_child_in_protocol
+                        .push(is_bound_to(&resolved, PROTOCOL_NS));
+                    if scan.body_child_in_protocol.len() == 1 {
+                        scan.body_child_name_len = element.name().as_ref().len();
+                        let mut own = Vec::new();
+                        namespace_declarations(element, &mut own)?;
+                        declared = own.into_iter().map(|(prefix, _)| prefix).collect();
+                    }
                 }
-                if matches!(event, Event::Start(_)) {
+                if next_depth >= 3
+                    && body == Section::Open
+                    && scan.body_child_in_protocol.len() == 1
+                {
+                    used_prefixes(element, &mut used)?;
+                }
+                if opens {
                     depth = next_depth;
                 }
             }
             Event::End(_) => {
                 if depth == 1 {
                     break;
+                }
+                if depth == 2 {
+                    if header == Section::Open {
+                        header = Section::Closed;
+                    }
+                    if body == Section::Open {
+                        body = Section::Closed;
+                    }
                 }
                 depth = depth.saturating_sub(1);
             }
@@ -261,7 +357,78 @@ fn soap_direct_children(xml: &str) -> Result<(bool, Vec<bool>), SamlError> {
         }
         buf.clear();
     }
-    Ok((root_is_soap_envelope, children))
+    for (prefix, value) in &in_scope {
+        if !used.contains(prefix) || declared.contains(prefix) {
+            continue;
+        }
+        // The raw value was delimited by one quote character, so it holds at
+        // most the other one.
+        let quote = if value.contains('"') { '\'' } else { '"' };
+        scan.inherited_declarations.push_str(" xmlns");
+        if !prefix.is_empty() {
+            scan.inherited_declarations.push(':');
+            scan.inherited_declarations.push_str(prefix);
+        }
+        scan.inherited_declarations.push('=');
+        scan.inherited_declarations.push(quote);
+        scan.inherited_declarations.push_str(value);
+        scan.inherited_declarations.push(quote);
+    }
+    Ok(scan)
+}
+
+fn is_bound_to(resolved: &quick_xml::name::ResolveResult<'_>, namespace: &str) -> bool {
+    matches!(
+        resolved,
+        quick_xml::name::ResolveResult::Bound(bound) if bound.as_ref() == namespace
+    )
+}
+
+/// Record the namespace declarations on `element`. A later declaration of a
+/// prefix replaces an earlier one.
+fn namespace_declarations(
+    element: &quick_xml::events::BytesStart<'_>,
+    declarations: &mut Vec<(Prefix, String)>,
+) -> Result<(), SamlError> {
+    use quick_xml::name::PrefixDeclaration;
+
+    for attribute in element.attributes() {
+        let attribute = attribute.map_err(|err| SamlError::Xml(err.to_string()))?;
+        let prefix = match attribute.key.as_namespace_binding() {
+            Some(PrefixDeclaration::Default) => Prefix::new(),
+            Some(PrefixDeclaration::Named(prefix)) => prefix.to_string(),
+            None => continue,
+        };
+        declarations.retain(|(declared, _)| declared != &prefix);
+        declarations.push((prefix, attribute.value.into_owned()));
+    }
+    Ok(())
+}
+
+/// Record the prefixes of `element`'s name and of its attribute names.
+fn used_prefixes(
+    element: &quick_xml::events::BytesStart<'_>,
+    used: &mut Vec<Prefix>,
+) -> Result<(), SamlError> {
+    let mut record = |prefix: &str| {
+        if !used.iter().any(|seen| seen == prefix) {
+            used.push(prefix.to_string());
+        }
+    };
+    match element.name().prefix() {
+        Some(prefix) => record(prefix.into_inner()),
+        None => record(""),
+    }
+    for attribute in element.attributes() {
+        let attribute = attribute.map_err(|err| SamlError::Xml(err.to_string()))?;
+        if attribute.key.as_namespace_binding().is_some() {
+            continue;
+        }
+        if let Some(prefix) = attribute.key.prefix() {
+            record(prefix.into_inner());
+        }
+    }
+    Ok(())
 }
 
 fn soap_child<'a>(envelope: &'a Node, child_is_soap: &[bool], name: &str) -> Option<&'a Node> {
@@ -273,7 +440,10 @@ fn soap_child<'a>(envelope: &'a Node, child_is_soap: &[bool], name: &str) -> Opt
         .map(|(node, _)| node)
 }
 
-fn relay_state_header(xml: &str, header: &Node) -> Result<RelayStateParam, SamlError> {
+fn relay_state_header(
+    header: &Node,
+    in_ecp_namespace: &[bool],
+) -> Result<RelayStateParam, SamlError> {
     let relay_states: Vec<&Node> = header
         .children
         .iter()
@@ -281,152 +451,24 @@ fn relay_state_header(xml: &str, header: &Node) -> Result<RelayStateParam, SamlE
         .collect();
     match relay_states.as_slice() {
         [] => Ok(RelayStateParam::absent()),
-        [relay_state] => {
-            let in_ecp_namespace = header_relay_state_namespaces(xml)?;
-            if in_ecp_namespace.len() != relay_states.len() {
-                return Err(SamlError::Xml(
-                    "RelayState header count did not match the SOAP header".into(),
-                ));
-            }
-            if !in_ecp_namespace[0] {
-                return Err(SamlError::ProtocolProfile(
-                    "RelayState header must use the ECP profile namespace".into(),
-                ));
-            }
-            RelayStateParam::try_from_option(Some(relay_state.text.clone()))
-        }
+        [relay_state] => match in_ecp_namespace {
+            [true] => RelayStateParam::try_from_option(Some(relay_state.text.clone())),
+            [false] => Err(SamlError::ProtocolProfile(
+                "RelayState header must use the ECP profile namespace".into(),
+            )),
+            _ => Err(SamlError::Xml(
+                "RelayState header count did not match the SOAP header".into(),
+            )),
+        },
         _ => Err(SamlError::ProtocolProfile(
             "SOAP header must contain at most one RelayState".into(),
         )),
     }
 }
 
-fn header_relay_state_namespaces(xml: &str) -> Result<Vec<bool>, SamlError> {
-    use quick_xml::events::Event;
-    use quick_xml::name::ResolveResult;
-    use quick_xml::reader::NsReader;
-
-    let mut reader = NsReader::from_str(xml);
-    let mut buf = Vec::new();
-    let mut depth = 0usize;
-    let mut header_depth = None;
-    let mut namespaces = Vec::new();
-    loop {
-        let (resolved, event) = reader
-            .read_resolved_event_into(&mut buf)
-            .map_err(|err| SamlError::Xml(err.to_string()))?;
-        match &event {
-            Event::Start(element) | Event::Empty(element) => {
-                let next_depth = depth + 1;
-                let local_name = element.local_name();
-                let in_soap_namespace = matches!(
-                    &resolved,
-                    ResolveResult::Bound(namespace) if namespace.as_ref() == SOAP_ENVELOPE_NS
-                );
-                if header_depth.is_none()
-                    && next_depth == 2
-                    && local_name.as_ref() == "Header"
-                    && in_soap_namespace
-                {
-                    header_depth = Some(next_depth);
-                }
-                if header_depth == Some(next_depth - 1) && local_name.as_ref() == "RelayState" {
-                    let in_ecp_namespace = matches!(
-                        &resolved,
-                        ResolveResult::Bound(namespace) if namespace.as_ref() == ECP_PROFILE
-                    );
-                    namespaces.push(in_ecp_namespace);
-                }
-                if matches!(event, Event::Start(_)) {
-                    depth = next_depth;
-                }
-            }
-            Event::End(_) => {
-                if header_depth == Some(depth) {
-                    break;
-                }
-                depth = depth.saturating_sub(1);
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    Ok(namespaces)
-}
-
 fn xml_slice<'a>(xml: &'a str, node: &Node) -> Result<&'a str, SamlError> {
     xml.get(node.start..node.end)
         .ok_or_else(|| SamlError::Xml("SOAP element offsets fell outside the message".into()))
-}
-
-/// Whether the SOAP body's children use the SAML 2.0 protocol namespace.
-///
-/// Prefixes may be declared on any ancestor, so the whole envelope is
-/// traversed with its in-scope bindings instead of slicing the body out.
-fn soap_body_child_in_protocol_namespace(
-    xml: &str,
-    expected_children: usize,
-) -> Result<bool, SamlError> {
-    use quick_xml::events::Event;
-    use quick_xml::name::ResolveResult;
-    use quick_xml::reader::NsReader;
-
-    let mut reader = NsReader::from_str(xml);
-    let mut buf = Vec::new();
-    let mut depth = 0usize;
-    let mut body_depth = None;
-    let mut in_protocol = Vec::new();
-    loop {
-        let (resolved, event) = reader
-            .read_resolved_event_into(&mut buf)
-            .map_err(|err| SamlError::Xml(err.to_string()))?;
-        match &event {
-            Event::Start(element) | Event::Empty(element) => {
-                let next_depth = depth + 1;
-                let local_name = element.local_name();
-                if body_depth.is_none()
-                    && next_depth == 2
-                    && local_name.as_ref() == "Body"
-                    && matches!(
-                        &resolved,
-                        ResolveResult::Bound(namespace)
-                            if namespace.as_ref() == SOAP_ENVELOPE_NS
-                    )
-                {
-                    body_depth = Some(next_depth);
-                }
-                if body_depth == Some(next_depth - 1) {
-                    in_protocol.push(matches!(
-                        &resolved,
-                        ResolveResult::Bound(namespace)
-                            if namespace.as_ref() == PROTOCOL_NS
-                    ));
-                }
-                if matches!(event, Event::Start(_)) {
-                    depth = next_depth;
-                }
-            }
-            Event::End(_) => {
-                if body_depth == Some(depth) {
-                    break;
-                }
-                depth = depth.saturating_sub(1);
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    if body_depth.is_none() {
-        return Err(SamlError::Xml("SOAP body was not found".into()));
-    }
-    if in_protocol.len() != expected_children {
-        return Err(SamlError::Xml(
-            "SAML element count did not match the SOAP body".into(),
-        ));
-    }
-    Ok(in_protocol.into_iter().next().unwrap_or(false))
 }
 
 fn header_value<'a>(header: &'a str, name: &str) -> &'a str {
@@ -637,6 +679,30 @@ mod tests {
             let body = read_soap_body(&xml, "Response", XmlLimits::default())?;
             assert!(body.element_xml.contains("ID=\"_1\""));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn inherited_namespaces_are_written_on_the_saml_element() -> Result<(), SamlError> {
+        let xml = format!(
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:samlp=\"urn:example:shadowed\" xmlns:unused=\"urn:example:unused\"><SOAP-ENV:Body xmlns:samlp=\"{PROTOCOL_NS}\" xmlns:saml='{ASSERTION_NS}'><samlp:Response ID=\"_1\"><saml:Issuer>idp</saml:Issuer></samlp:Response></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+        );
+        let body = read_soap_body(&xml, "Response", XmlLimits::default())?;
+        assert_eq!(
+            body.element_xml,
+            format!(
+                "<samlp:Response xmlns:samlp=\"{PROTOCOL_NS}\" xmlns:saml=\"{ASSERTION_NS}\" ID=\"_1\"><saml:Issuer>idp</saml:Issuer></samlp:Response>"
+            )
+        );
+
+        let xml = format!(
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns=\"{PROTOCOL_NS}\"><SOAP-ENV:Body><Response ID=\"_1\"/></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+        );
+        let body = read_soap_body(&xml, "Response", XmlLimits::default())?;
+        assert_eq!(
+            body.element_xml,
+            format!("<Response xmlns=\"{PROTOCOL_NS}\" ID=\"_1\"/>")
+        );
         Ok(())
     }
 

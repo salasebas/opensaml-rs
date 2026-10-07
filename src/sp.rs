@@ -17,6 +17,10 @@ use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
 use crate::xml::write::XmlWriter;
 use std::time::SystemTime;
 
+mod paos;
+
+pub(crate) use paos::PaosAuthnRequestInput;
+
 /// A SAML 2.0 Service Provider: runtime [`EntitySetting`] plus parsed [`SpMetadata`].
 #[derive(Debug, Clone)]
 pub struct ServiceProvider {
@@ -756,99 +760,6 @@ impl ServiceProvider {
         }
         Ok(result)
     }
-
-    /// AuthnRequest XML for the PAOS leg of Enhanced Client/Proxy SSO.
-    ///
-    /// `ProtocolBinding` stays omitted. The assertion consumer URL is carried
-    /// on the request and on the PAOS header. When `sign` is set, the request
-    /// receives the same enveloped signature HTTP-POST uses.
-    pub(crate) fn render_paos_authn_request(
-        &self,
-        input: &PaosAuthnRequestInput<'_>,
-    ) -> Result<(String, String), SamlError> {
-        let name_id_format = self
-            .setting
-            .name_id_format
-            .first()
-            .cloned()
-            .unwrap_or_default();
-        let name_id_format_attr = (!name_id_format.is_empty()).then_some(name_id_format.as_str());
-        let allow_create = if name_id_format == crate::constants::name_id_format::TRANSIENT {
-            AllowCreateAttribute::Omit
-        } else {
-            AllowCreateAttribute::Include(self.setting.allow_create)
-        };
-        let id = generate_id();
-        let issue_instant = now_iso8601();
-        let issuer = self.entity_id();
-        let xml = render_default_authn_request_xml(&AuthnRequestXml {
-            id: &id,
-            issue_instant: &issue_instant,
-            destination: input.destination,
-            force_authn: input.force_authn,
-            protocol_binding: None,
-            assertion_consumer_service_url: Some(input.assertion_consumer_service_url),
-            assertion_consumer_service_index: None,
-            is_passive: input.is_passive,
-            issuer: &issuer,
-            name_id_format: name_id_format_attr,
-            allow_create,
-        });
-        if !input.sign {
-            return Ok((id, xml));
-        }
-        Ok((id, sign_post_authn_request(self, &xml)?))
-    }
-}
-
-pub(crate) struct PaosAuthnRequestInput<'a> {
-    pub(crate) destination: &'a str,
-    pub(crate) assertion_consumer_service_url: &'a str,
-    pub(crate) force_authn: Option<bool>,
-    pub(crate) is_passive: Option<bool>,
-    pub(crate) sign: bool,
-}
-
-#[cfg(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
-))]
-fn sign_post_authn_request(sp: &ServiceProvider, xml: &str) -> Result<String, SamlError> {
-    use crate::crypto::{construct_saml_signature, keys::load_private_key};
-
-    let key_pem = sp
-        .setting
-        .private_key
-        .as_deref()
-        .ok_or_else(|| SamlError::MissingKey("private_key".into()))?;
-    let cert = sp
-        .setting
-        .signing_cert
-        .as_deref()
-        .ok_or_else(|| SamlError::MissingKey("signing_cert".into()))?;
-    let key = load_private_key(key_pem, sp.setting.private_key_pass.as_deref())?;
-    construct_saml_signature(
-        xml,
-        true,
-        &key,
-        cert,
-        &sp.setting.request_signature_algorithm,
-        &sp.setting.transformation_algorithms,
-        sp.setting.signature_config.as_ref(),
-    )
-}
-
-#[cfg(not(any(
-    feature = "crypto-rustcrypto",
-    feature = "crypto-aws-lc",
-    feature = "crypto-fips"
-)))]
-fn sign_post_authn_request(sp: &ServiceProvider, xml: &str) -> Result<String, SamlError> {
-    let _ = (sp, xml);
-    Err(SamlError::Unsupported(
-        "PAOS AuthnRequest signing requires a crypto provider feature".into(),
-    ))
 }
 
 #[cfg(test)]

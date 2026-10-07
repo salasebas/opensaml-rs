@@ -20,9 +20,11 @@ is in [`docs/architecture/`](architecture/README.md).
 
 | Behaviour | File |
 | --- | --- |
-| SP `start_paos_sso`, `finish_paos_sso` | `src/api/paos/mod.rs` |
+| SP `start_paos_sso`, `finish_paos_sso`, `finish_paos_sso_with_outstanding_logout` | `src/api/paos/mod.rs` |
 | IdP `receive_paos_sso`, `respond_paos_sso`, `reject_paos_sso`, `paos_soap_fault` | `src/api/paos/mod.rs` |
 | PAOS header and SOAP envelopes | `src/api/paos/protocol.rs` |
+| Raw PAOS AuthnRequest rendering | `src/sp/paos.rs` |
+| Raw PAOS response rendering | `src/idp/paos.rs` |
 
 The enhanced-client role is not a facade. The IdP and SP operational modes
 stay unclaimed.

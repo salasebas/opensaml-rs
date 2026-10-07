@@ -6,21 +6,25 @@ mod protocol;
 
 use std::marker::PhantomData;
 
+use crate::browser::SsoResponseBinding;
 use crate::config::{EntityId, IdpDescriptor, SpDescriptor};
 use crate::entity::User;
-use crate::flow::HttpRequest;
+use crate::flow::{FlowResult, HttpRequest};
 use crate::idp::PaosSsoResponseInput;
 use crate::model::{
-    AuthnRequest, EndpointUrl, ForceAuthn, IsPassive, MessageId, RelayStateParam,
-    SamlValidationContext, SsoResponse, SsoSession, Status, Subject, TopLevelStatusCode,
+    AuthnRequest, EndpointUrl, ForceAuthn, IsPassive, MessageId, OutstandingLogout,
+    RelayStateParam, SamlValidationContext, SsoResponse, SsoSession, Status, Subject,
+    TopLevelStatusCode,
 };
 use crate::sp::{LoginResponseParseOptions, PaosAuthnRequestInput};
+use crate::util::Value;
 
 use super::raw_mapping::{ensure_entity_id, raw_idp_descriptor, raw_sp_descriptor};
 use super::{Idp, Saml, SamlError, Sp};
 use protocol::{
     idp_to_ecp_envelope, parse_client_headers, read_soap_body, soap_fault_envelope,
-    sp_to_ecp_envelope, IdpToEcp, SpToEcp, E54_PAOS_HEADER, PAOS_MEDIA_TYPE, SOAP_MEDIA_TYPE,
+    sp_to_ecp_envelope, IdpToEcp, SpToEcp, E54_PAOS_HEADER, PAOS_BINDING, PAOS_MEDIA_TYPE,
+    SOAP_MEDIA_TYPE,
 };
 
 /// HTTP headers an enhanced client sends when it can carry this login.
@@ -125,13 +129,9 @@ impl StartPaosSso {
     /// character XML 1.0 forbids.
     pub fn provider_name(mut self, name: impl Into<String>) -> Result<Self, SamlError> {
         let name = name.into();
-        if name.is_empty()
-            || name.chars().any(
-                |character| matches!(character as u32, 0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F),
-            )
-        {
+        if name.is_empty() || !name.chars().all(is_xml_char) {
             return Err(SamlError::Invalid(
-                "provider name must not be empty or contain an XML 1.0 control character".into(),
+                "provider name must not be empty or contain a character XML 1.0 forbids".into(),
             ));
         }
         self.provider_name = Some(name);
@@ -144,7 +144,7 @@ impl StartPaosSso {
     ///
     /// Returns [`SamlError`] when `url` is not an absolute HTTP(S) URL.
     /// [`Saml<Sp>::start_paos_sso`] also rejects a URL the service provider
-    /// metadata does not publish.
+    /// metadata does not publish for HTTP-POST or HTTP-POST-SimpleSign.
     pub fn assertion_consumer(mut self, url: impl Into<String>) -> Result<Self, SamlError> {
         self.assertion_consumer = Some(EndpointUrl::try_new(url)?);
         Ok(self)
@@ -379,8 +379,8 @@ impl Saml<Sp> {
     /// # Errors
     ///
     /// Returns [`SamlError`] when the assertion consumer is missing or
-    /// unpublished, relay state is invalid, or the AuthnRequest cannot be
-    /// signed.
+    /// unpublished, relay state is invalid or contains a character XML 1.0
+    /// forbids, or the AuthnRequest cannot be signed.
     ///
     /// # Examples
     ///
@@ -431,6 +431,13 @@ impl Saml<Sp> {
         options: StartPaosSso,
     ) -> Result<StartedPaosSso, SamlError> {
         options.relay_state.validate()?;
+        if let Some(relay_state) = options.relay_state.as_deref() {
+            if !relay_state.chars().all(is_xml_char) {
+                return Err(SamlError::Invalid(
+                    "relay state must not contain a character XML 1.0 forbids".into(),
+                ));
+            }
+        }
         let assertion_consumer = assertion_consumer_url(self, options.assertion_consumer)?;
         let issuer = self
             .raw_service_provider()
@@ -470,7 +477,10 @@ impl Saml<Sp> {
 
     /// Finish Enhanced Client/Proxy login from the SOAP response.
     ///
-    /// A SAML error status does not return a session.
+    /// A SAML error status does not return a session. This accepts the
+    /// response without applying an outstanding logout. Use
+    /// [`Self::finish_paos_sso_with_outstanding_logout`] to reject a later
+    /// assertion that matches one.
     ///
     /// # Errors
     ///
@@ -484,6 +494,38 @@ impl Saml<Sp> {
         pending: &PendingPaosSso,
         response: &PaosSsoResponse,
         mut validation: SamlValidationContext<'_>,
+    ) -> Result<SsoSession, SamlError> {
+        let session = self.parsed_paos_session(idp, pending, response, &validation)?;
+        super::sp::finish_validated_session(session, &mut validation, None)
+    }
+
+    /// Finish Enhanced Client/Proxy login and apply an [`OutstandingLogout`].
+    ///
+    /// A match is rejected. The assertion identifier is still recorded for
+    /// replay.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::AssertionMatchesOutstandingLogout`] when the logout
+    /// matches. Also returns the errors documented on [`Self::finish_paos_sso`].
+    pub fn finish_paos_sso_with_outstanding_logout(
+        &self,
+        idp: &IdpDescriptor,
+        pending: &PendingPaosSso,
+        response: &PaosSsoResponse,
+        mut validation: SamlValidationContext<'_>,
+        outstanding_logout: &OutstandingLogout,
+    ) -> Result<SsoSession, SamlError> {
+        let session = self.parsed_paos_session(idp, pending, response, &validation)?;
+        super::sp::finish_validated_session(session, &mut validation, Some(outstanding_logout))
+    }
+
+    fn parsed_paos_session(
+        &self,
+        idp: &IdpDescriptor,
+        pending: &PendingPaosSso,
+        response: &PaosSsoResponse,
+        validation: &SamlValidationContext<'_>,
     ) -> Result<SsoSession, SamlError> {
         ensure_entity_id(pending.idp_entity_id(), idp.entity_id())?;
         let limits = self.raw_service_provider().setting.xml_limits;
@@ -506,14 +548,11 @@ impl Saml<Sp> {
                 )
                 .with_expected_recipient(pending.assertion_consumer_url().as_str()),
             )?;
-        // The expected value is compared after the response signature verifies,
-        // so a wrong or missing value cannot be probed without a valid signature.
+        // The expected value is compared after the response signature verifies.
         if pending.relay_state() != &RelayStateParam::absent() {
             super::raw_mapping::ensure_relay_state(pending.relay_state(), &body.relay_state)?;
         }
-        let session = super::sp::session_from_verified_flow(parsed)?;
-        session.check_and_store_replay(&mut validation)?;
-        Ok(session)
+        super::sp::session_from_verified_flow(parsed)
     }
 }
 
@@ -529,6 +568,9 @@ impl Saml<Idp> {
     }
 
     /// Read the SOAP AuthnRequest an enhanced client forwarded.
+    ///
+    /// A `ProtocolBinding` that names the PAOS binding is accepted, and
+    /// [`AuthnRequest::protocol_binding`] then reports none.
     ///
     /// # Errors
     ///
@@ -555,7 +597,7 @@ impl Saml<Idp> {
             validation.now(),
             validation.clock_skew().as_millis(),
         )?;
-        let authn = AuthnRequest::try_from(flow)?;
+        let authn = AuthnRequest::try_from(without_paos_protocol_binding(flow))?;
         let verify_present_signature = self
             .raw_identity_provider()
             .setting
@@ -662,6 +704,27 @@ impl Saml<Idp> {
     }
 }
 
+/// `flow` with `ProtocolBinding` cleared when it names the PAOS binding.
+fn without_paos_protocol_binding(mut flow: FlowResult) -> FlowResult {
+    if flow.extract.get_str("request.protocolBinding") != Some(PAOS_BINDING) {
+        return flow;
+    }
+    if let Value::Object(entries) = &mut flow.extract {
+        if let Some((_, request)) = entries.iter_mut().find(|(key, _)| key == "request") {
+            request.insert("protocolBinding", Value::Null);
+        }
+    }
+    flow
+}
+
+/// Whether XML 1.0 allows `character` in a document.
+fn is_xml_char(character: char) -> bool {
+    matches!(
+        character,
+        '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+    )
+}
+
 fn assertion_consumer_url(
     sp: &Saml<Sp>,
     selected: Option<EndpointUrl>,
@@ -714,5 +777,6 @@ fn assertion_consumer_for_request(
         .metadata()
         .get_assertion_consumer_service_by_index(index)?
         .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?;
+    SsoResponseBinding::try_from(endpoint.binding)?;
     EndpointUrl::try_new(endpoint.location)
 }

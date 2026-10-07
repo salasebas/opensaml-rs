@@ -30,7 +30,7 @@ pub(super) fn session_from_verified_flow(
     SsoSession::try_from_with_verified_xml_signatures(flow, verified_xml_signatures)
 }
 
-fn finish_validated_session(
+pub(super) fn finish_validated_session(
     session: SsoSession,
     validation: &mut SamlValidationContext<'_>,
     outstanding_logout: Option<&OutstandingLogout>,

@@ -111,17 +111,19 @@ impl SpMetadata {
         Ok(first)
     }
 
-    /// Assertion consumer locations, in metadata order.
+    /// Assertion consumer locations a response can be posted to, in metadata
+    /// order.
     pub(crate) fn assertion_consumer_locations(&self) -> Vec<String> {
-        self.assertion_consumer_service_endpoints()
+        self.posted_response_endpoints()
             .into_iter()
             .map(|endpoint| endpoint.location)
             .collect()
     }
 
-    /// Default assertion consumer location, or the first one when none is default.
+    /// Default assertion consumer location a response can be posted to, or
+    /// the first one when none is default.
     pub(crate) fn default_assertion_consumer_location(&self) -> Option<String> {
-        let endpoints = self.assertion_consumer_service_endpoints();
+        let endpoints = self.posted_response_endpoints();
         if let Some(endpoint) = endpoints.iter().find(|endpoint| endpoint.is_default) {
             return Some(endpoint.location.clone());
         }
@@ -133,6 +135,17 @@ impl SpMetadata {
         self.assertion_consumer_service_endpoints()
             .iter()
             .any(|endpoint| endpoint.binding == binding && endpoint.location == location)
+    }
+
+    /// HTTP-POST and HTTP-POST-SimpleSign assertion consumer endpoints.
+    fn posted_response_endpoints(&self) -> Vec<AcsMetadataEndpoint> {
+        self.assertion_consumer_service_endpoints()
+            .into_iter()
+            .filter(|endpoint| match endpoint.binding {
+                Binding::Post | Binding::SimpleSign => true,
+                Binding::Redirect | Binding::Artifact => false,
+            })
+            .collect()
     }
 
     fn assertion_consumer_service_endpoints(&self) -> Vec<AcsMetadataEndpoint> {
