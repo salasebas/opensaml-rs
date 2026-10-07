@@ -282,13 +282,17 @@
 //!
 //! # Unsupported profiles
 //!
-//! The high-level [`Saml`] API focuses on browser Web SSO, metadata-driven SP/IdP
-//! setup, XML signature/encryption through `bergshamra`, Single Logout, and
-//! artifact resolution over SOAP. It does not implement HTTP-Artifact browser
-//! delivery, ECP/PAOS, SAML query protocols, NameID management, or metadata
-//! federation. If you need one of those profiles for a real interoperability
-//! target, please open an issue with the profile, binding, IdP/SP product, and
-//! a minimal expected flow so we can consider the implementation.
+//! The high-level [`Saml`] API focuses on browser Web SSO, Enhanced Client/Proxy
+//! SSO over PAOS at the service-provider and identity-provider ends,
+//! metadata-driven SP/IdP setup, XML signature/encryption through `bergshamra`,
+//! Single Logout, and artifact resolution over SOAP. The enhanced-client role
+//! is not a facade. It does not implement HTTP-Artifact browser delivery, SOAP
+//! profiles other than artifact resolution and the identity-provider leg of
+//! Enhanced Client/Proxy SSO, SAML query protocols, NameID management, or
+//! metadata federation. If you need one of those profiles for a real
+//! interoperability target, please open an issue with the profile, binding,
+//! IdP/SP product, and a minimal expected flow so we can consider the
+//! implementation.
 //!
 //! XML cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
 //! message signatures) is delegated to `bergshamra`. The default
@@ -364,8 +368,10 @@ pub mod validator;
 pub mod xml;
 
 pub use api::{
-    ForceAuthn, Idp, IsPassive, LogoutSigning, RespondSlo, RespondSso, Saml, SamlError, Sp,
-    StartSlo, StartSso, Unknown,
+    ForceAuthn, Idp, IsPassive, LogoutSigning, PaosAuthnRequest, PaosClientRequest, PaosHeader,
+    PaosHttpResponse, PaosSsoResponse, PendingPaosSso, PendingPaosSsoSnapshot, RespondSlo,
+    RespondSso, Saml, SamlError, SoapFault, Sp, StartPaosSso, StartSlo, StartSso, StartedPaosSso,
+    Unknown,
 };
 pub use artifact::{
     AnsweredArtifact, Artifact, ArtifactDereference, ArtifactRelease, ArtifactResolution,

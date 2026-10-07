@@ -8,6 +8,7 @@ Normative text is SAML Core 2.0, Profiles 2.0, Bindings 2.0, and Metadata 2.0, a
 
 - [SSO acceptance](conformance/web-browser-sso-acceptance.md) for `finish_sso`, `accept_unsolicited_sso`, and `receive_sso`.
 - [SSO generation](conformance/web-browser-sso-generation.md) for `start_sso`, `respond_sso`, and `initiate_sso`.
+- [Enhanced Client/Proxy](conformance/enhanced-client-proxy.md) for `start_paos_sso`, `finish_paos_sso`, `receive_paos_sso`, and `respond_paos_sso`.
 - [Logout](conformance/single-logout.md) for `start_slo`, `respond_slo`, `receive_slo`, and `finish_slo`.
 - [Metadata and replay](conformance/metadata-and-replay.md) for `MetadataTrustPolicy` and `ReplayPolicy`.
 - [Artifact resolution](conformance/artifact-resolution.md) for `issue_artifact`, `resolve_artifact`, and `answer_artifact_resolve`.

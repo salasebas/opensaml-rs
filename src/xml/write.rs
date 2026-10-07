@@ -68,3 +68,15 @@ fn element<'a>(name: &'a str, attrs: &[(&'a str, &'a str)]) -> BytesStart<'a> {
     }
     elem
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attribute_values_are_escaped() {
+        let mut writer = XmlWriter::new();
+        writer.empty("e", &[("n", "a\"b&c")]);
+        assert_eq!(writer.finish(), "<e n=\"a&quot;b&amp;c\"/>");
+    }
+}
