@@ -28,6 +28,17 @@
 //!
 //! let _ = idp.start_sso(&peer, StartSso::post());
 //! ```
+//!
+//! ```compile_fail
+//! use saml_rs::{CommonDomainCookieRequest, DiscoveryCookieLifetime, Saml, Sp};
+//!
+//! let sp: Saml<Sp> = unreachable!();
+//! let _ = sp.remember_identity_provider(CommonDomainCookieRequest {
+//!     common_domain: "example.org",
+//!     lifetime: DiscoveryCookieLifetime::Session,
+//!     existing_cookie: None,
+//! });
+//! ```
 
 mod idp;
 mod options;

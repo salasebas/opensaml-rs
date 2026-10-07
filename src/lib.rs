@@ -158,6 +158,11 @@
 //! # Ok(()) }
 //! ```
 //!
+//! [`Saml<Idp>::remember_identity_provider`] returns the `_saml_idp` cookie
+//! for the caller to write after authentication.
+//! [`Saml<Idp>::respond_sso`] does not write that cookie, and a service
+//! provider has no method for it.
+//!
 //! # Single Logout
 //!
 //! Typed SLO uses the same pattern: start with a [`LogoutSubject`], store the
@@ -326,6 +331,7 @@ pub mod constants;
 pub mod context;
 #[doc(hidden)]
 pub mod crypto;
+mod discovery;
 #[doc(hidden)]
 pub mod entity;
 pub mod error;
@@ -377,6 +383,7 @@ pub use crypto::{
     crypto_provider_info, initialize_crypto_provider, CryptoFipsStatus, CryptoProvider,
     CryptoProviderInfo,
 };
+pub use discovery::{CommonDomainCookie, CommonDomainCookieRequest, DiscoveryCookieLifetime};
 #[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::EntitySetting`."]
 pub use entity::EntitySetting;
 #[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::IdentityProvider`."]

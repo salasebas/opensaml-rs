@@ -16,6 +16,12 @@ is in [`docs/architecture/`](architecture/README.md).
 `finish_sso_with_outstanding_logout` and
 `accept_unsolicited_sso_with_outstanding_logout` are in `src/api/sp.rs`.
 
+## Identity Provider Discovery
+
+| Behaviour | File |
+| --- | --- |
+| IdP `remember_identity_provider` | `src/api/idp.rs`, `src/discovery.rs` |
+
 ## Raw login
 
 | Behaviour | File |
@@ -53,6 +59,7 @@ Logout is the directory `src/logout/`.
 | Inbound Web Browser SSO | [`web-browser-sso-acceptance.md`](conformance/web-browser-sso-acceptance.md) |
 | Outbound Web Browser SSO | [`web-browser-sso-generation.md`](conformance/web-browser-sso-generation.md) |
 | Single Logout | [`single-logout.md`](conformance/single-logout.md) |
+| Identity Provider Discovery | [`identity-provider-discovery.md`](conformance/identity-provider-discovery.md) |
 | Metadata trust and replay | [`metadata-and-replay.md`](conformance/metadata-and-replay.md) |
 
 ## Compatibility crates

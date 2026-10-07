@@ -1,0 +1,315 @@
+//! Common domain cookie for Identity Provider Discovery.
+
+use std::time::Duration;
+
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
+
+use crate::error::SamlError;
+
+const MAX_ENTITY_IDENTIFIER_CHARACTERS: usize = 1024;
+const MAX_EXISTING_COOKIE_BYTES: usize = 8 * 1024;
+
+/// How long the browser keeps the common domain cookie.
+///
+/// `Session` ends with the browser session. `Persistent` keeps the cookie for
+/// `max_age`. Neither value means the principal still has a session with this
+/// identity provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryCookieLifetime {
+    /// The browser drops the cookie when the session ends.
+    Session,
+    /// The browser keeps the cookie for `max_age`.
+    ///
+    /// `max_age` must be at least one whole second. That duration is written
+    /// as `Max-Age`.
+    Persistent {
+        /// How long the browser keeps the cookie.
+        max_age: Duration,
+    },
+}
+
+/// What the caller passes to remember this identity provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommonDomainCookieRequest<'a> {
+    /// Deployment common domain, without a leading period.
+    ///
+    /// `example.org` becomes the cookie domain `.example.org`.
+    pub common_domain: &'a str,
+    /// Browser session, or a persistent `Max-Age`.
+    pub lifetime: DiscoveryCookieLifetime,
+    /// Current `_saml_idp` value, when the browser sent one.
+    ///
+    /// `None` and an empty value both start a new list. A present value is the
+    /// cookie's value, still URL-encoded or already decoded.
+    pub existing_cookie: Option<&'a str>,
+}
+
+impl<'a> CommonDomainCookieRequest<'a> {
+    /// Start a cookie list that contains only this identity provider.
+    ///
+    /// `common_domain` has no leading period. Call
+    /// [`Self::with_existing_cookie`] when the browser already sent
+    /// `_saml_idp`.
+    pub fn new(common_domain: &'a str, lifetime: DiscoveryCookieLifetime) -> Self {
+        Self {
+            common_domain,
+            lifetime,
+            existing_cookie: None,
+        }
+    }
+
+    /// Keep the identity providers already listed in this `_saml_idp` value.
+    pub fn with_existing_cookie(mut self, value: &'a str) -> Self {
+        self.existing_cookie = Some(value);
+        self
+    }
+}
+
+/// `_saml_idp` cookie for the caller to write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use = "the caller writes this cookie on the common domain"]
+pub struct CommonDomainCookie {
+    value: String,
+    domain: String,
+    lifetime: DiscoveryCookieLifetime,
+}
+
+impl CommonDomainCookie {
+    /// Cookie name required by the discovery profile.
+    pub const NAME: &'static str = "_saml_idp";
+    /// Cookie path required by the discovery profile.
+    pub const PATH: &'static str = "/";
+
+    /// `_saml_idp`.
+    pub fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    /// URL-encoded list of base64 identity-provider entity identifiers.
+    ///
+    /// This identity provider is last.
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    /// `/`.
+    pub fn path(&self) -> &'static str {
+        Self::PATH
+    }
+
+    /// Common domain with the required leading period.
+    pub fn domain(&self) -> &str {
+        &self.domain
+    }
+
+    /// The cookie is marked secure.
+    pub fn secure(&self) -> bool {
+        true
+    }
+
+    /// Session or persistent lifetime the caller asked for.
+    pub fn lifetime(&self) -> DiscoveryCookieLifetime {
+        self.lifetime
+    }
+
+    /// `Set-Cookie` header value, without the header name.
+    ///
+    /// The caller may append extra attributes, such as `SameSite`, after this
+    /// value.
+    pub fn set_cookie_header(&self) -> String {
+        let mut header = format!(
+            "{name}={value}; Path={path}; Domain={domain}; Secure",
+            name = Self::NAME,
+            value = self.value,
+            path = Self::PATH,
+            domain = self.domain,
+        );
+        if let DiscoveryCookieLifetime::Persistent { max_age } = self.lifetime {
+            let seconds = max_age.as_secs();
+            header.push_str(&format!("; Max-Age={seconds}"));
+        }
+        header
+    }
+}
+
+pub(crate) fn remember_identity_provider(
+    entity_id: &str,
+    request: CommonDomainCookieRequest<'_>,
+) -> Result<CommonDomainCookie, SamlError> {
+    validate_entity_identifier(entity_id)?;
+    let domain = common_domain_attribute(request.common_domain)?;
+    let lifetime = validated_lifetime(request.lifetime)?;
+    let mut entity_ids = entity_ids_from_existing(request.existing_cookie)?;
+    entity_ids.retain(|existing| existing != entity_id);
+    entity_ids.push(entity_id.to_string());
+    Ok(CommonDomainCookie {
+        value: encode_cookie_value(&entity_ids),
+        domain,
+        lifetime,
+    })
+}
+
+fn validate_entity_identifier(entity_id: &str) -> Result<(), SamlError> {
+    if entity_id.is_empty() {
+        return Err(invalid("entity identifier must not be empty"));
+    }
+    if entity_id.chars().count() > MAX_ENTITY_IDENTIFIER_CHARACTERS {
+        return Err(invalid("entity identifier must not exceed 1024 characters"));
+    }
+    Ok(())
+}
+
+fn common_domain_attribute(common_domain: &str) -> Result<String, SamlError> {
+    if common_domain.is_empty() {
+        return Err(invalid("common domain must not be empty"));
+    }
+    if common_domain.starts_with('.') {
+        return Err(invalid("common domain is passed without a leading period"));
+    }
+    if !is_ascii_hostname(common_domain) {
+        return Err(invalid("common domain must be an ASCII hostname"));
+    }
+    Ok(format!(".{common_domain}"))
+}
+
+fn is_ascii_hostname(domain: &str) -> bool {
+    if domain.len() > 253 || domain.ends_with('.') {
+        return false;
+    }
+    domain.split('.').all(|label| {
+        let bytes = label.as_bytes();
+        !bytes.is_empty()
+            && bytes.len() <= 63
+            && bytes[0] != b'-'
+            && bytes[bytes.len() - 1] != b'-'
+            && bytes
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+    })
+}
+
+fn validated_lifetime(
+    lifetime: DiscoveryCookieLifetime,
+) -> Result<DiscoveryCookieLifetime, SamlError> {
+    if let DiscoveryCookieLifetime::Persistent { max_age } = lifetime {
+        if max_age.subsec_nanos() != 0 {
+            return Err(invalid(
+                "persistent discovery cookie lifetime must be a whole number of seconds",
+            ));
+        }
+        if max_age.as_secs() == 0 {
+            return Err(invalid(
+                "persistent discovery cookie lifetime must be at least one second",
+            ));
+        }
+    }
+    Ok(lifetime)
+}
+
+fn entity_ids_from_existing(existing: Option<&str>) -> Result<Vec<String>, SamlError> {
+    let Some(existing) = existing.filter(|value| !value.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    if existing.len() > MAX_EXISTING_COOKIE_BYTES {
+        return Err(invalid(
+            "existing common domain cookie is larger than 8192 bytes",
+        ));
+    }
+    let decoded = decode_percent(existing)?;
+    if decoded.is_empty() {
+        return Ok(Vec::new());
+    }
+    decoded.split(' ').map(entity_id_from_token).collect()
+}
+
+fn entity_id_from_token(token: &str) -> Result<String, SamlError> {
+    if token.is_empty() {
+        return Err(invalid("existing common domain cookie has an empty entry"));
+    }
+    let bytes = STANDARD
+        .decode(token)
+        .map_err(|_| invalid("existing common domain cookie entry is not base64"))?;
+    let entity_id = String::from_utf8(bytes)
+        .map_err(|_| invalid("existing common domain cookie entry is not an entity identifier"))?;
+    validate_entity_identifier(&entity_id)?;
+    Ok(entity_id)
+}
+
+fn encode_cookie_value(entity_ids: &[String]) -> String {
+    let mut raw = String::new();
+    for (index, entity_id) in entity_ids.iter().enumerate() {
+        if index > 0 {
+            raw.push(' ');
+        }
+        raw.push_str(&STANDARD.encode(entity_id.as_bytes()));
+    }
+    encode_percent(&raw)
+}
+
+fn encode_percent(raw: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        if matches!(
+            byte,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~'
+        ) {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(HEX[(byte >> 4) as usize]));
+            encoded.push(char::from(HEX[(byte & 0x0f) as usize]));
+        }
+    }
+    encoded
+}
+
+fn decode_percent(value: &str) -> Result<String, SamlError> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            b'%' => {
+                let hex = bytes.get(index + 1..index + 3).ok_or_else(|| {
+                    invalid("existing common domain cookie has a truncated percent escape")
+                })?;
+                let high = hex_value(hex[0])?;
+                let low = hex_value(hex[1])?;
+                decoded.push((high << 4) | low);
+                index += 3;
+            }
+            byte if byte.is_ascii() => {
+                decoded.push(byte);
+                index += 1;
+            }
+            _ => {
+                return Err(invalid(
+                    "existing common domain cookie is not URL-encoded text",
+                ));
+            }
+        }
+    }
+    String::from_utf8(decoded)
+        .map_err(|_| invalid("existing common domain cookie is not URL-encoded text"))
+}
+
+fn hex_value(byte: u8) -> Result<u8, SamlError> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err(invalid(
+            "existing common domain cookie has a percent escape that is not hexadecimal",
+        )),
+    }
+}
+
+fn invalid(message: &str) -> SamlError {
+    SamlError::Invalid(message.to_string())
+}
