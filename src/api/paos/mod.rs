@@ -104,8 +104,10 @@ impl StartPaosSso {
 
     /// Set `IsPassive` on the AuthnRequest and on `ecp:Request`.
     ///
-    /// Omitting this leaves both attributes out. An omitted `ecp:Request`
-    /// `IsPassive` means passive to the enhanced client.
+    /// A start that omits this sends `IsPassive="false"` on `ecp:Request`.
+    /// An omitted value means passive to the enhanced client, so a normal
+    /// login states false. The AuthnRequest attribute is written only when
+    /// this is set.
     #[allow(
         clippy::wrong_self_convention,
         reason = "the builder name is the SAML IsPassive attribute, and it takes self by value like force_authn"
@@ -614,7 +616,15 @@ impl Saml<Idp> {
     ) -> Result<PaosHttpResponse<SsoResponse>, SamlError> {
         ensure_entity_id(request.message().issuer(), sp.entity_id())?;
         let acs = assertion_consumer_for_request(sp, request.message())?;
-        let raw_sp = raw_sp_descriptor(sp)?;
+        let mut raw_sp = raw_sp_descriptor(sp)?;
+        let sign_encrypted_cbc = {
+            let setting = &self.raw_identity_provider().setting;
+            super::options::RespondSso::post().should_sign_response(
+                setting.is_assertion_encrypted,
+                &setting.data_encryption_algorithm,
+            )
+        };
+        raw_sp.setting.want_message_signed = sign_encrypted_cbc;
         let name_id_format = subject.as_ref().and_then(|subject| {
             subject
                 .name_id()

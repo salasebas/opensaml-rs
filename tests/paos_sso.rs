@@ -360,3 +360,94 @@ fn unprocessable_soap_is_a_client_fault() -> Result<(), Box<dyn std::error::Erro
     ));
     Ok(())
 }
+
+#[test]
+fn unpublished_assertion_consumer_on_the_request_is_rejected(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = parties()?;
+    let started = sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::enhanced_client(),
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?.allow_unsigned_authn_request(),
+    )?;
+    let (_, idp_request) = enhanced_client_takes_authn_request(started.response.soap_envelope())?;
+    let tampered = idp_request.replace(SP_ACS, "https://evil.example/acs");
+    let received = idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(tampered, IDP_SOAP)?,
+        validation(),
+    )?;
+    let error = match idp.respond_paos_sso(&sp_descriptor, &received, subject()) {
+        Err(error) => error,
+        Ok(_) => return Err("an unpublished assertion consumer is rejected".into()),
+    };
+    assert!(matches!(error, SamlError::Invalid(_)));
+    Ok(())
+}
+
+#[cfg(not(feature = "crypto-fips"))]
+#[test]
+fn cbc_encrypted_response_is_signed() -> Result<(), Box<dyn std::error::Error>> {
+    let encryption = saml_rs::XmlPolicy {
+        encryption: saml_rs::XmlEncryptionPolicy::encrypt_assertions()
+            .with_insecure_software_rsa_key_transport_decryption_allowed(),
+        ..saml_rs::XmlPolicy::default()
+    };
+    let encrypted_credentials = saml_rs::Credentials {
+        encryption_certificate: Some(saml_rs::CertificatePem::new(CERT)),
+        decryption_key: Some(saml_rs::PrivateKeyPem::new(PRIVKEY)),
+        ..credentials()
+    };
+    let sp_validation = SpValidationPolicy {
+        assertions: saml_rs::AssertionSignaturePolicy::RequireSigned,
+        ..SpValidationPolicy::recommended()
+    };
+    let sp = Saml::sp(
+        SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+            .acs_endpoint(AcsEndpoint::post(SP_ACS)?.mark_default())
+            .credentials(encrypted_credentials)
+            .validation(sp_validation)
+            .xml(encryption)
+            .build()?,
+    )?;
+    let idp = Saml::idp(
+        IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+            .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso/post")?)
+            .credentials(credentials())
+            .validation(IdpValidationPolicy::recommended())
+            .xml(encryption)
+            .build()?,
+    )?;
+    let sp_descriptor = SpDescriptor::from_metadata_xml(
+        sp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml(
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    let started = sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::enhanced_client(),
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?.allow_unsigned_authn_request(),
+    )?;
+    let (client, idp_request) =
+        enhanced_client_takes_authn_request(started.response.soap_envelope())?;
+    let received = idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(idp_request, IDP_SOAP)?,
+        validation(),
+    )?;
+    let answered = idp.respond_paos_sso(&sp_descriptor, &received, subject())?;
+    assert!(answered.soap_envelope().contains("EncryptedAssertion"));
+    assert!(answered.soap_envelope().contains("<ds:Signature"));
+    let sp_request = enhanced_client_takes_response(&client, answered.soap_envelope())?;
+    let session = sp.finish_paos_sso(
+        &idp_descriptor,
+        &started.pending,
+        &PaosSsoResponse::from_soap(sp_request)?,
+        validation(),
+    )?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    Ok(())
+}

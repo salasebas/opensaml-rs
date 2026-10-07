@@ -76,12 +76,11 @@ pub(super) fn sp_to_ecp_envelope(input: &SpToEcp<'_>) -> String {
     if let Some(provider_name) = input.provider_name {
         ecp_attrs.push(("ProviderName", provider_name));
     }
-    let is_passive = input
-        .is_passive
-        .map(|value| if value { "true" } else { "false" });
-    if let Some(is_passive) = is_passive {
-        ecp_attrs.push(("IsPassive", is_passive));
-    }
+    let is_passive = match input.is_passive {
+        Some(true) => "true",
+        Some(false) | None => "false",
+    };
+    ecp_attrs.push(("IsPassive", is_passive));
     header.start("ecp:Request", &ecp_attrs);
     header.text_element("saml:Issuer", &[("xmlns:saml", ASSERTION_NS)], input.issuer);
     header.start("samlp:IDPList", &[("xmlns:samlp", PROTOCOL_NS)]);
@@ -146,18 +145,19 @@ pub(super) fn read_soap_body(
     element_name: &str,
     limits: XmlLimits,
 ) -> Result<SoapBody, SamlError> {
-    if !envelope_xml.contains(SOAP_ENVELOPE_NS) {
-        return Err(SamlError::ProtocolProfile(
-            "SOAP envelope namespace is missing".into(),
-        ));
-    }
     let document = parse_with_limits(envelope_xml, limits)?;
-    if document.root.local_name != "Envelope" {
+    let (root_is_soap_envelope, child_is_soap) = soap_direct_children(envelope_xml)?;
+    if document.root.local_name != "Envelope" || !root_is_soap_envelope {
         return Err(SamlError::ProtocolProfile(
             "SOAP message must be an Envelope".into(),
         ));
     }
-    let body = child(&document.root, "Body")
+    if child_is_soap.len() != document.root.children.len() {
+        return Err(SamlError::Xml(
+            "SOAP child count did not match the envelope".into(),
+        ));
+    }
+    let body = soap_child(&document.root, &child_is_soap, "Body")
         .ok_or_else(|| SamlError::ProtocolProfile("SOAP envelope is missing a Body".into()))?;
     let elements: Vec<&Node> = body.children.iter().collect();
     let [element] = elements.as_slice() else {
@@ -171,7 +171,10 @@ pub(super) fn read_soap_body(
         )));
     }
     let element_xml = xml_slice(envelope_xml, element)?.to_string();
-    let relay_state = relay_state_header(envelope_xml, &document.root)?;
+    let relay_state = match soap_child(&document.root, &child_is_soap, "Header") {
+        Some(header) => relay_state_header(envelope_xml, header)?,
+        None => RelayStateParam::absent(),
+    };
     Ok(SoapBody {
         element_xml,
         relay_state,
@@ -184,10 +187,63 @@ fn envelope(header_xml: &str, body_xml: &str) -> String {
     )
 }
 
-fn relay_state_header(xml: &str, envelope: &Node) -> Result<RelayStateParam, SamlError> {
-    let Some(header) = child(envelope, "Header") else {
-        return Ok(RelayStateParam::absent());
-    };
+fn soap_direct_children(xml: &str) -> Result<(bool, Vec<bool>), SamlError> {
+    use quick_xml::events::Event;
+    use quick_xml::name::ResolveResult;
+    use quick_xml::reader::NsReader;
+
+    let mut reader = NsReader::from_str(xml);
+    let mut buf = Vec::new();
+    let mut depth = 0usize;
+    let mut root_is_soap_envelope = false;
+    let mut saw_root = false;
+    let mut children = Vec::new();
+    loop {
+        let (resolved, event) = reader
+            .read_resolved_event_into(&mut buf)
+            .map_err(|err| SamlError::Xml(err.to_string()))?;
+        let in_soap_namespace = matches!(
+            resolved,
+            ResolveResult::Bound(namespace) if namespace.as_ref() == SOAP_ENVELOPE_NS
+        );
+        match &event {
+            Event::Start(element) | Event::Empty(element) => {
+                let next_depth = depth + 1;
+                let local_name = element.local_name();
+                if !saw_root && next_depth == 1 {
+                    saw_root = true;
+                    root_is_soap_envelope = in_soap_namespace && local_name.as_ref() == "Envelope";
+                } else if saw_root && next_depth == 2 {
+                    children.push(in_soap_namespace);
+                }
+                if matches!(event, Event::Start(_)) {
+                    depth = next_depth;
+                }
+            }
+            Event::End(_) => {
+                if depth == 1 {
+                    break;
+                }
+                depth = depth.saturating_sub(1);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok((root_is_soap_envelope, children))
+}
+
+fn soap_child<'a>(envelope: &'a Node, child_is_soap: &[bool], name: &str) -> Option<&'a Node> {
+    envelope
+        .children
+        .iter()
+        .zip(child_is_soap)
+        .find(|(node, is_soap)| node.local_name == name && **is_soap)
+        .map(|(node, _)| node)
+}
+
+fn relay_state_header(xml: &str, header: &Node) -> Result<RelayStateParam, SamlError> {
     let relay_states: Vec<&Node> = header
         .children
         .iter()
@@ -233,14 +289,21 @@ fn header_relay_state_namespaces(xml: &str) -> Result<Vec<bool>, SamlError> {
             Event::Start(element) | Event::Empty(element) => {
                 let next_depth = depth + 1;
                 let local_name = element.local_name();
-                if header_depth.is_none() && next_depth == 2 && local_name.as_ref() == "Header" {
+                let in_soap_namespace = matches!(
+                    &resolved,
+                    ResolveResult::Bound(namespace) if namespace.as_ref() == SOAP_ENVELOPE_NS
+                );
+                if header_depth.is_none()
+                    && next_depth == 2
+                    && local_name.as_ref() == "Header"
+                    && in_soap_namespace
+                {
                     header_depth = Some(next_depth);
                 }
                 if header_depth == Some(next_depth - 1) && local_name.as_ref() == "RelayState" {
                     let in_ecp_namespace = matches!(
-                        resolved,
-                        ResolveResult::Bound(namespace)
-                            if namespace.as_ref() == ECP_PROFILE
+                        &resolved,
+                        ResolveResult::Bound(namespace) if namespace.as_ref() == ECP_PROFILE
                     );
                     namespaces.push(in_ecp_namespace);
                 }
@@ -260,10 +323,6 @@ fn header_relay_state_namespaces(xml: &str) -> Result<Vec<bool>, SamlError> {
         buf.clear();
     }
     Ok(namespaces)
-}
-
-fn child<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
-    node.children.iter().find(|child| child.local_name == name)
 }
 
 fn xml_slice<'a>(xml: &'a str, node: &Node) -> Result<&'a str, SamlError> {
@@ -387,6 +446,35 @@ mod tests {
     fn soap_body_must_contain_one_element() -> Result<(), String> {
         let xml = format!(
             "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\"><SOAP-ENV:Body><samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest><samlp:Response ID=\"_2\"></samlp:Response></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+        );
+        match read_soap_body(&xml, "AuthnRequest", XmlLimits::default()) {
+            Err(SamlError::ProtocolProfile(_)) => Ok(()),
+            Err(other) => Err(format!("expected ProtocolProfile, got {other:?}")),
+            Ok(_) => Err("expected ProtocolProfile, got a SOAP body".into()),
+        }
+    }
+
+    #[test]
+    fn omitted_is_passive_is_false_on_the_ecp_request() {
+        let envelope = sp_to_ecp_envelope(&SpToEcp {
+            response_consumer_url: "https://sp.example.com/acs?a=1&b=2",
+            provider_name: Some("A\"B&C"),
+            is_passive: None,
+            issuer: "https://sp.example.com/metadata",
+            identity_provider_id: "https://idp.example.com/metadata",
+            identity_provider_loc: "https://idp.example.com/soap",
+            relay_state: None,
+            authn_request_xml: "<samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest>",
+        });
+        assert!(envelope.contains("IsPassive=\"false\""));
+        assert!(envelope.contains("ProviderName=\"A&quot;B&amp;C\""));
+        assert!(envelope.contains("responseConsumerURL=\"https://sp.example.com/acs?a=1&amp;b=2\""));
+    }
+
+    #[test]
+    fn a_non_soap_body_is_rejected() -> Result<(), String> {
+        let xml = format!(
+            "<!-- {SOAP_ENVELOPE_NS} --><SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:other=\"urn:example:other\"><other:Body><samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest></other:Body></SOAP-ENV:Envelope>"
         );
         match read_soap_body(&xml, "AuthnRequest", XmlLimits::default()) {
             Err(SamlError::ProtocolProfile(_)) => Ok(()),
