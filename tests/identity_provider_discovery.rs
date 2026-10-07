@@ -175,6 +175,29 @@ fn common_domain_must_be_a_hostname_not_an_ip_address() -> Result<(), Box<dyn st
 }
 
 #[test]
+fn remembered_cookie_value_stays_within_browser_cookie_limits(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let entity = format!("https://idp.example.net/{}", "a".repeat(400));
+    let single = identity_provider(&entity)?.remember_identity_provider(
+        CommonDomainCookieRequest::new("example.org", DiscoveryCookieLifetime::Session),
+    )?;
+    let copies = 4096 / (single.value().len() + 3) + 2;
+    let bloated = vec![single.value(); copies].join("%20");
+    assert!(bloated.len() > 4096);
+    assert!(bloated.len() <= 8192);
+    assert_invalid(
+        remember(
+            IDP_ENTITY_ID,
+            "example.org",
+            DiscoveryCookieLifetime::Session,
+            Some(&bloated),
+        ),
+        "4096",
+    )?;
+    Ok(())
+}
+
+#[test]
 fn cookie_value_percent_encodes_base64_plus_and_slash() -> Result<(), Box<dyn std::error::Error>> {
     let plus = remember(
         "https://idp.example/~",

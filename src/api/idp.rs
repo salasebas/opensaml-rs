@@ -248,8 +248,9 @@ impl Saml<Idp> {
     /// Returns [`SamlError::Invalid`] when the common domain is not a hostname
     /// without a leading period, the persistent lifetime is not a whole number
     /// of seconds or is shorter than one second, the existing cookie is not a list of
-    /// identity-provider entity identifiers, or this identity provider's entity
-    /// identifier cannot be stored in that list.
+    /// identity-provider entity identifiers, this identity provider's entity
+    /// identifier cannot be stored in that list, or the resulting cookie value
+    /// is larger than 4096 bytes.
     ///
     /// # Examples
     ///

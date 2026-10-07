@@ -9,6 +9,7 @@ use crate::error::SamlError;
 
 const MAX_ENTITY_IDENTIFIER_CHARACTERS: usize = 1024;
 const MAX_EXISTING_COOKIE_BYTES: usize = 8 * 1024;
+const MAX_COOKIE_VALUE_BYTES: usize = 4096;
 
 /// How long the browser keeps the common domain cookie.
 ///
@@ -144,8 +145,15 @@ pub(crate) fn remember_identity_provider(
     let mut entity_ids = entity_ids_from_existing(request.existing_cookie)?;
     entity_ids.retain(|existing| existing != entity_id);
     entity_ids.push(entity_id.to_string());
+    let value = encode_cookie_value(&entity_ids);
+    // Browsers discard cookies larger than this instead of writing them.
+    if value.len() > MAX_COOKIE_VALUE_BYTES {
+        return Err(invalid(
+            "remembered common domain cookie is larger than 4096 bytes",
+        ));
+    }
     Ok(CommonDomainCookie {
-        value: encode_cookie_value(&entity_ids),
+        value,
         domain,
         lifetime,
     })
