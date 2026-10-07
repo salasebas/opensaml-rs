@@ -63,14 +63,18 @@ into another. It is a separate operational mode from the base IdP and SP.
 _Avoid_: name identifier management
 
 **Operational mode**:
-An OASIS conformance role and the full column of features that role implements.
-The roles are IdP, IdP Lite, SP, SP Lite, ECP, and the SAML authorities. IdP
-Lite and SP Lite are smaller columns of the same table, not separate profiles.
+A role in SAML V2.0 Conformance Requirements §3.1, and the full column of
+features that role implements. The roles are IdP, IdP Lite, SP, SP Lite, ECP,
+and the SAML authorities. Table 2 is the feature matrix for the IdP and SP
+columns. IdP Lite and SP Lite are smaller columns of that table, not separate
+profiles.
 _Avoid_: Web Browser SSO operational mode, claimed feature
 
 **Claimed feature**:
 A SAML behaviour saml-rs already implements, bounded by role, direction,
-profile or flow, and binding.
+profile or flow, and binding. It is one cell of Conformance Requirements
+Table 2: a profile or message exchange plus a binding. The cells this crate
+records are in `docs/conformance/`.
 _Avoid_: SAML V2.0 as a whole, operational mode
 
 **Recommended**:

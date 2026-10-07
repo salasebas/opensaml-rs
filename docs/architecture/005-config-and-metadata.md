@@ -1,5 +1,9 @@
 # Config, policies, and metadata trust
 
+> Design record for the typed API. The live file index is
+> [the module map](../module-map.md). A heading that says Proposed, Target,
+> or Today describes this design.
+
 The typed config surface replaces `EntitySetting` as the primary path.
 `EntitySetting` remains raw compatibility. A raw string bag cannot keep an
 illegal endpoint or credential combination unrepresentable, which is why the

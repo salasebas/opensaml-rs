@@ -1,5 +1,9 @@
 # Typed Single Logout API
 
+> Design record for the typed API. The live file index is
+> [the module map](../module-map.md). A heading that says Proposed, Target,
+> or Today describes this design.
+
 Typed Single Logout follows the SSO shape: start, receive, respond, and
 finish, with the same typed correlation. Logout then carries the role and the
 pending message, rather than a free-form request identifier.

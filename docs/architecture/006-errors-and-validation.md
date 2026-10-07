@@ -1,12 +1,17 @@
 # Errors and validation
 
+> Design record for the typed API. The live file index is
+> [the module map](../module-map.md). A heading that says Proposed, Target,
+> or Today describes this design.
+
 The canonical error type remains `SamlError`. This note explains why a single
 semantic error, plus an explicit validation context, replaced generic failure
 buckets and hidden clocks.
 
-## Current Problem
+## Starting point
 
-Today, `SamlError` mixes semantic SAML failures with generic buckets:
+This design started from a `SamlError` that mixed semantic SAML failures
+with generic buckets:
 
 ```rust
 SamlError::Xml(String)
@@ -25,6 +30,9 @@ This works for fail-closed behaviour, but it is not enough for a polished typed
 API. Callers should branch on validation rule failures without string matching.
 
 ## Target Error Shape
+
+The semantic variants below are the ones callers match on. `UnmatchIssuer`
+remains a compatibility variant beside `IssuerMismatch`.
 
 Keep `SamlError` and make it semantic:
 
@@ -182,7 +190,7 @@ order explicit:
 A `bool` is not enough for signed metadata in the typed API. The caller also
 needs the signed descriptor that verification covered.
 
-Target:
+The verification result this design called for:
 
 ```rust
 pub struct MetadataSignatureVerification { /* private fields */ }
