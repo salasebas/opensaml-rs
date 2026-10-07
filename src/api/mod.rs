@@ -33,11 +33,10 @@
 //! use saml_rs::{CommonDomainCookieRequest, DiscoveryCookieLifetime, Saml, Sp};
 //!
 //! let sp: Saml<Sp> = unreachable!();
-//! let _ = sp.remember_identity_provider(CommonDomainCookieRequest {
-//!     common_domain: "example.org",
-//!     lifetime: DiscoveryCookieLifetime::Session,
-//!     existing_cookie: None,
-//! });
+//! let _ = sp.remember_identity_provider(CommonDomainCookieRequest::new(
+//!     "example.org",
+//!     DiscoveryCookieLifetime::Session,
+//! ));
 //! ```
 
 mod idp;

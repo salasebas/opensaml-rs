@@ -1,5 +1,6 @@
 //! Common domain cookie for Identity Provider Discovery.
 
+use std::net::Ipv4Addr;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD;
@@ -9,7 +10,8 @@ use crate::error::SamlError;
 
 const MAX_ENTITY_IDENTIFIER_CHARACTERS: usize = 1024;
 const MAX_EXISTING_COOKIE_BYTES: usize = 8 * 1024;
-const MAX_COOKIE_VALUE_BYTES: usize = 4096;
+const MAX_COOKIE_NAME_AND_VALUE_BYTES: usize = 4096;
+const MAX_PERSISTENT_LIFETIME_SECONDS: u64 = 2_147_483_647;
 
 /// How long the browser keeps the common domain cookie.
 ///
@@ -22,8 +24,8 @@ pub enum DiscoveryCookieLifetime {
     Session,
     /// The browser keeps the cookie for `max_age`.
     ///
-    /// `max_age` must be a whole number of seconds and at least one second.
-    /// That duration is written as `Max-Age`.
+    /// `max_age` must be a whole number of seconds, at least one second, and
+    /// at most 2147483647 seconds. That duration is written as `Max-Age`.
     Persistent {
         /// How long the browser keeps the cookie.
         max_age: Duration,
@@ -33,24 +35,17 @@ pub enum DiscoveryCookieLifetime {
 /// What the caller passes to remember this identity provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommonDomainCookieRequest<'a> {
-    /// Deployment common domain, without a leading period.
-    ///
-    /// `example.org` becomes the cookie domain `.example.org`.
-    pub common_domain: &'a str,
-    /// Browser session, or a persistent `Max-Age`.
-    pub lifetime: DiscoveryCookieLifetime,
-    /// Current `_saml_idp` value, when the browser sent one.
-    ///
-    /// `None` and an empty value both start a new list. A present value is the
-    /// cookie value: percent-encoded, or already decoded with a real space
-    /// between entries. A `+` inside a base64 entry stays a `+`.
-    pub existing_cookie: Option<&'a str>,
+    common_domain: &'a str,
+    lifetime: DiscoveryCookieLifetime,
+    existing_cookie: Option<&'a str>,
 }
 
 impl<'a> CommonDomainCookieRequest<'a> {
     /// Start a cookie list that contains only this identity provider.
     ///
-    /// `common_domain` has no leading period. Call
+    /// `common_domain` is the deployment common domain, without a leading
+    /// period: `example.org` becomes the cookie domain `.example.org`.
+    /// `lifetime` is the browser session, or a persistent `Max-Age`. Call
     /// [`Self::with_existing_cookie`] when the browser already sent
     /// `_saml_idp`.
     pub fn new(common_domain: &'a str, lifetime: DiscoveryCookieLifetime) -> Self {
@@ -62,6 +57,10 @@ impl<'a> CommonDomainCookieRequest<'a> {
     }
 
     /// Keep the identity providers already listed in this `_saml_idp` value.
+    ///
+    /// An empty value starts a new list. Any other value is the cookie value:
+    /// percent-encoded, or already decoded with a real space between entries.
+    /// A `+` inside a base64 entry stays a `+`.
     pub fn with_existing_cookie(mut self, value: &'a str) -> Self {
         self.existing_cookie = Some(value);
         self
@@ -145,12 +144,14 @@ pub(crate) fn remember_identity_provider(
     let mut entity_ids = entity_ids_from_existing(request.existing_cookie)?;
     entity_ids.retain(|existing| existing != entity_id);
     entity_ids.push(entity_id.to_string());
-    let value = encode_cookie_value(&entity_ids);
-    // Browsers discard cookies larger than this instead of writing them.
-    if value.len() > MAX_COOKIE_VALUE_BYTES {
-        return Err(invalid(
-            "remembered common domain cookie is larger than 4096 bytes",
-        ));
+    let mut value = encode_cookie_value(&entity_ids);
+    // The oldest entries are dropped until the cookie name and value together
+    // are at most 4096 bytes.
+    while CommonDomainCookie::NAME.len() + value.len() > MAX_COOKIE_NAME_AND_VALUE_BYTES
+        && entity_ids.len() > 1
+    {
+        entity_ids.remove(0);
+        value = encode_cookie_value(&entity_ids);
     }
     Ok(CommonDomainCookie {
         value,
@@ -160,10 +161,7 @@ pub(crate) fn remember_identity_provider(
 }
 
 fn validate_entity_identifier(entity_id: &str) -> Result<(), SamlError> {
-    if entity_id.is_empty()
-        || entity_id.chars().count() > MAX_ENTITY_IDENTIFIER_CHARACTERS
-        || !is_entity_identifier_uri(entity_id)
-    {
+    if entity_id.len() > MAX_ENTITY_IDENTIFIER_CHARACTERS || !is_entity_identifier_uri(entity_id) {
         return Err(invalid(
             "entity identifier must be a URI of at most 1024 characters",
         ));
@@ -172,8 +170,8 @@ fn validate_entity_identifier(entity_id: &str) -> Result<(), SamlError> {
 }
 
 fn is_entity_identifier_uri(entity_id: &str) -> bool {
-    // Entity identifiers are URIs, so they are ASCII.
-    if !entity_id.is_ascii() {
+    // Every byte is a visible ASCII character.
+    if !entity_id.bytes().all(|byte| byte.is_ascii_graphic()) {
         return false;
     }
     let Some((scheme, rest)) = entity_id.split_once(':') else {
@@ -188,9 +186,6 @@ fn is_entity_identifier_uri(entity_id: &str) -> bool {
             character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
         })
         && !rest.is_empty()
-        && !entity_id
-            .chars()
-            .any(|character| character.is_ascii_control() || character.is_whitespace())
 }
 
 fn common_domain_attribute(common_domain: &str) -> Result<String, SamlError> {
@@ -207,15 +202,8 @@ fn common_domain_attribute(common_domain: &str) -> Result<String, SamlError> {
 }
 
 fn is_ascii_hostname(domain: &str) -> bool {
-    if domain.len() > 253 || domain.ends_with('.') {
-        return false;
-    }
-    // An IPv4 literal or an all-numeric top-level domain is not a common domain.
-    if domain
-        .rsplit('.')
-        .next()
-        .is_some_and(|label| !label.is_empty() && label.bytes().all(|byte| byte.is_ascii_digit()))
-    {
+    // An IPv4 literal is not a common domain.
+    if domain.len() > 253 || domain.ends_with('.') || domain.parse::<Ipv4Addr>().is_ok() {
         return false;
     }
     domain.split('.').all(|label| {
@@ -242,6 +230,11 @@ fn validated_lifetime(
         if max_age.as_secs() == 0 {
             return Err(invalid(
                 "persistent discovery cookie lifetime must be at least one second",
+            ));
+        }
+        if max_age.as_secs() > MAX_PERSISTENT_LIFETIME_SECONDS {
+            return Err(invalid(
+                "persistent discovery cookie lifetime must be at most 2147483647 seconds",
             ));
         }
     }
@@ -282,10 +275,8 @@ fn entity_id_from_token(token: &str) -> Result<String, SamlError> {
     let bytes = STANDARD
         .decode(token)
         .map_err(|_| invalid("existing common domain cookie entry is not base64"))?;
-    let entity_id = String::from_utf8(bytes)
-        .map_err(|_| invalid("existing common domain cookie entry is not an entity identifier"))?;
-    validate_entity_identifier(&entity_id)?;
-    Ok(entity_id)
+    String::from_utf8(bytes)
+        .map_err(|_| invalid("existing common domain cookie entry is not an entity identifier"))
 }
 
 fn encode_cookie_value(entity_ids: &[String]) -> String {

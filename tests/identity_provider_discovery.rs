@@ -146,13 +146,7 @@ fn writer_appends_this_identity_provider_and_moves_it_to_the_end(
 
 #[test]
 fn common_domain_must_be_a_hostname_not_an_ip_address() -> Result<(), Box<dyn std::error::Error>> {
-    for domain in [
-        "192.168.1.1",
-        "127.0.0.1",
-        "10.0.0.1",
-        "1.2.3.4",
-        "example.123",
-    ] {
+    for domain in ["192.168.1.1", "127.0.0.1", "10.0.0.1", "1.2.3.4"] {
         assert_invalid(
             remember(
                 IDP_ENTITY_ID,
@@ -172,6 +166,15 @@ fn common_domain_must_be_a_hostname_not_an_ip_address() -> Result<(), Box<dyn st
         None,
     )?;
     assert_eq!(local.domain(), ".localhost");
+
+    // A numeric last label is a hostname, not an IPv4 literal.
+    let numeric_label = remember(
+        IDP_ENTITY_ID,
+        "example.123",
+        DiscoveryCookieLifetime::Session,
+        None,
+    )?;
+    assert_eq!(numeric_label.domain(), ".example.123");
     Ok(())
 }
 
@@ -186,15 +189,77 @@ fn remembered_cookie_value_stays_within_browser_cookie_limits(
     let bloated = vec![single.value(); copies].join("%20");
     assert!(bloated.len() > 4096);
     assert!(bloated.len() <= 8192);
-    assert_invalid(
-        remember(
-            IDP_ENTITY_ID,
-            "example.org",
-            DiscoveryCookieLifetime::Session,
-            Some(&bloated),
-        ),
-        "4096",
+    let cookie = remember(
+        IDP_ENTITY_ID,
+        "example.org",
+        DiscoveryCookieLifetime::Session,
+        Some(&bloated),
     )?;
+    assert!(CommonDomainCookie::NAME.len() + cookie.value().len() <= 4096);
+    assert!(cookie
+        .value()
+        .ends_with(&format!("%20{IDP_ENTITY_COOKIE_VALUE}")));
+    Ok(())
+}
+
+#[test]
+fn cookie_name_counts_toward_the_4096_byte_limit() -> Result<(), Box<dyn std::error::Error>> {
+    // Encoded `_saml_idp` value for one identity provider with `tail` path bytes.
+    fn listed(tail: usize) -> Result<String, Box<dyn std::error::Error>> {
+        let entity = format!("https://idp.example.net/{}", "a".repeat(tail));
+        let cookie = identity_provider(&entity)?.remember_identity_provider(
+            CommonDomainCookieRequest::new("example.org", DiscoveryCookieLifetime::Session),
+        )?;
+        Ok(cookie.value().to_string())
+    }
+    let name = CommonDomainCookie::NAME.len();
+    let appended = "%20".len() + IDP_ENTITY_COOKIE_VALUE.len();
+
+    let fits = [listed(999)?, listed(999)?, listed(954)?].join("%20");
+    assert_eq!(name + fits.len() + appended, 4096);
+    let cookie = remember(
+        IDP_ENTITY_ID,
+        "example.org",
+        DiscoveryCookieLifetime::Session,
+        Some(&fits),
+    )?;
+    assert_eq!(name + cookie.value().len(), 4096);
+
+    // The oldest entry is dropped when the name pushes the pair over 4096.
+    let over = [listed(999)?, listed(999)?, listed(957)?].join("%20");
+    assert!(over.len() + appended <= 4096);
+    assert!(name + over.len() + appended > 4096);
+    let evicted = remember(
+        IDP_ENTITY_ID,
+        "example.org",
+        DiscoveryCookieLifetime::Session,
+        Some(&over),
+    )?;
+    assert_eq!(
+        evicted.value(),
+        [
+            listed(999)?,
+            listed(957)?,
+            IDP_ENTITY_COOKIE_VALUE.to_string()
+        ]
+        .join("%20")
+    );
+    Ok(())
+}
+
+#[test]
+fn existing_entry_that_is_not_a_uri_is_kept() -> Result<(), Box<dyn std::error::Error>> {
+    // Standard base64 of `legacy-idp`.
+    let cookie = remember(
+        IDP_ENTITY_ID,
+        "example.org",
+        DiscoveryCookieLifetime::Session,
+        Some("bGVnYWN5LWlkcA%3D%3D"),
+    )?;
+    assert_eq!(
+        cookie.value(),
+        format!("bGVnYWN5LWlkcA%3D%3D%20{IDP_ENTITY_COOKIE_VALUE}")
+    );
     Ok(())
 }
 
@@ -296,6 +361,28 @@ fn discovery_cookie_rejects_input_that_cannot_be_written() -> Result<(), Box<dyn
         ),
         "whole number of seconds",
     )?;
+    assert_invalid(
+        remember(
+            IDP_ENTITY_ID,
+            "example.org",
+            DiscoveryCookieLifetime::Persistent {
+                max_age: Duration::from_secs(2_147_483_648),
+            },
+            None,
+        ),
+        "at most 2147483647 seconds",
+    )?;
+    let longest = remember(
+        IDP_ENTITY_ID,
+        "example.org",
+        DiscoveryCookieLifetime::Persistent {
+            max_age: Duration::from_secs(2_147_483_647),
+        },
+        None,
+    )?;
+    assert!(longest
+        .set_cookie_header()
+        .ends_with("; Max-Age=2147483647"));
     assert_invalid(
         remember(
             IDP_ENTITY_ID,

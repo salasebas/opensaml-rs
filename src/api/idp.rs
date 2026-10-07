@@ -241,22 +241,23 @@ impl Saml<Idp> {
     ///
     /// The caller writes the cookie. [`Self::respond_sso`] does not. Pass the
     /// current cookie value when the browser sent one; this identity provider
-    /// is appended, or moved to the end when it is already listed.
+    /// is appended, or moved to the end when it is already listed. The oldest
+    /// entries are dropped when the cookie name and value together would be
+    /// larger than 4096 bytes.
     ///
     /// # Errors
     ///
     /// Returns [`SamlError::Invalid`] when the common domain is not a hostname
     /// without a leading period, the persistent lifetime is not a whole number
-    /// of seconds or is shorter than one second, the existing cookie is not a list of
-    /// identity-provider entity identifiers, this identity provider's entity
-    /// identifier cannot be stored in that list, or the resulting cookie value
-    /// is larger than 4096 bytes.
+    /// of seconds, is shorter than one second, or is longer than 2147483647
+    /// seconds, the existing cookie is not a list of base64 entries, or this
+    /// identity provider's entity identifier cannot be stored in that list.
+    ///
+    /// # Examples
     ///
     /// The example selects [`crate::IdpValidationPolicy::compatibility`] so it
     /// builds without a crypto provider. [`crate::IdpConfig::builder`] starts
     /// on [`crate::IdpValidationPolicy::recommended`].
-    ///
-    /// # Examples
     ///
     /// ```
     /// use saml_rs::{
@@ -285,19 +286,7 @@ impl Saml<Idp> {
         &self,
         request: CommonDomainCookieRequest<'_>,
     ) -> Result<CommonDomainCookie, SamlError> {
-        discovery::remember_identity_provider(self.identity_provider_entity_id()?, request)
-    }
-
-    fn identity_provider_entity_id(&self) -> Result<&str, SamlError> {
-        let provider = self.raw_identity_provider();
-        provider
-            .setting
-            .entity_id
-            .as_deref()
-            .filter(|entity_id| !entity_id.is_empty())
-            .or_else(|| provider.metadata.get_entity_id())
-            .filter(|entity_id| !entity_id.is_empty())
-            .ok_or_else(|| Error::Invalid("identity provider entity ID is missing".into()))
+        discovery::remember_identity_provider(&self.raw_identity_provider().entity_id(), request)
     }
 }
 fn user_from_subject(subject: Subject) -> crate::entity::User {
