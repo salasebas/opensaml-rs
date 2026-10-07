@@ -11,6 +11,7 @@ compatible additions.
 - [How to upgrade from 0.3 to 0.4](0.3-to-0.4.md)
 - [How to upgrade from 0.4 to 0.5](0.4-to-0.5.md)
 - [How to upgrade from 0.5 to 0.6](0.5-to-0.6.md)
+- [How to upgrade from 0.6 to 0.7](0.6-to-0.7.md)
 
 Someone shipping a breaking change adds the next guide from
 [Contributing](../../CONTRIBUTING.md#how-to-add-a-migration-guide).

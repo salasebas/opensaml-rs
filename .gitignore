@@ -25,3 +25,10 @@ PARITY.md
 
 # Local advisor plans
 plans/
+
+# Doc site previews
+sites/mdbook/book/
+sites/starlight/node_modules/
+sites/starlight/dist/
+sites/starlight/.astro/
+sites/starlight/.vercel/
