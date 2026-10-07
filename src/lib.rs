@@ -268,15 +268,26 @@
 //! API. Hidden modules are lower-level implementation paths and should not be
 //! the first choice for new integrations.
 //!
+//! # Artifact resolution
+//!
+//! [`Saml<Idp>::issue_artifact`] stores a protocol message for one service
+//! provider. [`Saml<Idp>::answer_artifact_resolve`] returns that message in
+//! `ArtifactResponse` only when the presenter is that provider.
+//! [`Saml<Sp>::resolve_artifact`] sends `ArtifactResolve` to the identity
+//! provider's `ArtifactResolutionService`, and [`ArtifactResolution::finish`]
+//! reads the message back. The deployment POSTs the SOAP envelope. This does
+//! not deliver the artifact through the browser and does not claim the IdP or
+//! SP operational mode.
+//!
 //! # Unsupported profiles
 //!
 //! The high-level [`Saml`] API focuses on browser Web SSO, metadata-driven SP/IdP
-//! setup, XML signature/encryption through `bergshamra`, and Single Logout. It
-//! does not yet implement Artifact resolution, SOAP/back-channel profiles,
-//! ECP/PAOS, SAML query protocols, NameID management, or metadata federation. If
-//! you need one of those profiles for a real interoperability target, please
-//! open an issue with the profile, binding, IdP/SP product, and a minimal
-//! expected flow so we can consider the implementation.
+//! setup, XML signature/encryption through `bergshamra`, Single Logout, and
+//! artifact resolution over SOAP. It does not implement HTTP-Artifact browser
+//! delivery, ECP/PAOS, SAML query protocols, NameID management, or metadata
+//! federation. If you need one of those profiles for a real interoperability
+//! target, please open an issue with the profile, binding, IdP/SP product, and
+//! a minimal expected flow so we can consider the implementation.
 //!
 //! XML cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
 //! message signatures) is delegated to `bergshamra`. The default
@@ -316,6 +327,7 @@ compile_error!(
 
 #[doc(hidden)]
 pub mod api;
+mod artifact;
 mod assertion_acceptance;
 #[doc(hidden)]
 pub mod binding;
@@ -338,6 +350,7 @@ pub mod logout;
 pub mod metadata;
 pub mod model;
 pub mod raw;
+mod soap;
 #[doc(hidden)]
 pub mod sp;
 #[doc(hidden)]
@@ -353,20 +366,25 @@ pub use api::{
     ForceAuthn, Idp, IsPassive, LogoutSigning, RespondSlo, RespondSso, Saml, SamlError, Sp,
     StartSlo, StartSso, Unknown,
 };
+pub use artifact::{
+    AnsweredArtifact, Artifact, ArtifactDereference, ArtifactRelease, ArtifactResolution,
+    ArtifactUses, ArtifactWithheld, IssuedArtifacts, IssuedMessage, ResolvedProtocolMessage,
+};
 pub use browser::{
     AcsEndpoint, BrowserInput, EndpointUrl, FormField, LogoutBinding, Outbound, Pending,
     PendingAuthnRequest, PendingLogoutRequest, PendingSnapshot, PostForm, SloEndpoint, SsoEndpoint,
     SsoRequestBinding, SsoResponseBinding, Started,
 };
 pub use config::{
-    AlgorithmPolicy, AssertionEncryptionPolicy, AssertionSignaturePolicy, AudienceValidationPolicy,
-    AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, CertificatePem, Credentials,
-    DataEncryptionAlgorithm, DigestAlgorithm, EntityId, IdpConfig, IdpConfigBuilder, IdpDescriptor,
-    IdpMetadataConfig, IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy,
-    LogoutSignaturePolicy, MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase,
-    PrivateKeyPem, ResponseSignaturePolicy, SignatureAlgorithm, SpConfig, SpConfigBuilder,
-    SpDescriptor, SpMetadataConfig, SpValidationPolicy, TemplatePolicy, TransformAlgorithm,
-    XmlEncryptionPolicy, XmlPolicy, XmlSignatureProfile,
+    AlgorithmPolicy, ArtifactResolutionService, AssertionEncryptionPolicy,
+    AssertionSignaturePolicy, AudienceValidationPolicy, AuthnRequestSigningPolicy,
+    AuthnRequestValidationPolicy, CertificatePem, Credentials, DataEncryptionAlgorithm,
+    DigestAlgorithm, EntityId, IdpConfig, IdpConfigBuilder, IdpDescriptor, IdpMetadataConfig,
+    IdpValidationPolicy, KeyEncryptionAlgorithm, LogoutPolicy, LogoutSignaturePolicy,
+    MetadataTrustPolicy, NameIdCreationPolicy, NameIdFormat, Passphrase, PrivateKeyPem,
+    ResponseSignaturePolicy, SignatureAlgorithm, SpConfig, SpConfigBuilder, SpDescriptor,
+    SpMetadataConfig, SpValidationPolicy, TemplatePolicy, TransformAlgorithm, XmlEncryptionPolicy,
+    XmlPolicy, XmlSignatureProfile,
 };
 #[cfg(any(
     feature = "crypto-rustcrypto",
@@ -395,6 +413,10 @@ pub use model::{
     RequestedSubjectIdentifier, SamlInstant, SamlValidationContext, SessionIndex, SsoResponse,
     SsoSession, Status, Subject, SubjectConfirmation, SubordinateStatusCode, TopLevelStatusCode,
     VerifiedXmlSignature, VerifiedXmlSignatureCoverage, MAX_RELAY_STATE_BYTES,
+};
+pub use soap::{
+    MessageConfidentiality, MessageIntegrity, PartyAuthentication, SoapChannel,
+    SoapProtocolMessage, SoapRequest,
 };
 #[doc = "Re-export kept for older crate-root imports of the raw samlify-port API. Use `Saml` for new integrations; advanced raw callers should import `raw::ServiceProvider`."]
 pub use sp::ServiceProvider;

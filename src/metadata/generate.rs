@@ -5,6 +5,15 @@ use crate::error::SamlError;
 use crate::metadata::write::MetadataWriter;
 use crate::util::{is_non_empty_array, normalize_cert_string};
 
+/// Indexed `ArtifactResolutionService` location. The binding is SOAP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactResolutionEndpoint {
+    /// `index` selecting this endpoint from an artifact.
+    pub index: u16,
+    /// Endpoint URL.
+    pub location: String,
+}
+
 /// A protocol endpoint (`SingleSignOnService` / `SingleLogoutService` / ACS).
 #[derive(Debug, Clone)]
 pub struct Endpoint {
@@ -70,6 +79,8 @@ pub struct IdpMetadataConfig {
     pub single_sign_on_service: Vec<Endpoint>,
     /// `SingleLogoutService` endpoints.
     pub single_logout_service: Vec<Endpoint>,
+    /// `ArtifactResolutionService` endpoints. Each binding is SOAP.
+    pub artifact_resolution_service: Vec<ArtifactResolutionEndpoint>,
     /// Element ordering profile (defaults to [`elements_order::idp::DEFAULT`]).
     pub elements_order: Option<Vec<String>>,
 }
@@ -139,6 +150,23 @@ fn write_single_sign_on_service(w: &mut MetadataWriter, endpoints: &[Endpoint]) 
     }
 }
 
+fn write_artifact_resolution_service(
+    w: &mut MetadataWriter,
+    endpoints: &[ArtifactResolutionEndpoint],
+) {
+    for endpoint in endpoints {
+        let index = endpoint.index.to_string();
+        w.empty(
+            "ArtifactResolutionService",
+            &[
+                ("index", index.as_str()),
+                ("Binding", crate::constants::SOAP_BINDING_URN),
+                ("Location", endpoint.location.as_str()),
+            ],
+        );
+    }
+}
+
 fn write_sp_group(w: &mut MetadataWriter, cfg: &SpMetadataConfig, name: &str) {
     match name {
         "KeyDescriptor" => write_key_descriptors(w, &cfg.signing_certs, &cfg.encrypt_certs),
@@ -159,6 +187,7 @@ fn idp_group_has_content(cfg: &IdpMetadataConfig, name: &str) -> bool {
         "NameIDFormat" => is_non_empty_array(&cfg.name_id_format),
         "SingleSignOnService" => is_non_empty_array(&cfg.single_sign_on_service),
         "SingleLogoutService" => is_non_empty_array(&cfg.single_logout_service),
+        "ArtifactResolutionService" => is_non_empty_array(&cfg.artifact_resolution_service),
         _ => false,
     }
 }
@@ -169,6 +198,9 @@ fn write_idp_group(w: &mut MetadataWriter, cfg: &IdpMetadataConfig, name: &str) 
         "NameIDFormat" => write_name_id_formats(w, &cfg.name_id_format, false),
         "SingleSignOnService" => write_single_sign_on_service(w, &cfg.single_sign_on_service),
         "SingleLogoutService" => write_single_logout(w, &cfg.single_logout_service),
+        "ArtifactResolutionService" => {
+            write_artifact_resolution_service(w, &cfg.artifact_resolution_service)
+        }
         _ => {}
     }
 }
@@ -233,6 +265,7 @@ pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
     let descriptors = [
         "KeyDescriptor",
         "NameIDFormat",
+        "ArtifactResolutionService",
         "SingleSignOnService",
         "SingleLogoutService",
     ];
@@ -264,6 +297,12 @@ pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
     if is_custom_order {
         if !order.iter().any(|ordered| ordered == "SingleSignOnService") {
             write_idp_group(&mut w, cfg, "SingleSignOnService");
+        }
+        if !order
+            .iter()
+            .any(|ordered| ordered == "ArtifactResolutionService")
+        {
+            write_idp_group(&mut w, cfg, "ArtifactResolutionService");
         }
     } else {
         for name in descriptors {
@@ -651,11 +690,15 @@ mod tests {
 
     #[test]
     fn idp_elements_order_profiles_match_upstream() {
+        // The default profile includes ArtifactResolutionService. OneLogin and
+        // Shibboleth stay the upstream lists; generation appends the service
+        // when a custom list omits it.
         assert_eq!(
             elements_order::idp::DEFAULT,
             [
                 "KeyDescriptor",
                 "NameIDFormat",
+                "ArtifactResolutionService",
                 "SingleSignOnService",
                 "SingleLogoutService",
             ]

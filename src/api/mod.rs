@@ -29,6 +29,7 @@
 //! let _ = idp.start_sso(&peer, StartSso::post());
 //! ```
 
+mod artifact;
 mod idp;
 mod options;
 mod raw_mapping;

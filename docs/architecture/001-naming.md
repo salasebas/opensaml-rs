@@ -116,8 +116,8 @@ Rationale:
 - Web SSO AuthnRequests can use Redirect, POST, and SimpleSign.
 - Web SSO Responses should not use Redirect in the typed API.
 - Logout has a separate legal binding set.
-- Raw `Binding::Artifact` remains available only in raw compatibility until
-  Artifact support exists.
+- Raw `Binding::Artifact` remains the browser HTTP-Artifact binding. SOAP
+  artifact resolution does not add a `Binding` variant.
 
 ## Endpoint Names
 

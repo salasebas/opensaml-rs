@@ -6,7 +6,9 @@ use crate::error::SamlError;
 
 use super::algorithms::{name_id_format_uris, transform_algorithm_uris, NameIdFormat};
 use super::credentials::Credentials;
-use super::descriptors::{validate_entity_id, EntityId, IdpMetadataConfig, SpMetadataConfig};
+use super::descriptors::{
+    validate_entity_id, ArtifactResolutionService, EntityId, IdpMetadataConfig, SpMetadataConfig,
+};
 use super::policies::{
     assertion_signature_required, audience_restriction_required, audience_validation_enabled,
     authn_request_signature_required, authn_request_signing_enabled,
@@ -345,6 +347,12 @@ impl IdpConfigBuilder {
     /// Add an SLO endpoint.
     pub fn slo_endpoint(mut self, endpoint: SloEndpoint) -> Self {
         self.metadata.single_logout_service.push(endpoint);
+        self
+    }
+
+    /// Publish a SOAP `ArtifactResolutionService` endpoint.
+    pub fn artifact_resolution_service(mut self, service: ArtifactResolutionService) -> Self {
+        self.metadata.artifact_resolution_service.push(service);
         self
     }
 
