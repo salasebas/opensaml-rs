@@ -13,7 +13,7 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::reader::NsReader;
 
 use crate::config::{IdpDescriptor, SpDescriptor};
-use crate::constants::{namespace, status_code};
+use crate::constants::{name_id_format, namespace, status_code};
 use crate::entity::{generate_id, now_iso8601};
 use crate::error::SamlError;
 use crate::metadata::IdpMetadata;
@@ -29,7 +29,6 @@ use crate::xml::write::XmlWriter;
 const ARTIFACT_TYPE_CODE: u16 = 0x0004;
 const ARTIFACT_LEN: usize = 44;
 const SOURCE_ID_LEN: usize = 20;
-const ENTITY_FORMAT: &str = "urn:oasis:names:tc:SAML:2.0:nameid-format:entity";
 
 /// SAML V2.0 type 0x0004 artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +181,12 @@ impl IssuedMessage {
                 "Web Browser SSO artifact message must be a protocol Response".into(),
             ));
         }
+        if !web_browser_sso_response && element.local_name == "Response" {
+            return Err(SamlError::ProtocolProfile(
+                "a protocol Response must be stored with IssuedMessage::web_browser_sso_response"
+                    .into(),
+            ));
+        }
         let xml = root_span(xml.as_str())?;
         Ok(Self {
             xml,
@@ -191,6 +196,9 @@ impl IssuedMessage {
 }
 
 /// Artifacts an identity provider has issued and not yet resolved.
+///
+/// The caller owns eviction: drop entries that will never resolve, for
+/// example after a deployment-selected timeout, to bound memory.
 #[derive(Debug, Default)]
 pub struct IssuedArtifacts {
     entries: HashMap<String, IssuedEntry>,
@@ -344,6 +352,13 @@ impl ArtifactResolution {
                 "ArtifactResponse Version must be 2.0".into(),
             ));
         }
+        let _response_id = required_attr(&response, "ID")?;
+        let response_instant = required_attr(&response, "IssueInstant")?;
+        if parse_saml_utc_date_time(&response_instant).is_none() {
+            return Err(SamlError::ProtocolProfile(
+                "ArtifactResponse IssueInstant must be a UTC xs:dateTime".into(),
+            ));
+        }
         let in_response_to = response.attr("InResponseTo");
         if in_response_to != Some(self.request_id.as_str()) {
             return Err(SamlError::in_response_to_mismatch(
@@ -459,7 +474,6 @@ pub(crate) fn resolve(
         return Err(SamlError::issuer_mismatch(idp_entity_id, None));
     }
     let service = soap_service(identity_provider.metadata(), artifact.endpoint_index())?;
-    uses.record(artifact.as_str())?;
     let request_id = generate_id();
     let issue_instant = now_iso8601();
     let mut writer = XmlWriter::new();
@@ -479,6 +493,7 @@ pub(crate) fn resolve(
     writer.end("samlp:ArtifactResolve");
     let request =
         SoapProtocolMessage::request(EndpointUrl::try_new(service.location())?, &writer.finish())?;
+    uses.record(artifact.as_str())?;
     Ok(ArtifactResolution {
         request,
         request_id,
@@ -697,12 +712,23 @@ fn parse_resolve(xml: &str) -> Result<ResolveRequest, SamlError> {
     if element
         .children
         .iter()
-        .filter(|child| child.local_name == "Artifact")
+        .filter(|child| child.local_name == "Artifact" && child.namespace == namespace::PROTOCOL)
         .count()
         != 1
     {
         return Err(SamlError::ProtocolProfile(
             "ArtifactResolve requires one Artifact value".into(),
+        ));
+    }
+    if element
+        .children
+        .iter()
+        .filter(|child| child.local_name == "Issuer" && child.namespace == namespace::ASSERTION)
+        .count()
+        > 1
+    {
+        return Err(SamlError::ProtocolProfile(
+            "ArtifactResolve requires at most one Issuer".into(),
         ));
     }
     Ok(ResolveRequest {
@@ -732,16 +758,21 @@ fn issuer(element: &SamlElement) -> Option<PartyName> {
 fn issuer_format_is_entity(format: Option<&str>) -> bool {
     match format {
         None => true,
-        Some(format) => format == ENTITY_FORMAT,
+        Some(format) => format == name_id_format::ENTITY,
     }
 }
 
 fn status_codes(response: &SamlElement) -> Result<(String, Option<String>), SamlError> {
-    let status = response
+    let mut statuses = response
         .children
         .iter()
-        .find(|child| child.local_name == "Status" && child.namespace == namespace::PROTOCOL)
-        .ok_or(SamlError::UndefinedStatus)?;
+        .filter(|child| child.local_name == "Status" && child.namespace == namespace::PROTOCOL);
+    let status = statuses.next().ok_or(SamlError::UndefinedStatus)?;
+    if statuses.next().is_some() {
+        return Err(SamlError::ProtocolProfile(
+            "ArtifactResponse requires one Status".into(),
+        ));
+    }
     let code = status
         .children
         .iter()
@@ -755,7 +786,7 @@ fn status_codes(response: &SamlElement) -> Result<(String, Option<String>), Saml
     let second = code
         .children
         .iter()
-        .find(|child| child.local_name == "StatusCode")
+        .find(|child| child.local_name == "StatusCode" && child.namespace == namespace::PROTOCOL)
         .and_then(|child| child.attr("Value"))
         .map(str::to_string);
     Ok((top, second))
@@ -973,6 +1004,24 @@ mod tests {
     fn sha1_matches_the_nist_abc_vector() {
         let digest = sha1(b"abc");
         assert_eq!(hex(&digest), "a9993e364706816aba3e25717850c26c9cd0d89d");
+    }
+
+    #[test]
+    fn sha1_matches_the_empty_vector() {
+        let digest = sha1(b"");
+        assert_eq!(hex(&digest), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+    }
+
+    #[test]
+    fn sha1_matches_the_two_block_nist_vector() {
+        let digest = sha1(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq");
+        assert_eq!(hex(&digest), "84983e441c3bd26ebaae4aa1f95129e5e54670f1");
+    }
+
+    #[test]
+    fn sha1_matches_the_quick_brown_fox_vector() {
+        let digest = sha1(b"The quick brown fox jumps over the lazy dog");
+        assert_eq!(hex(&digest), "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12");
     }
 
     fn hex(bytes: &[u8]) -> String {

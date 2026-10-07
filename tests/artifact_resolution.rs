@@ -845,3 +845,133 @@ fn a_release_that_cannot_be_built_leaves_the_artifact_outstanding(
     ));
     Ok(())
 }
+
+#[test]
+fn a_response_must_be_stored_as_a_web_sso_response() -> Result<(), Box<dyn std::error::Error>> {
+    let response = format!(
+        r#"<samlp:Response xmlns:samlp="{PROTOCOL}" ID="_response" Version="2.0" IssueInstant="2024-01-01T00:00:00Z">{WEB_SSO_MARKER}</samlp:Response>"#
+    );
+    assert!(matches!(
+        IssuedMessage::protocol(response),
+        Err(SamlError::ProtocolProfile(_))
+    ));
+    let logout = format!(
+        r#"<samlp:LogoutRequest xmlns:samlp="{PROTOCOL}" ID="_logout" Version="2.0" IssueInstant="2024-01-01T00:00:00Z">{LOGOUT_MARKER}</samlp:LogoutRequest>"#
+    );
+    assert!(matches!(
+        IssuedMessage::web_browser_sso_response(logout),
+        Err(SamlError::ProtocolProfile(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn the_service_provider_rejects_an_artifact_response_without_id_or_instant(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, web_sso_response()?, &mut issued)?;
+    let channel = confidential();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut ArtifactUses::enforce_single_use(),
+    )?;
+    let answer = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    )?;
+    let envelope = answer.envelope();
+    let without_id = remove_attribute(envelope, "ID")?;
+    assert!(matches!(
+        resolution.finish(&without_id),
+        Err(SamlError::ProtocolProfile(_))
+    ));
+    let without_instant = remove_attribute(envelope, "IssueInstant")?;
+    assert!(matches!(
+        resolution.finish(&without_instant),
+        Err(SamlError::ProtocolProfile(_))
+    ));
+    let bad_instant = envelope.replacen("IssueInstant=\"", "IssueInstant=\"not-a-time ", 1);
+    assert_ne!(bad_instant, *envelope);
+    assert!(matches!(
+        resolution.finish(&bad_instant),
+        Err(SamlError::ProtocolProfile(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn a_duplicate_resolve_issuer_is_refused_as_malformed() -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, web_sso_response()?, &mut issued)?;
+    let channel = confidential();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut ArtifactUses::allow_reuse(),
+    )?;
+    let duplicated = resolution.request().envelope().replacen(
+        "</saml:Issuer>",
+        &format!("</saml:Issuer><saml:Issuer>{SP_ENTITY_ID}</saml:Issuer>"),
+        1,
+    );
+    let refused = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        &duplicated,
+        &mut issued,
+        channel,
+    );
+    assert!(matches!(refused, Err(SamlError::ProtocolProfile(_))));
+
+    let accepted = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    )?;
+    assert_eq!(accepted.release(), ArtifactRelease::Returned);
+    Ok(())
+}
+
+#[test]
+fn the_service_provider_rejects_an_artifact_response_with_two_statuses(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, web_sso_response()?, &mut issued)?;
+    let channel = confidential();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut ArtifactUses::enforce_single_use(),
+    )?;
+    let answer = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    )?;
+    let envelope = answer.envelope();
+    let status_end_tag = "</samlp:Status>";
+    let start = envelope
+        .find("<samlp:Status")
+        .ok_or("ArtifactResponse is missing Status")?;
+    let end = envelope
+        .find(status_end_tag)
+        .ok_or("ArtifactResponse is missing Status")?
+        + status_end_tag.len();
+    let mut duplicated = envelope.to_string();
+    duplicated.insert_str(end, &envelope[start..end]);
+    assert!(matches!(
+        resolution.finish(&duplicated),
+        Err(SamlError::ProtocolProfile(_))
+    ));
+    Ok(())
+}

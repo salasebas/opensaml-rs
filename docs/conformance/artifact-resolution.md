@@ -54,6 +54,7 @@ Bindings §3.6.5.
 | Do not generate a leap-second time | Requester | Generate any instant | Mandatory. Core §1.3.3. Receivers are not required to reject a leap second |
 | `Destination` is the artifact resolution endpoint | Requester | Generate ArtifactResolve | Set to the metadata location. Core treats `Destination` as optional. When a received request includes it, a different value does not release the message |
 | One `Artifact` value | Requester | Generate ArtifactResolve | Mandatory. Protocol schema |
+| At most one `Issuer` | Requester | Generate ArtifactResolve | Protocol schema `ArtifactResolveType`. A second `Issuer` is malformed; the responder returns `SamlError` so the deployment can refuse it at HTTP |
 | Authenticate to the responder and protect integrity | Requester | Send ArtifactResolve | Recommendation. Profiles §5.3.1 and §5.4.1. Enforced for every dereference. There is no relaxation. Web SSO makes the same properties mandatory and adds confidentiality; that row is below |
 | The SOAP body contains exactly one SAML request | Requester | SOAP envelope | Mandatory. Bindings §3.2.2.1, as left by Errata 05 E19 |
 | `SOAPAction` may be `http://www.oasis-open.org/committees/security` | Requester | HTTP | Optional. Bindings §3.2.3. The helper reports that value. The responder does not read the header |
@@ -84,7 +85,7 @@ The caller chooses. A channel that lacks the required protection returns
 | The responder authenticates itself and protects integrity | Artifact issuer | SOAP exchange | Mandatory. Profiles §5.4.2. Satisfied by the caller's `SoapChannel`, which is the binding mechanism. An XML signature on `ArtifactResponse` is the profile's other mechanism and is not generated |
 | `Cache-Control: no-cache, no-store, must-revalidate, private` and `Pragma: no-cache` | Artifact issuer | HTTP | Recommendation. Bindings §3.2.3.2. The helper reports those values |
 | Exactly one SAML response in the SOAP body | Artifact issuer | SOAP envelope | Mandatory. Bindings §3.2.2.1 and Errata 05 E19 |
-| Ignore SOAP headers this responder does not process | Artifact issuer | SOAP envelope | Bindings §3.2.2.2: a responder must not require headers for the SAML message. A header with SOAP `mustUnderstand="1"` or `"true"` is refused, because SOAP 1.1 requires a fault when that header is not processed. The deployment sends the fault |
+| Ignore SOAP headers this responder does not process | Artifact issuer | SOAP envelope | Bindings §3.2.2.2: a responder must not require headers for the SAML message. A header with SOAP `mustUnderstand="1"` or `"true"` is refused, because SOAP 1.1 requires a fault when that header is not processed. An unprefixed `mustUnderstand` is refused the same way, fail-closed, as library policy. The deployment sends the fault |
 
 A missing `Issuer`, or an `Issuer` whose `Format` is not omitted and not
 `entity`, does not release the message. The status is still Success, and the
@@ -106,6 +107,7 @@ Profiles §4.1.4.4 applies only when the caller stores the message with
 | Rule | Actor | Direction | Level |
 | --- | --- | --- | --- |
 | The dereference is mutually authenticated, integrity protected, and confidential | Both parties | SOAP exchange | Mandatory for this profile. Profiles §4.1.4.4. The caller attests all three on `SoapChannel`. Confidentiality is not required for `IssuedMessage::protocol` |
+| A Web SSO `<Response>` is stored only with `web_browser_sso_response` | Artifact issuer | Store the message | Library policy. `IssuedMessage::protocol` rejects a `Response`, so the call site cannot downgrade the confidentiality requirement above |
 | Only the service provider the response was issued to receives it | Artifact issuer | Generate ArtifactResponse | Mandatory. Profiles §4.1.4.4 |
 
 The binding, not a message signature, is the authentication mechanism from
@@ -119,6 +121,8 @@ The binding, not a message signature, is the authentication mechanism from
 | --- | --- | --- | --- |
 | The SOAP body is one `ArtifactResponse` | Requester | Inbound ArtifactResponse | Bindings §3.2.2.1 |
 | `Version` is `2.0` | Requester | Inbound ArtifactResponse | Protocol schema |
+| `ID` is present and `IssueInstant` is a UTC `xs:dateTime` | Requester | Inbound ArtifactResponse | Protocol schema; Core §1.3.3 for the instant. Mirrors the `ArtifactResolve` check |
+| One `Status` | Requester | Inbound ArtifactResponse | Protocol schema. A second `Status` is malformed |
 | `InResponseTo` is present and equals the request `ID` | Requester | Inbound ArtifactResponse | Mandatory. Core §3.2.2 |
 | Top-level status is Success, and one protocol message is present | Requester | Inbound ArtifactResponse | The success case of Profiles §5.3.2. Success without a message is `SamlError::ArtifactNotReturned` |
 | `Issuer` is present, equals the identity provider, and omits `Format` or sets it to `entity` | Requester | Inbound ArtifactResponse | Library policy. Profiles §5.4.2 requires the issuer to send that `Issuer` and does not require the requester to reject another response. The looser rule cannot be applied because this requester attributes the responder by that `Issuer` together with `SoapChannel`. Without it, `finish` would return a message that is not attributed to the artifact issuer |
