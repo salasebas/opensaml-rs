@@ -41,7 +41,8 @@ pub struct CommonDomainCookieRequest<'a> {
     /// Current `_saml_idp` value, when the browser sent one.
     ///
     /// `None` and an empty value both start a new list. A present value is the
-    /// cookie's value, still URL-encoded or already decoded.
+    /// cookie value: percent-encoded, or already decoded with a real space
+    /// between entries. A `+` inside a base64 entry stays a `+`.
     pub existing_cookie: Option<&'a str>,
 }
 
@@ -151,13 +152,33 @@ pub(crate) fn remember_identity_provider(
 }
 
 fn validate_entity_identifier(entity_id: &str) -> Result<(), SamlError> {
-    if entity_id.is_empty() {
-        return Err(invalid("entity identifier must not be empty"));
-    }
-    if entity_id.chars().count() > MAX_ENTITY_IDENTIFIER_CHARACTERS {
-        return Err(invalid("entity identifier must not exceed 1024 characters"));
+    if entity_id.is_empty()
+        || entity_id.chars().count() > MAX_ENTITY_IDENTIFIER_CHARACTERS
+        || !is_entity_identifier_uri(entity_id)
+    {
+        return Err(invalid(
+            "entity identifier must be a URI of at most 1024 characters",
+        ));
     }
     Ok(())
+}
+
+fn is_entity_identifier_uri(entity_id: &str) -> bool {
+    let Some((scheme, rest)) = entity_id.split_once(':') else {
+        return false;
+    };
+    let mut scheme_chars = scheme.chars();
+    let Some(first) = scheme_chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphabetic()
+        && scheme_chars.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
+        })
+        && !rest.is_empty()
+        && !entity_id
+            .chars()
+            .any(|character| character.is_ascii_control() || character.is_whitespace())
 }
 
 fn common_domain_attribute(common_domain: &str) -> Result<String, SamlError> {
@@ -216,7 +237,18 @@ fn entity_ids_from_existing(existing: Option<&str>) -> Result<Vec<String>, SamlE
             "existing common domain cookie is larger than 8192 bytes",
         ));
     }
-    let decoded = decode_percent(existing)?;
+    let decoded = decode_percent(existing, PlusSign::Keep)?;
+    match entity_ids_from_decoded(&decoded) {
+        Ok(entity_ids) => Ok(entity_ids),
+        Err(error) if !existing.as_bytes().contains(&b'+') => Err(error),
+        Err(_) => {
+            let form_decoded = decode_percent(existing, PlusSign::Space)?;
+            entity_ids_from_decoded(&form_decoded)
+        }
+    }
+}
+
+fn entity_ids_from_decoded(decoded: &str) -> Result<Vec<String>, SamlError> {
     if decoded.is_empty() {
         return Ok(Vec::new());
     }
@@ -265,13 +297,18 @@ fn encode_percent(raw: &str) -> String {
     encoded
 }
 
-fn decode_percent(value: &str) -> Result<String, SamlError> {
+enum PlusSign {
+    Keep,
+    Space,
+}
+
+fn decode_percent(value: &str, plus: PlusSign) -> Result<String, SamlError> {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
         match bytes[index] {
-            b'+' => {
+            b'+' if matches!(plus, PlusSign::Space) => {
                 decoded.push(b' ');
                 index += 1;
             }

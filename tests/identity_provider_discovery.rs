@@ -171,6 +171,17 @@ fn cookie_value_percent_encodes_base64_plus_and_slash() -> Result<(), Box<dyn st
         Some(plus.value()),
     )?;
     assert_eq!(again.value(), plus.value());
+
+    let decoded_plus = remember(
+        "https://idp.example/~",
+        "example.org",
+        DiscoveryCookieLifetime::Session,
+        Some("aHR0cHM6Ly9vdGhlci5leGFtcGxlLm5ldC9tZXRhZGF0YQ== aHR0cHM6Ly9pZHAuZXhhbXBsZS9+"),
+    )?;
+    assert_eq!(
+        decoded_plus.value(),
+        "aHR0cHM6Ly9vdGhlci5leGFtcGxlLm5ldC9tZXRhZGF0YQ%3D%3D%20aHR0cHM6Ly9pZHAuZXhhbXBsZS9%2B"
+    );
     Ok(())
 }
 
@@ -304,6 +315,15 @@ fn discovery_cookie_rejects_input_that_cannot_be_written() -> Result<(), Box<dyn
             None,
         ),
         "1024 characters",
+    )?;
+    assert_invalid(
+        remember(
+            "not-a-uri",
+            "example.org",
+            DiscoveryCookieLifetime::Session,
+            None,
+        ),
+        "URI",
     )?;
     Ok(())
 }
