@@ -109,7 +109,7 @@ impl IdentityProvider {
         self.metadata.get_metadata()
     }
 
-    fn entity_id(&self) -> String {
+    pub(crate) fn entity_id(&self) -> String {
         self.setting
             .entity_id
             .clone()

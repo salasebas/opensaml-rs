@@ -8,6 +8,7 @@
 | Enhanced Client/Proxy SSO | Service-provider and identity-provider ends over PAOS. The enhanced client is not a facade |
 | Metadata | Parse peer metadata, generate SP and IdP descriptors, verify signed metadata |
 | Single Logout | Create and parse `LogoutRequest` and `LogoutResponse` on the same three bindings |
+| Identity Provider Discovery | `remember_identity_provider` returns the `_saml_idp` cookie for the caller to write. Service providers do not set or read it |
 | Artifact resolution | SOAP `ArtifactResolve` and `ArtifactResponse` through `resolve_artifact` and `answer_artifact_resolve`. The deployment sends the HTTP request |
 | Validation | Issuer, audience, destination, recipient, bearer confirmation, status, time windows, and request correlation |
 | Crypto | XML-DSig, XML-Enc, detached signatures, and metadata key pinning through bergshamra |

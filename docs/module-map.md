@@ -31,6 +31,12 @@ is in [`docs/architecture/`](architecture/README.md).
 The enhanced-client role is not a facade. The IdP and SP operational modes
 stay unclaimed.
 
+## Identity Provider Discovery
+
+| Behaviour | File |
+| --- | --- |
+| IdP `remember_identity_provider` | `src/api/idp.rs`, `src/discovery.rs` |
+
 ## Raw login
 
 | Behaviour | File |
@@ -69,6 +75,7 @@ Logout is the directory `src/logout/`.
 | Outbound Web Browser SSO | [`web-browser-sso-generation.md`](conformance/web-browser-sso-generation.md) |
 | Single Logout | [`single-logout.md`](conformance/single-logout.md) |
 | Enhanced Client/Proxy SSO over PAOS | [`enhanced-client-proxy.md`](conformance/enhanced-client-proxy.md) |
+| Identity Provider Discovery | [`identity-provider-discovery.md`](conformance/identity-provider-discovery.md) |
 | Artifact resolution over SOAP | [`artifact-resolution.md`](conformance/artifact-resolution.md) |
 | Metadata trust and replay | [`metadata-and-replay.md`](conformance/metadata-and-replay.md) |
 

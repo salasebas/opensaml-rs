@@ -1,5 +1,6 @@
 use crate::browser::{BrowserInput, Outbound, SsoRequestBinding};
 use crate::config::SpDescriptor;
+use crate::discovery::{self, CommonDomainCookie, CommonDomainCookieRequest};
 use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
 use crate::idp::{IdentityProvider, LoginResponseOptions, LoginResponseOverrides};
@@ -105,6 +106,10 @@ impl Saml<Idp> {
     }
 
     /// Respond to a received SP AuthnRequest.
+    ///
+    /// This does not write the Identity Provider Discovery cookie. Call
+    /// [`Self::remember_identity_provider`] after authentication when the
+    /// caller wants this identity provider remembered.
     ///
     /// # Errors
     ///
@@ -230,6 +235,54 @@ impl Saml<Idp> {
                 },
             )?;
         Outbound::<SsoResponse>::try_from(context)
+    }
+
+    /// Build the `_saml_idp` cookie that remembers this identity provider.
+    ///
+    /// The caller writes the cookie. [`Self::respond_sso`] does not. Pass the
+    /// current cookie value when the browser sent one; this identity provider
+    /// is appended, or moved to the end when it is already listed. The oldest
+    /// entries are dropped when the cookie name and value together would be
+    /// larger than 4096 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when the common domain is not a hostname
+    /// without a leading period, the persistent lifetime is not a whole number
+    /// of seconds, is shorter than one second, or is longer than 2147483647
+    /// seconds, the existing cookie is not a list of base64 entries, or this
+    /// identity provider's entity identifier cannot be stored in that list.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use saml_rs::{
+    ///     CommonDomainCookieRequest, DiscoveryCookieLifetime, EntityId, IdpConfig,
+    ///     IdpValidationPolicy, Saml, SsoEndpoint,
+    /// };
+    ///
+    /// let idp = Saml::idp(
+    ///     IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+    ///         .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+    ///         .validation(IdpValidationPolicy::compatibility())
+    ///         .build()?,
+    /// )?;
+    /// let cookie = idp.remember_identity_provider(CommonDomainCookieRequest::new(
+    ///     "example.org",
+    ///     DiscoveryCookieLifetime::Session,
+    /// ))?;
+    ///
+    /// assert_eq!(cookie.name(), "_saml_idp");
+    /// assert_eq!(cookie.domain(), ".example.org");
+    /// assert!(cookie.secure());
+    /// assert!(cookie.set_cookie_header().starts_with("_saml_idp="));
+    /// # Ok::<(), saml_rs::SamlError>(())
+    /// ```
+    pub fn remember_identity_provider(
+        &self,
+        request: CommonDomainCookieRequest<'_>,
+    ) -> Result<CommonDomainCookie, SamlError> {
+        discovery::remember_identity_provider(&self.raw_identity_provider().entity_id(), request)
     }
 }
 fn user_from_subject(subject: Subject) -> crate::entity::User {
