@@ -111,6 +111,23 @@ impl SpMetadata {
         Ok(first)
     }
 
+    /// Assertion consumer locations, in metadata order.
+    pub(crate) fn assertion_consumer_locations(&self) -> Vec<String> {
+        self.assertion_consumer_service_endpoints()
+            .into_iter()
+            .map(|endpoint| endpoint.location)
+            .collect()
+    }
+
+    /// Default assertion consumer location, or the first one when none is default.
+    pub(crate) fn default_assertion_consumer_location(&self) -> Option<String> {
+        let endpoints = self.assertion_consumer_service_endpoints();
+        if let Some(endpoint) = endpoints.iter().find(|endpoint| endpoint.is_default) {
+            return Some(endpoint.location.clone());
+        }
+        endpoints.first().map(|endpoint| endpoint.location.clone())
+    }
+
     /// Whether metadata contains `location` for `binding`.
     pub(crate) fn has_assertion_consumer_service(&self, binding: Binding, location: &str) -> bool {
         self.assertion_consumer_service_endpoints()

@@ -270,13 +270,15 @@
 //!
 //! # Unsupported profiles
 //!
-//! The high-level [`Saml`] API focuses on browser Web SSO, metadata-driven SP/IdP
-//! setup, XML signature/encryption through `bergshamra`, and Single Logout. It
-//! does not yet implement Artifact resolution, SOAP/back-channel profiles,
-//! ECP/PAOS, SAML query protocols, NameID management, or metadata federation. If
-//! you need one of those profiles for a real interoperability target, please
-//! open an issue with the profile, binding, IdP/SP product, and a minimal
-//! expected flow so we can consider the implementation.
+//! The high-level [`Saml`] API focuses on browser Web SSO, Enhanced Client/Proxy
+//! SSO over PAOS at the service-provider and identity-provider ends,
+//! metadata-driven SP/IdP setup, XML signature/encryption through `bergshamra`,
+//! and Single Logout. The enhanced-client role is not a facade. The API does
+//! not yet implement Artifact resolution, other SOAP profiles, SAML query
+//! protocols, NameID management, or metadata federation. If you need one of
+//! those profiles for a real interoperability target, please open an issue
+//! with the profile, binding, IdP/SP product, and a minimal expected flow so
+//! we can consider the implementation.
 //!
 //! XML cryptography (XML-DSig sign/verify with anti-wrapping, XML-Enc, detached
 //! message signatures) is delegated to `bergshamra`. The default
@@ -350,8 +352,10 @@ pub mod validator;
 pub mod xml;
 
 pub use api::{
-    ForceAuthn, Idp, IsPassive, LogoutSigning, RespondSlo, RespondSso, Saml, SamlError, Sp,
-    StartSlo, StartSso, Unknown,
+    ForceAuthn, Idp, IsPassive, LogoutSigning, PaosAuthnRequest, PaosClientRequest, PaosHeader,
+    PaosHttpResponse, PaosSsoResponse, PendingPaosSso, PendingPaosSsoSnapshot, RespondSlo,
+    RespondSso, Saml, SamlError, SoapFault, Sp, StartPaosSso, StartSlo, StartSso, StartedPaosSso,
+    Unknown,
 };
 pub use browser::{
     AcsEndpoint, BrowserInput, EndpointUrl, FormField, LogoutBinding, Outbound, Pending,

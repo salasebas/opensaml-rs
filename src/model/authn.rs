@@ -64,6 +64,13 @@ impl IsPassive {
             Self::NotRequired
         }
     }
+
+    pub(crate) fn as_bool(self) -> bool {
+        match self {
+            Self::Required => true,
+            Self::NotRequired => false,
+        }
+    }
 }
 
 /// Parsed AuthnRequest result.

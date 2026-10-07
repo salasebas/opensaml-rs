@@ -13,7 +13,7 @@ use super::raw_mapping::{
 };
 use super::{ForceAuthn, Saml, SamlError, Sp, StartSso};
 
-fn session_from_verified_flow(
+pub(super) fn session_from_verified_flow(
     result: FlowResultWithSignatureEvidence,
 ) -> Result<SsoSession, SamlError> {
     let (flow, evidence) = result.into_parts();

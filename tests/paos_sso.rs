@@ -1,0 +1,362 @@
+//! Enhanced Client/Proxy login over PAOS.
+//!
+//! The enhanced client in this file is the test double for that role. It is
+//! not a service-provider or identity-provider facade.
+
+#![cfg(any(
+    feature = "crypto-rustcrypto",
+    feature = "crypto-aws-lc",
+    feature = "crypto-fips"
+))]
+
+use std::time::SystemTime;
+
+use saml_rs::constants::status_code::AUTH_FAILED;
+use saml_rs::xml::dom::{parse, Node};
+use saml_rs::{
+    AcsEndpoint, EndpointUrl, EntityId, IdpConfig, IdpDescriptor, IdpValidationPolicy,
+    MetadataTrustPolicy, NameId, NameIdFormat, PaosAuthnRequest, PaosClientRequest,
+    PaosSsoResponse, RelayStateParam, ReplayPolicy, Saml, SamlError, SamlValidationContext,
+    SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, StartPaosSso, Status, Subject,
+    SubordinateStatusCode,
+};
+
+const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
+const IDP_ENTITY_ID: &str = "https://idp.example.com/metadata";
+const SP_ACS: &str = "https://sp.example.com/acs/post";
+const IDP_SOAP: &str = "https://idp.example.com/sso/soap";
+const ECP_PROFILE: &str = "urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp";
+const SOAP_NS: &str = "http://schemas.xmlsoap.org/soap/envelope/";
+
+const PRIVKEY: &str = include_str!("fixtures/key/sp_privkey.pem");
+const CERT: &str = include_str!("fixtures/key/sp_signing_cert.cer");
+
+struct EnhancedClient {
+    response_consumer_url: String,
+    relay_state: Option<String>,
+}
+
+fn credentials() -> saml_rs::Credentials {
+    saml_rs::Credentials {
+        signing_key: Some(saml_rs::PrivateKeyPem::new(PRIVKEY)),
+        signing_certificate: Some(saml_rs::CertificatePem::new(CERT)),
+        ..saml_rs::Credentials::default()
+    }
+}
+
+fn parties() -> Result<
+    (
+        Saml<saml_rs::Sp>,
+        Saml<saml_rs::Idp>,
+        SpDescriptor,
+        IdpDescriptor,
+    ),
+    SamlError,
+> {
+    let sp = Saml::sp(
+        SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
+            .acs_endpoint(AcsEndpoint::post(SP_ACS)?.mark_default())
+            .credentials(credentials())
+            .validation(SpValidationPolicy::recommended())
+            .build()?,
+    )?;
+    let idp = Saml::idp(
+        IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
+            .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso/post")?)
+            .credentials(credentials())
+            .validation(IdpValidationPolicy::recommended())
+            .build()?,
+    )?;
+    let sp_descriptor = SpDescriptor::from_metadata_xml(
+        sp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    let idp_descriptor = IdpDescriptor::from_metadata_xml(
+        idp.metadata_xml(),
+        MetadataTrustPolicy::UnsignedForCompatibility,
+    )?;
+    Ok((sp, idp, sp_descriptor, idp_descriptor))
+}
+
+fn validation() -> SamlValidationContext<'static> {
+    SamlValidationContext::new(SystemTime::now(), ReplayPolicy::DisabledForCompatibility)
+}
+
+fn subject() -> Subject {
+    Subject::new(
+        NameId::new("alice@example.com", Some(NameIdFormat::EmailAddress)),
+        Vec::new(),
+    )
+}
+
+fn enhanced_client_takes_authn_request(
+    sp_soap: &str,
+) -> Result<(EnhancedClient, String), Box<dyn std::error::Error>> {
+    let document = parse(sp_soap)?;
+    let header = child(&document.root, "Header").ok_or("SOAP header missing")?;
+    let paos_request = header
+        .children
+        .iter()
+        .find(|node| node.attr("responseConsumerURL").is_some())
+        .ok_or("paos:Request missing")?;
+    let response_consumer_url = paos_request
+        .attr("responseConsumerURL")
+        .ok_or("responseConsumerURL missing")?
+        .to_string();
+    let relay_state = header
+        .children
+        .iter()
+        .find(|node| node.local_name == "RelayState")
+        .map(|node| node.text.clone());
+    let authn = body_element(sp_soap, &document.root, "AuthnRequest")?;
+    let forwarded = soap_envelope("", &authn);
+    Ok((
+        EnhancedClient {
+            response_consumer_url,
+            relay_state,
+        },
+        forwarded,
+    ))
+}
+
+fn enhanced_client_takes_response(
+    client: &EnhancedClient,
+    idp_soap: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let document = parse(idp_soap)?;
+    let header = child(&document.root, "Header").ok_or("SOAP header missing")?;
+    let ecp_response = header
+        .children
+        .iter()
+        .find(|node| node.attr("AssertionConsumerServiceURL").is_some())
+        .ok_or("ecp:Response missing")?;
+    let assertion_consumer = ecp_response
+        .attr("AssertionConsumerServiceURL")
+        .ok_or("AssertionConsumerServiceURL missing")?;
+    if assertion_consumer != client.response_consumer_url {
+        return Err("assertion consumer does not match responseConsumerURL".into());
+    }
+    let response = body_element(idp_soap, &document.root, "Response")?;
+    let relay = client
+        .relay_state
+        .as_ref()
+        .map(|value| relay_state_header(value))
+        .unwrap_or_default();
+    Ok(soap_envelope(&relay, &response))
+}
+
+fn soap_envelope(header_xml: &str, body_xml: &str) -> String {
+    format!(
+        "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_NS}\"><SOAP-ENV:Header>{header_xml}</SOAP-ENV:Header><SOAP-ENV:Body>{body_xml}</SOAP-ENV:Body></SOAP-ENV:Envelope>"
+    )
+}
+
+fn relay_state_header(value: &str) -> String {
+    format!(
+        "<ecp:RelayState xmlns:ecp=\"{ECP_PROFILE}\" SOAP-ENV:mustUnderstand=\"1\" SOAP-ENV:actor=\"http://schemas.xmlsoap.org/soap/actor/next\">{value}</ecp:RelayState>"
+    )
+}
+
+fn body_element(
+    xml: &str,
+    envelope: &Node,
+    name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let body = child(envelope, "Body").ok_or("SOAP body missing")?;
+    let element = body
+        .children
+        .iter()
+        .find(|node| node.local_name == name)
+        .ok_or(name)?;
+    let slice = xml
+        .get(element.start..element.end)
+        .ok_or("element offsets")?;
+    Ok(slice.to_string())
+}
+
+fn child<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
+    node.children.iter().find(|child| child.local_name == name)
+}
+
+#[test]
+fn enhanced_client_completes_paos_login() -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = parties()?;
+    let started = sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::from_headers(PaosClientRequest::ACCEPT, PaosClientRequest::PAOS_HEADER)?,
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?
+            .relay_state(RelayStateParam::try_from_option(Some("state".to_string()))?)
+            .provider_name("Example SP")?,
+    )?;
+    assert_eq!(started.response.http_status(), 200);
+    assert!(started.response.headers().iter().any(
+        |header| header.name() == "Content-Type" && header.value() == PaosClientRequest::ACCEPT
+    ));
+    assert!(started.response.soap_envelope().contains(ECP_PROFILE));
+    assert!(!started
+        .response
+        .soap_envelope()
+        .contains("ProtocolBinding="));
+
+    let (client, idp_request) =
+        enhanced_client_takes_authn_request(started.response.soap_envelope())?;
+    assert_eq!(client.response_consumer_url, SP_ACS);
+    let received = idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(idp_request, IDP_SOAP)?,
+        validation(),
+    )?;
+    let answered = idp.respond_paos_sso(&sp_descriptor, &received, subject())?;
+    assert_eq!(answered.http_status(), 200);
+    assert!(answered.headers().iter().any(
+        |header| header.name() == "Content-Type" && header.value() == "text/xml; charset=utf-8"
+    ));
+
+    let sp_request = enhanced_client_takes_response(&client, answered.soap_envelope())?;
+    let pending = saml_rs::PendingPaosSso::from_snapshot(started.pending.snapshot())?;
+    let session = sp.finish_paos_sso(
+        &idp_descriptor,
+        &pending,
+        &PaosSsoResponse::from_soap(sp_request)?,
+        validation(),
+    )?;
+    assert_eq!(session.name_id().value(), "alice@example.com");
+    assert_eq!(
+        pending.assertion_consumer_url(),
+        &EndpointUrl::try_new(SP_ACS)?
+    );
+    Ok(())
+}
+
+#[test]
+fn failed_authentication_does_not_establish_a_session() -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = parties()?;
+    let started = sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::enhanced_client(),
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?,
+    )?;
+    let (client, idp_request) =
+        enhanced_client_takes_authn_request(started.response.soap_envelope())?;
+    let received = idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(idp_request, IDP_SOAP)?,
+        validation(),
+    )?;
+    let rejected = idp.reject_paos_sso(
+        &sp_descriptor,
+        &received,
+        Status::responder().with_subordinate(SubordinateStatusCode::try_new(AUTH_FAILED)?),
+    )?;
+    assert!(!rejected.soap_envelope().contains("Assertion>"));
+    let sp_request = enhanced_client_takes_response(&client, rejected.soap_envelope())?;
+    let error = match sp.finish_paos_sso(
+        &idp_descriptor,
+        &started.pending,
+        &PaosSsoResponse::from_soap(sp_request)?,
+        validation(),
+    ) {
+        Err(error) => error,
+        Ok(_) => return Err("an error status does not return a session".into()),
+    };
+    assert!(matches!(error, SamlError::StatusNotSuccess { .. }));
+    Ok(())
+}
+
+#[test]
+fn returned_relay_state_must_match_the_value_the_service_provider_sent(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = parties()?;
+    let started = sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::enhanced_client(),
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?
+            .relay_state(RelayStateParam::try_from_option(Some("state".to_string()))?),
+    )?;
+    let (client, idp_request) =
+        enhanced_client_takes_authn_request(started.response.soap_envelope())?;
+    let received = idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(idp_request, IDP_SOAP)?,
+        validation(),
+    )?;
+    let answered = idp.respond_paos_sso(&sp_descriptor, &received, subject())?;
+    let mut sp_request = enhanced_client_takes_response(&client, answered.soap_envelope())?;
+    sp_request = sp_request.replace(&relay_state_header("state"), "");
+    let error = match sp.finish_paos_sso(
+        &idp_descriptor,
+        &started.pending,
+        &PaosSsoResponse::from_soap(sp_request)?,
+        validation(),
+    ) {
+        Err(error) => error,
+        Ok(_) => return Err("a missing relay state does not match".into()),
+    };
+    assert!(matches!(error, SamlError::RelayStateMismatch { .. }));
+    Ok(())
+}
+
+#[test]
+fn destination_must_be_the_soap_endpoint_that_received_the_request(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = parties()?;
+    let started = sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::enhanced_client(),
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?,
+    )?;
+    let (_, idp_request) = enhanced_client_takes_authn_request(started.response.soap_envelope())?;
+    let error = match idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(idp_request, "https://idp.example.com/elsewhere")?,
+        validation(),
+    ) {
+        Err(error) => error,
+        Ok(_) => return Err("a different SOAP endpoint does not match Destination".into()),
+    };
+    assert!(matches!(error, SamlError::DestinationMismatch { .. }));
+    Ok(())
+}
+
+#[test]
+fn unpublished_assertion_consumer_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, _, _, idp_descriptor) = parties()?;
+    let error = match sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::enhanced_client(),
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?
+            .assertion_consumer("https://evil.example/acs")?
+            .allow_unsigned_authn_request(),
+    ) {
+        Err(error) => error,
+        Ok(_) => return Err("an unpublished assertion consumer is rejected".into()),
+    };
+    assert!(matches!(error, SamlError::Invalid(_)));
+    Ok(())
+}
+
+#[test]
+fn unprocessable_soap_is_a_client_fault() -> Result<(), Box<dyn std::error::Error>> {
+    let (_, idp, sp_descriptor, _) = parties()?;
+    let envelope = format!(
+        "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_NS}\"><SOAP-ENV:Body><samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" ID=\"_1\"></samlp:AuthnRequest><samlp:Extra xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\"></samlp:Extra></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+    );
+    let error = match idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(envelope, IDP_SOAP)?,
+        validation(),
+    ) {
+        Err(error) => error,
+        Ok(_) => return Err("two SOAP body elements are not one AuthnRequest".into()),
+    };
+    assert!(matches!(error, SamlError::ProtocolProfile(_)));
+
+    let fault = idp.paos_soap_fault();
+    assert_eq!(fault.http_status(), 500);
+    assert!(fault.soap_envelope().contains("SOAP-ENV:Fault"));
+    assert!(fault.soap_envelope().contains("SOAP-ENV:Client"));
+    assert!(fault.headers().iter().any(
+        |header| header.name() == "Content-Type" && header.value() == "text/xml; charset=utf-8"
+    ));
+    Ok(())
+}

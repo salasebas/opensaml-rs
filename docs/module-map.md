@@ -16,6 +16,17 @@ is in [`docs/architecture/`](architecture/README.md).
 `finish_sso_with_outstanding_logout` and
 `accept_unsolicited_sso_with_outstanding_logout` are in `src/api/sp.rs`.
 
+## Enhanced Client/Proxy SSO
+
+| Behaviour | File |
+| --- | --- |
+| SP `start_paos_sso`, `finish_paos_sso` | `src/api/paos/mod.rs` |
+| IdP `receive_paos_sso`, `respond_paos_sso`, `reject_paos_sso`, `paos_soap_fault` | `src/api/paos/mod.rs` |
+| PAOS header and SOAP envelopes | `src/api/paos/protocol.rs` |
+
+The enhanced-client role is not a facade. The IdP and SP operational modes
+stay unclaimed.
+
 ## Raw login
 
 | Behaviour | File |
@@ -53,6 +64,7 @@ Logout is the directory `src/logout/`.
 | Inbound Web Browser SSO | [`web-browser-sso-acceptance.md`](conformance/web-browser-sso-acceptance.md) |
 | Outbound Web Browser SSO | [`web-browser-sso-generation.md`](conformance/web-browser-sso-generation.md) |
 | Single Logout | [`single-logout.md`](conformance/single-logout.md) |
+| Enhanced Client/Proxy SSO over PAOS | [`enhanced-client-proxy.md`](conformance/enhanced-client-proxy.md) |
 | Metadata trust and replay | [`metadata-and-replay.md`](conformance/metadata-and-replay.md) |
 
 ## Compatibility crates

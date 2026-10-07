@@ -36,9 +36,9 @@ under discussion.
   in function signatures.
 - XML security stays in `bergshamra`. This tree does not implement XML-DSig,
   canonicalisation, or XML-Enc.
-- Artifact resolution, SOAP and other back-channel profiles, ECP/PAOS, SAML
-  queries, NameID management, and metadata federation stay outside the
-  high-level typed API.
+- Artifact resolution, SOAP profiles other than the identity-provider leg of
+  Enhanced Client/Proxy SSO, the enhanced-client role, SAML queries, NameID
+  management, and metadata federation stay outside the high-level typed API.
 
 ## Shape of an SP round trip
 

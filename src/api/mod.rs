@@ -31,6 +31,7 @@
 
 mod idp;
 mod options;
+mod paos;
 mod raw_mapping;
 mod slo;
 mod sp;
@@ -45,6 +46,10 @@ use raw_mapping::{raw_idp_metadata_config, raw_sp_metadata_config};
 
 pub use options::{
     ForceAuthn, IsPassive, LogoutSigning, RespondSlo, RespondSso, StartSlo, StartSso,
+};
+pub use paos::{
+    PaosAuthnRequest, PaosClientRequest, PaosHeader, PaosHttpResponse, PaosSsoResponse,
+    PendingPaosSso, PendingPaosSsoSnapshot, SoapFault, StartPaosSso, StartedPaosSso,
 };
 
 /// Typed SAML facade for high-level browser SSO/SLO flows.
