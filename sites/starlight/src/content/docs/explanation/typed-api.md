@@ -9,6 +9,6 @@ Request correlation, `RelayState`, the clock, replay, and metadata trust show up
 
 The raw `flow` API, `ServiceProvider`, and `IdentityProvider` stay available for migration. Their defaults are historical. Changing a typed preset does not rewrite them.
 
-Artifact resolution, SOAP and other back-channel profiles, ECP/PAOS, SAML queries, NameID management, and metadata federation stay outside the typed API. That boundary is also the [coverage table](../reference/coverage.md).
+Artifact resolution, SOAP profiles other than the identity-provider leg of Enhanced Client/Proxy SSO, the enhanced-client role, SAML queries, NameID management, and metadata federation stay outside the typed API. That boundary is also the [coverage table](../reference/coverage.md).
 
 The service-provider round trip is [Service provider](../guides/service-provider-sso.md). The design notes in the repository, including names that were rejected, are the [architecture record](https://github.com/salasebas/saml-rs/tree/main/docs/architecture). A heading there that says Proposed, Target, or Today describes that design record. The guides on this site are the current calls.

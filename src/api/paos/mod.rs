@@ -384,6 +384,12 @@ impl Saml<Sp> {
     ///
     /// # Examples
     ///
+    /// The builders start on [`SpValidationPolicy::recommended`] and
+    /// [`IdpValidationPolicy::recommended`]. This example passes
+    /// [`SpValidationPolicy::compatibility`] and
+    /// [`IdpValidationPolicy::compatibility`] so it builds without a crypto
+    /// provider.
+    ///
     /// ```
     /// use saml_rs::{
     ///     AcsEndpoint, EntityId, IdpConfig, IdpDescriptor, IdpValidationPolicy,
