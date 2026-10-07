@@ -255,10 +255,6 @@ impl Saml<Idp> {
     ///
     /// # Examples
     ///
-    /// The example selects [`crate::IdpValidationPolicy::compatibility`] so it
-    /// builds without a crypto provider. [`crate::IdpConfig::builder`] starts
-    /// on [`crate::IdpValidationPolicy::recommended`].
-    ///
     /// ```
     /// use saml_rs::{
     ///     CommonDomainCookieRequest, DiscoveryCookieLifetime, EntityId, IdpConfig,
