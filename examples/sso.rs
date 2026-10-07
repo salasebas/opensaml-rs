@@ -3,10 +3,6 @@
 //!
 //! Run with: `cargo run -p saml-rs --example sso`
 //! (the `crypto-bergshamra` feature is on by default).
-#![allow(
-    deprecated,
-    reason = "the example keeps exercising the deprecated strict() preset"
-)]
 
 #[cfg(any(
     feature = "crypto-rustcrypto",
@@ -37,14 +33,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
             .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
             .credentials(credentials())
-            .validation(SpValidationPolicy::strict())
+            .validation(SpValidationPolicy::recommended())
             .build()?,
     )?;
     let idp = Saml::idp(
         IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
             .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
             .credentials(credentials())
-            .validation(IdpValidationPolicy::strict())
+            .validation(IdpValidationPolicy::recommended())
             .build()?,
     )?;
 

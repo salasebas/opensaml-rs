@@ -32,15 +32,16 @@ use super::policies::{
 /// # Examples
 ///
 /// ```
-/// use saml_rs::{AcsEndpoint, EntityId, SpConfig, SpMetadataConfig};
+/// use saml_rs::{AcsEndpoint, EntityId, SpConfig, SpMetadataConfig, SpValidationPolicy};
 ///
 /// let acs = AcsEndpoint::post("https://sp.example.com/acs")?;
-/// let config = SpConfig::try_new(
+/// let config = SpConfig::new(
 ///     EntityId::try_new("https://sp.example.com/metadata")?,
 ///     SpMetadataConfig::new(vec![acs]),
-/// )?;
+/// );
 ///
 /// assert_eq!(config.entity_id.as_str(), "https://sp.example.com/metadata");
+/// assert_eq!(config.validation, SpValidationPolicy::recommended());
 /// # Ok::<(), saml_rs::SamlError>(())
 /// ```
 #[derive(Debug, Clone)]
@@ -64,9 +65,10 @@ pub struct SpConfig {
 impl SpConfig {
     /// Create SP configuration with required identity and metadata inputs.
     ///
-    /// This convenience constructor accepts already-validated typed inputs but
-    /// does not validate the final config. Use [`Self::try_new`] or
-    /// [`Self::builder`] for caller-provided setup.
+    /// Validation starts on [`SpValidationPolicy::recommended`]. This
+    /// convenience constructor accepts already-validated typed inputs but does
+    /// not validate the final config. Use [`Self::try_new`] or [`Self::builder`]
+    /// for caller-provided setup.
     pub fn new(entity_id: EntityId, metadata: SpMetadataConfig) -> Self {
         Self {
             entity_id,
@@ -79,22 +81,23 @@ impl SpConfig {
         }
     }
 
-    /// Validate and create SP configuration with the legacy permissive preset.
+    /// Validate and create SP configuration on [`SpValidationPolicy::recommended`].
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError`] when the entity ID is empty or required SP
-    /// metadata endpoints are missing.
+    /// Returns [`SamlError`] when the entity ID is empty, required SP metadata
+    /// endpoints are missing, or this build has no crypto provider and the
+    /// Recommended preset needs one.
     pub fn try_new(entity_id: EntityId, metadata: SpMetadataConfig) -> Result<Self, SamlError> {
         let config = Self::new(entity_id, metadata);
         config.validate()?;
         Ok(config)
     }
 
-    /// Start a dependency-free SP config builder.
+    /// Start a dependency-free SP config builder on [`SpValidationPolicy::recommended`].
     ///
-    /// The builder starts on the deprecated [`SpValidationPolicy::strict`]
-    /// bundle. [`Self::try_new`] uses [`SpValidationPolicy::compatibility`].
+    /// [`Self::try_new`] uses the same preset. [`SpValidationPolicy::compatibility`]
+    /// remains the legacy permissive preset.
     pub fn builder(entity_id: EntityId) -> SpConfigBuilder {
         SpConfigBuilder::new(entity_id)
     }
@@ -103,8 +106,9 @@ impl SpConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError`] when the entity ID is empty or required SP
-    /// metadata endpoints are missing.
+    /// Returns [`SamlError`] when the entity ID is empty, required SP
+    /// metadata endpoints are missing, or the selected policy requires crypto
+    /// in a build without a crypto provider.
     pub fn validate(&self) -> Result<(), SamlError> {
         validate_entity_id(&self.entity_id)?;
         self.metadata.validate()?;
@@ -130,7 +134,7 @@ impl SpConfigBuilder {
             entity_id,
             metadata: SpMetadataConfig::new(Vec::new()),
             credentials: Credentials::default(),
-            validation: deprecated_strict_sp_validation(),
+            validation: SpValidationPolicy::recommended(),
             algorithms: AlgorithmPolicy::default(),
             xml: XmlPolicy::default(),
             templates: TemplatePolicy::default(),
@@ -217,7 +221,7 @@ impl SpConfigBuilder {
 ///
 /// # Examples
 ///
-/// The builder starts on the deprecated [`IdpValidationPolicy::strict`] bundle.
+/// The builder starts on [`IdpValidationPolicy::recommended`].
 /// Use [`IdpValidationPolicy::compatibility`] for the legacy permissive preset,
 /// including when compiling or testing without the default crypto feature.
 ///
@@ -262,7 +266,8 @@ impl IdpConfig {
     /// Create IdP configuration with required identity and metadata inputs.
     ///
     /// This convenience constructor accepts already-validated typed inputs but
-    /// does not validate the final config. The issuance lifetime defaults to
+    /// does not validate the final config. Validation starts on
+    /// [`IdpValidationPolicy::recommended`]. The issuance lifetime defaults to
     /// exactly five minutes. Use [`Self::try_new`] or [`Self::builder`] for
     /// caller-provided setup.
     pub fn new(entity_id: EntityId, metadata: IdpMetadataConfig) -> Self {
@@ -278,21 +283,22 @@ impl IdpConfig {
         }
     }
 
-    /// Validate and create IdP configuration with the legacy permissive preset.
+    /// Validate and create IdP configuration on [`IdpValidationPolicy::recommended`].
     ///
     /// # Errors
     ///
     /// Returns [`SamlError`] when the entity ID is empty, required IdP
-    /// metadata endpoints are missing, or the issuance lifetime is zero or
-    /// outside the range supported by the internal time representation.
+    /// metadata endpoints are missing, the issuance lifetime is zero or
+    /// outside the range supported by the internal time representation, or
+    /// this build has no crypto provider and the Recommended preset needs one.
     pub fn try_new(entity_id: EntityId, metadata: IdpMetadataConfig) -> Result<Self, SamlError> {
         let config = Self::new(entity_id, metadata);
         config.validate()?;
         Ok(config)
     }
 
-    /// Start a dependency-free IdP config builder on the deprecated `strict()`
-    /// bundle and a five-minute issuance lifetime.
+    /// Start a dependency-free IdP config builder on [`IdpValidationPolicy::recommended`]
+    /// and a five-minute issuance lifetime.
     pub fn builder(entity_id: EntityId) -> IdpConfigBuilder {
         IdpConfigBuilder::new(entity_id)
     }
@@ -302,8 +308,10 @@ impl IdpConfig {
     /// # Errors
     ///
     /// Returns [`SamlError`] when the entity ID is empty, required IdP
-    /// metadata endpoints are missing, or the issuance lifetime is zero or
-    /// outside the range supported by the internal time representation.
+    /// metadata endpoints are missing, the issuance lifetime is zero or
+    /// outside the range supported by the internal time representation, or
+    /// the selected policy requires crypto in a build without a crypto
+    /// provider.
     pub fn validate(&self) -> Result<(), SamlError> {
         validate_entity_id(&self.entity_id)?;
         self.metadata.validate()?;
@@ -331,7 +339,7 @@ impl IdpConfigBuilder {
             metadata: IdpMetadataConfig::new(Vec::new()),
             credentials: Credentials::default(),
             issuance_lifetime: Duration::from_secs(300),
-            validation: deprecated_strict_idp_validation(),
+            validation: IdpValidationPolicy::recommended(),
             algorithms: AlgorithmPolicy::default(),
             xml: XmlPolicy::default(),
             templates: TemplatePolicy::default(),
@@ -719,18 +727,70 @@ impl TryFrom<&IdpConfig> for EntitySetting {
     }
 }
 
-#[expect(
-    deprecated,
-    reason = "config builders stay on the deprecated strict preset in this release"
-)]
-fn deprecated_strict_sp_validation() -> SpValidationPolicy {
-    SpValidationPolicy::strict()
-}
+#[cfg(all(
+    test,
+    not(any(
+        feature = "crypto-rustcrypto",
+        feature = "crypto-aws-lc",
+        feature = "crypto-fips"
+    ))
+))]
+mod no_crypto_tests {
+    use super::{
+        IdpConfig, IdpMetadataConfig, IdpValidationPolicy, SpConfig, SpMetadataConfig,
+        SpValidationPolicy,
+    };
+    use crate::browser::{AcsEndpoint, SsoEndpoint};
+    use crate::config::descriptors::EntityId;
+    use crate::error::SamlError;
 
-#[expect(
-    deprecated,
-    reason = "config builders stay on the deprecated strict preset in this release"
-)]
-fn deprecated_strict_idp_validation() -> IdpValidationPolicy {
-    IdpValidationPolicy::strict()
+    #[test]
+    fn recommended_constructors_need_a_crypto_provider() -> Result<(), SamlError> {
+        let sp = SpConfig::try_new(
+            EntityId::try_new("https://sp.example.com/metadata")?,
+            SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
+        );
+        assert!(matches!(sp, Err(SamlError::Unsupported(_))));
+
+        let idp = IdpConfig::try_new(
+            EntityId::try_new("https://idp.example.com/metadata")?,
+            IdpMetadataConfig::new(vec![SsoEndpoint::post("https://idp.example.com/sso")?]),
+        );
+        assert!(matches!(idp, Err(SamlError::Unsupported(_))));
+
+        let sp_builder = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+            .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+            .build();
+        assert!(matches!(sp_builder, Err(SamlError::Unsupported(_))));
+
+        let idp_builder =
+            IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+                .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+                .build();
+        assert!(matches!(idp_builder, Err(SamlError::Unsupported(_))));
+
+        SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+            .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+            .validation(SpValidationPolicy::compatibility())
+            .build()?;
+        IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+            .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+            .validation(IdpValidationPolicy::compatibility())
+            .build()?;
+
+        let mut sp = SpConfig::new(
+            EntityId::try_new("https://sp.example.com/metadata")?,
+            SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
+        );
+        sp.validation = SpValidationPolicy::compatibility();
+        sp.validate()?;
+
+        let mut idp = IdpConfig::new(
+            EntityId::try_new("https://idp.example.com/metadata")?,
+            IdpMetadataConfig::new(vec![SsoEndpoint::post("https://idp.example.com/sso")?]),
+        );
+        idp.validation = IdpValidationPolicy::compatibility();
+        idp.validate()?;
+        Ok(())
+    }
 }

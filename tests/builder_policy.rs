@@ -1,6 +1,5 @@
 //! Compatibility is the legacy permissive preset: the samlify-port behavior kept
 //! for a caller leaving the raw API.
-#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 
 use std::{str::FromStr, time::Duration};
 
@@ -43,7 +42,7 @@ fn sp_builder_and_struct_literal_reach_same_config() -> Result<(), Box<dyn std::
     let acs = AcsEndpoint::post("https://sp.example.com/acs")?;
     let slo = SloEndpoint::post("https://sp.example.com/slo")?;
     let credentials = signing_credentials();
-    let validation = SpValidationPolicy::strict();
+    let validation = SpValidationPolicy::recommended();
 
     let builder = SpConfig::builder(entity_id.clone())
         .acs_endpoint(acs.clone())
@@ -82,7 +81,7 @@ fn idp_builder_and_struct_literal_reach_same_config() -> Result<(), Box<dyn std:
     let entity_id = EntityId::try_new("https://idp.example.com/metadata")?;
     let sso = SsoEndpoint::redirect("https://idp.example.com/sso")?;
     let slo = SloEndpoint::post("https://idp.example.com/slo")?;
-    let validation = IdpValidationPolicy::strict();
+    let validation = IdpValidationPolicy::recommended();
 
     let builder = IdpConfig::builder(entity_id.clone())
         .sso_endpoint(sso.clone())
@@ -172,20 +171,19 @@ fn idp_config_rejects_unrepresentable_issuance_lifetime() -> Result<(), Box<dyn 
 }
 
 #[test]
-fn builders_default_to_strict_validation() -> Result<(), Box<dyn std::error::Error>> {
+fn builders_start_on_recommended() -> Result<(), Box<dyn std::error::Error>> {
     let sp = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
         .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
-        .credentials(signing_credentials())
         .build()?;
     let idp = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
         .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
         .build()?;
 
-    assert_eq!(sp.validation, SpValidationPolicy::strict());
-    assert_eq!(idp.validation, IdpValidationPolicy::strict());
+    assert_eq!(sp.validation, SpValidationPolicy::recommended());
+    assert_eq!(idp.validation, IdpValidationPolicy::recommended());
     assert_eq!(
         sp.validation.assertions,
-        AssertionSignaturePolicy::RequireSigned
+        AssertionSignaturePolicy::AllowUnsignedForCompatibility
     );
     assert_eq!(
         sp.validation.responses,
@@ -193,17 +191,24 @@ fn builders_default_to_strict_validation() -> Result<(), Box<dyn std::error::Err
     );
     assert_eq!(
         sp.validation.authn_requests,
-        AuthnRequestSigningPolicy::Sign
+        AuthnRequestSigningPolicy::DoNotSignForCompatibility
     );
-    assert_eq!(sp.validation.audience, AudienceValidationPolicy::Validate);
+    assert_eq!(
+        sp.validation.audience,
+        AudienceValidationPolicy::EvaluatePresentRestrictions
+    );
     assert_eq!(
         sp.validation.name_id_creation,
         NameIdCreationPolicy::DoNotAllowCreate
     );
-    assert_eq!(sp.validation.logout, LogoutPolicy::strict());
+    assert_eq!(sp.validation.logout, LogoutPolicy::recommended());
     assert_eq!(
         sp.validation.xml_signatures,
         XmlSignatureProfile::AllowProviderSupportedForCompatibility
+    );
+    assert_eq!(
+        idp.validation.authn_requests,
+        AuthnRequestValidationPolicy::AllowUnsignedVerifyIfPresent
     );
     Ok(())
 }
@@ -245,21 +250,21 @@ fn raw_settings_keep_audience_and_logout_defaults_that_differ_from_compatibility
     assert!(raw.want_logout_request_signed);
     assert!(raw.want_logout_response_signed);
 
-    let sp = SpConfig::try_new(
+    let mut sp = SpConfig::new(
         EntityId::try_new("https://sp.example.com/metadata")?,
         SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
-    )?;
-    assert_eq!(sp.validation, SpValidationPolicy::compatibility());
+    );
+    sp.validation = SpValidationPolicy::compatibility();
     let converted = EntitySetting::try_from(&sp)?;
     assert!(!converted.validate_audience);
     assert!(!converted.want_logout_request_signed);
     assert!(!converted.want_logout_response_signed);
 
-    let idp = IdpConfig::try_new(
+    let mut idp = IdpConfig::new(
         EntityId::try_new("https://idp.example.com/metadata")?,
         IdpMetadataConfig::new(vec![SsoEndpoint::redirect("https://idp.example.com/sso")?]),
-    )?;
-    assert_eq!(idp.validation, IdpValidationPolicy::compatibility());
+    );
+    idp.validation = IdpValidationPolicy::compatibility();
     let converted = EntitySetting::try_from(&idp)?;
     assert!(converted.validate_audience);
     assert!(!converted.want_logout_request_signed);
@@ -273,7 +278,7 @@ fn raw_settings_keep_audience_and_logout_defaults_that_differ_from_compatibility
 }
 
 #[test]
-fn recommended_preset_matches_classified_validation_and_strict_stays_unchanged() {
+fn recommended_preset_matches_classified_validation_and_hardenings_stay_independent() {
     let recommended_logout = LogoutPolicy {
         requests: LogoutSignaturePolicy::RequireSigned,
         responses: LogoutSignaturePolicy::RequireSigned,
@@ -298,38 +303,37 @@ fn recommended_preset_matches_classified_validation_and_strict_stays_unchanged()
             logout: recommended_logout,
         }
     );
+
+    let assertion_signature = SpValidationPolicy {
+        assertions: AssertionSignaturePolicy::RequireSigned,
+        ..SpValidationPolicy::recommended()
+    };
     assert_eq!(
-        SpValidationPolicy::strict(),
-        SpValidationPolicy {
-            assertions: AssertionSignaturePolicy::RequireSigned,
-            responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
-            xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
-            authn_requests: AuthnRequestSigningPolicy::Sign,
-            audience: AudienceValidationPolicy::Validate,
-            name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
-            logout: LogoutPolicy::strict(),
-        }
+        assertion_signature.xml_signatures,
+        XmlSignatureProfile::AllowProviderSupportedForCompatibility
     );
+    let rsa_sha2 = SpValidationPolicy {
+        xml_signatures: XmlSignatureProfile::StrictRsaSha2,
+        ..SpValidationPolicy::recommended()
+    };
     assert_eq!(
-        IdpValidationPolicy::strict(),
-        IdpValidationPolicy {
-            authn_requests: AuthnRequestValidationPolicy::RequireSigned,
-            logout: LogoutPolicy::strict(),
-        }
+        rsa_sha2.assertions,
+        AssertionSignaturePolicy::AllowUnsignedForCompatibility
     );
 }
 
 #[test]
-fn public_validation_defaults_remain_compatibility() {
+fn policy_defaults_start_on_recommended_and_field_defaults_stay_permissive() {
     assert!(!EntitySetting::default().want_message_signed);
     assert_eq!(
         SpValidationPolicy::default(),
-        SpValidationPolicy::compatibility()
+        SpValidationPolicy::recommended()
     );
     assert_eq!(
         IdpValidationPolicy::default(),
-        IdpValidationPolicy::compatibility()
+        IdpValidationPolicy::recommended()
     );
+    assert_eq!(LogoutPolicy::default(), LogoutPolicy::recommended());
     assert_eq!(
         AssertionSignaturePolicy::default(),
         AssertionSignaturePolicy::AllowUnsignedForCompatibility
@@ -351,13 +355,13 @@ fn public_validation_defaults_remain_compatibility() {
         XmlSignatureProfile::AllowProviderSupportedForCompatibility
     );
     assert_eq!(
-        SpValidationPolicy::strict().xml_signatures,
+        SpValidationPolicy::recommended().xml_signatures,
         XmlSignatureProfile::AllowProviderSupportedForCompatibility
     );
 }
 
 #[test]
-fn constructors_use_compatibility_defaults() -> Result<(), Box<dyn std::error::Error>> {
+fn constructors_start_on_recommended() -> Result<(), Box<dyn std::error::Error>> {
     let sp = SpConfig::try_new(
         EntityId::try_new("https://sp.example.com/metadata")?,
         SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
@@ -366,9 +370,19 @@ fn constructors_use_compatibility_defaults() -> Result<(), Box<dyn std::error::E
         EntityId::try_new("https://idp.example.com/metadata")?,
         IdpMetadataConfig::new(vec![SsoEndpoint::redirect("https://idp.example.com/sso")?]),
     )?;
+    let sp_new = SpConfig::new(
+        EntityId::try_new("https://sp.example.com/metadata")?,
+        SpMetadataConfig::new(vec![AcsEndpoint::post("https://sp.example.com/acs")?]),
+    );
+    let idp_new = IdpConfig::new(
+        EntityId::try_new("https://idp.example.com/metadata")?,
+        IdpMetadataConfig::new(vec![SsoEndpoint::redirect("https://idp.example.com/sso")?]),
+    );
 
-    assert_eq!(sp.validation, SpValidationPolicy::compatibility());
-    assert_eq!(idp.validation, IdpValidationPolicy::compatibility());
+    assert_eq!(sp.validation, SpValidationPolicy::recommended());
+    assert_eq!(idp.validation, IdpValidationPolicy::recommended());
+    assert_eq!(sp_new.validation, SpValidationPolicy::default());
+    assert_eq!(idp_new.validation, IdpValidationPolicy::default());
     Ok(())
 }
 
@@ -571,6 +585,10 @@ fn sp_builder_requires_signing_credentials_when_authn_requests_are_signed(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let result = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
         .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .validation(SpValidationPolicy {
+            authn_requests: AuthnRequestSigningPolicy::Sign,
+            ..SpValidationPolicy::recommended()
+        })
         .build();
 
     assert_missing_key(result, "signing_key");
@@ -586,6 +604,10 @@ fn sp_builder_requires_signing_certificate_when_authn_requests_are_signed(
     };
     let result = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
         .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+        .validation(SpValidationPolicy {
+            authn_requests: AuthnRequestSigningPolicy::Sign,
+            ..SpValidationPolicy::recommended()
+        })
         .credentials(credentials)
         .build();
 

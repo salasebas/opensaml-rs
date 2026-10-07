@@ -1,5 +1,4 @@
 //! Compatibility is the legacy permissive preset.
-#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
@@ -517,17 +516,16 @@ fn signed_logout_response(
 }
 
 #[test]
-fn existing_logout_policy_constructors_stay_in_place() {
+fn logout_policy_defaults_follow_recommended() {
     assert_eq!(
         SpValidationPolicy::default().logout,
-        LogoutPolicy::compatibility()
+        LogoutPolicy::recommended()
     );
     assert_eq!(
         IdpValidationPolicy::default().logout,
-        LogoutPolicy::compatibility()
+        LogoutPolicy::recommended()
     );
-    assert_eq!(SpValidationPolicy::strict().logout, LogoutPolicy::strict());
-    assert_eq!(IdpValidationPolicy::strict().logout, LogoutPolicy::strict());
+    assert_eq!(LogoutPolicy::default(), LogoutPolicy::recommended());
     assert_eq!(
         SpValidationPolicy::recommended().logout,
         LogoutPolicy::recommended()

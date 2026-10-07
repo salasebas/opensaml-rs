@@ -1,6 +1,5 @@
 //! Compatibility is the legacy permissive preset.
 //! `RespondSso::allow_unsigned_encrypted_cbc` relaxes Errata 05 E93 and is not that preset.
-#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
@@ -14,12 +13,13 @@ use saml_rs::constants::status_code;
 use saml_rs::raw::Binding;
 use saml_rs::template::LoginResponseTemplate;
 use saml_rs::{
-    AcsEndpoint, AuthnRequest, AuthnRequestSigningPolicy, AuthnRequestValidationPolicy,
-    BrowserInput, CertificatePem, Credentials, EntityId, ForceAuthn, FormField, IdpConfig,
-    IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId, NameIdCreationPolicy,
-    NameIdFormat, Outbound, PrivateKeyPem, ReplayPolicy, RespondSso, Saml, SamlError,
-    SamlValidationContext, SloEndpoint, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint,
-    SsoResponse, StartSso, Status, Subject, SubordinateStatusCode,
+    AcsEndpoint, AssertionSignaturePolicy, AudienceValidationPolicy, AuthnRequest,
+    AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, BrowserInput, CertificatePem,
+    Credentials, EntityId, ForceAuthn, FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy,
+    MetadataTrustPolicy, NameId, NameIdCreationPolicy, NameIdFormat, Outbound, PrivateKeyPem,
+    ReplayPolicy, RespondSso, Saml, SamlError, SamlValidationContext, SloEndpoint, SpConfig,
+    SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse, StartSso, Status, Subject,
+    SubordinateStatusCode,
 };
 #[cfg(not(feature = "crypto-fips"))]
 use saml_rs::{XmlEncryptionPolicy, XmlPolicy};
@@ -41,6 +41,22 @@ fn credentials() -> Credentials {
         signing_key: Some(PrivateKeyPem::new(PRIVKEY)),
         signing_certificate: Some(CertificatePem::new(CERT)),
         ..Credentials::default()
+    }
+}
+
+fn signing_sp_validation() -> SpValidationPolicy {
+    SpValidationPolicy {
+        assertions: AssertionSignaturePolicy::RequireSigned,
+        authn_requests: AuthnRequestSigningPolicy::Sign,
+        audience: AudienceValidationPolicy::Validate,
+        ..SpValidationPolicy::recommended()
+    }
+}
+
+fn signed_authn_request_idp_validation() -> IdpValidationPolicy {
+    IdpValidationPolicy {
+        authn_requests: AuthnRequestValidationPolicy::RequireSigned,
+        ..IdpValidationPolicy::recommended()
     }
 }
 
@@ -159,8 +175,8 @@ fn confirmation_tag(xml: &str) -> String {
 #[test]
 fn typed_sso_response_carries_profile_authentication_statement(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict())?;
-    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let sp = sp_with(signing_sp_validation())?;
+    let idp = idp_with(signed_authn_request_idp_validation(), false)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
     let received = idp.receive_sso(
@@ -217,8 +233,8 @@ fn typed_sso_response_carries_profile_authentication_statement(
 #[test]
 fn typed_unsolicited_sso_omits_in_response_to_under_producer_rules(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict())?;
-    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let sp = sp_with(signing_sp_validation())?;
+    let idp = idp_with(signed_authn_request_idp_validation(), false)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let response = idp.initiate_sso(
         &sp_descriptor,
@@ -245,8 +261,8 @@ fn typed_unsolicited_sso_omits_in_response_to_under_producer_rules(
 #[test]
 fn typed_sso_compatibility_generation_keeps_todays_response_shape(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict())?;
-    let idp = idp_with(IdpValidationPolicy::strict(), true)?;
+    let sp = sp_with(signing_sp_validation())?;
+    let idp = idp_with(signed_authn_request_idp_validation(), true)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let response = idp.initiate_sso(&sp_descriptor, subject(), RespondSso::post())?;
     let xml = response_xml(&response)?;
@@ -267,8 +283,8 @@ fn typed_sso_compatibility_generation_keeps_todays_response_shape(
 #[test]
 fn typed_sso_session_index_is_present_only_when_single_logout_is_supported(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict())?;
-    let idp = idp_with(IdpValidationPolicy::strict(), true)?;
+    let sp = sp_with(signing_sp_validation())?;
+    let idp = idp_with(signed_authn_request_idp_validation(), true)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let response = idp.initiate_sso(
         &sp_descriptor,
@@ -302,7 +318,7 @@ fn typed_sso_session_index_is_present_only_when_single_logout_is_supported(
     assert_eq!(session_index.as_str(), session.assertion_id().as_str());
     assert_eq!(session_index.as_str(), assertion_id);
 
-    let idp_without_logout = idp_with(IdpValidationPolicy::strict(), false)?;
+    let idp_without_logout = idp_with(signed_authn_request_idp_validation(), false)?;
     let (sp_descriptor, _) = descriptors(&sp, &idp_without_logout)?;
     let response = idp_without_logout.initiate_sso(
         &sp_descriptor,
@@ -450,7 +466,7 @@ fn typed_cbc_response_signature_stays_recommended_and_relaxes_alone(
         SpConfig::builder(EntityId::try_new(SP_ENTITY_ID)?)
             .acs_endpoint(AcsEndpoint::post(SP_ACS)?.mark_default())
             .credentials(encrypted_credentials.clone())
-            .validation(SpValidationPolicy::strict())
+            .validation(signing_sp_validation())
             .xml(encryption)
             .build()?,
     )?;
@@ -458,7 +474,7 @@ fn typed_cbc_response_signature_stays_recommended_and_relaxes_alone(
         IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
             .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
             .credentials(credentials())
-            .validation(IdpValidationPolicy::strict())
+            .validation(signed_authn_request_idp_validation())
             .xml(encryption)
             .build()?,
     )?;
@@ -546,11 +562,11 @@ fn typed_producer_rules_reject_custom_login_templates() -> Result<(), Box<dyn st
         other => return Err(format!("expected built-in renderer error, got {other:?}").into()),
     }
 
-    let sp = sp_with(SpValidationPolicy::strict())?;
+    let sp = sp_with(signing_sp_validation())?;
     let mut idp_config = IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
         .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
         .credentials(credentials())
-        .validation(IdpValidationPolicy::strict())
+        .validation(signed_authn_request_idp_validation())
         .build()?;
     idp_config.templates.login_response_template = Some(LoginResponseTemplate {
         context: Some("<samlp:Response/>".to_string()),
@@ -575,8 +591,8 @@ fn typed_producer_rules_reject_custom_login_templates() -> Result<(), Box<dyn st
 #[test]
 fn typed_plaintext_response_stays_accepted_without_producer_rules(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict())?;
-    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let sp = sp_with(signing_sp_validation())?;
+    let idp = idp_with(signed_authn_request_idp_validation(), false)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
     let received = idp.receive_sso(
@@ -621,8 +637,8 @@ fn assert_error_response_has_no_assertion(xml: &str) -> Result<(), Box<dyn std::
 #[test]
 fn typed_sso_error_response_carries_caller_status_and_no_assertions(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict())?;
-    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let sp = sp_with(signing_sp_validation())?;
+    let idp = idp_with(signed_authn_request_idp_validation(), false)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
     let received = idp.receive_sso(
@@ -685,8 +701,8 @@ fn typed_sso_error_response_carries_caller_status_and_no_assertions(
 #[test]
 fn typed_sso_without_error_status_keeps_success_and_assertions(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict())?;
-    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let sp = sp_with(signing_sp_validation())?;
+    let idp = idp_with(signed_authn_request_idp_validation(), false)?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(&idp_descriptor, StartSso::post())?;
     let received = idp.receive_sso(
@@ -757,8 +773,8 @@ fn typed_sso_without_error_status_keeps_success_and_assertions(
 #[test]
 fn typed_unsolicited_error_response_follows_in_response_to_rules(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict())?;
-    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let sp = sp_with(signing_sp_validation())?;
+    let idp = idp_with(signed_authn_request_idp_validation(), false)?;
     let (sp_descriptor, _) = descriptors(&sp, &idp)?;
 
     let ruled = idp.initiate_sso(
@@ -798,11 +814,11 @@ fn typed_unsolicited_error_response_follows_in_response_to_rules(
 #[test]
 fn typed_error_response_rejects_a_login_response_template() -> Result<(), Box<dyn std::error::Error>>
 {
-    let sp = sp_with(SpValidationPolicy::strict())?;
+    let sp = sp_with(signing_sp_validation())?;
     let mut idp_config = IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
         .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
         .credentials(credentials())
-        .validation(IdpValidationPolicy::strict())
+        .validation(signed_authn_request_idp_validation())
         .build()?;
     idp_config.templates.login_response_template = Some(LoginResponseTemplate {
         context: Some(saml_rs::template::LOGIN_RESPONSE_TEMPLATE.to_string()),
@@ -835,10 +851,10 @@ fn typed_simplesign_error_response_keeps_the_detached_signature(
                 "https://sp.example.com/acs/simple-sign",
             )?)
             .credentials(credentials())
-            .validation(SpValidationPolicy::strict())
+            .validation(signing_sp_validation())
             .build()?,
     )?;
-    let idp = idp_with(IdpValidationPolicy::strict(), false)?;
+    let idp = idp_with(signed_authn_request_idp_validation(), false)?;
     let (sp_descriptor, _) = descriptors(&sp, &idp)?;
     let response = idp.initiate_sso(
         &sp_descriptor,
@@ -865,12 +881,12 @@ fn typed_error_response_stays_plaintext_when_assertion_encryption_is_on(
             .with_insecure_software_rsa_key_transport_decryption_allowed(),
         ..XmlPolicy::default()
     };
-    let sp = sp_with(SpValidationPolicy::strict())?;
+    let sp = sp_with(signing_sp_validation())?;
     let idp = Saml::idp(
         IdpConfig::builder(EntityId::try_new(IDP_ENTITY_ID)?)
             .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
             .credentials(credentials())
-            .validation(IdpValidationPolicy::strict())
+            .validation(signed_authn_request_idp_validation())
             .xml(encryption)
             .build()?,
     )?;
