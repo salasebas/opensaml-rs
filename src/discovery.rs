@@ -21,8 +21,8 @@ pub enum DiscoveryCookieLifetime {
     Session,
     /// The browser keeps the cookie for `max_age`.
     ///
-    /// `max_age` must be at least one whole second. That duration is written
-    /// as `Max-Age`.
+    /// `max_age` must be a whole number of seconds and at least one second.
+    /// That duration is written as `Max-Age`.
     Persistent {
         /// How long the browser keeps the cookie.
         max_age: Duration,
