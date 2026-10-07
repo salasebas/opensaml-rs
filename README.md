@@ -13,6 +13,7 @@ message signatures go through
 
 The Cargo package is `saml-rs`. The Rust import path is `saml_rs`. Source and
 issues live in [salasebas/saml-rs](https://github.com/salasebas/saml-rs).
+Guides are at [samlrs.vercel.app](https://samlrs.vercel.app).
 
 **Status:** pre-1.0. A minor release can change the API or runtime behaviour.
 There has been no external security audit. Review the crate, your
@@ -120,6 +121,7 @@ product, and a minimal expected flow on
 
 | Need | Start here |
 | --- | --- |
+| Read the guides | [samlrs.vercel.app](https://samlrs.vercel.app) |
 | Run a full flow | [`examples/sso.rs`](examples/sso.rs) and [`examples/slo.rs`](examples/slo.rs) |
 | Change an existing integration | [Migration guides](docs/migrations/README.md) |
 | Look up a type or method | [docs.rs](https://docs.rs/saml-rs/latest/saml_rs/) |
