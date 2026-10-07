@@ -521,7 +521,7 @@ pub(crate) fn answer(
     if artifact.source_id != sha1(entity_id.as_bytes()) {
         return success_without(&entity_id, &request.id, ArtifactWithheld::NotOutstanding);
     }
-    {
+    let message_xml = {
         let Some(entry) = issued.entries.get(artifact.as_str()) else {
             return success_without(&entity_id, &request.id, ArtifactWithheld::NotOutstanding);
         };
@@ -539,13 +539,8 @@ pub(crate) fn answer(
         }
         let presenter_id = presenter.entity_id().as_str();
         let issuer_matches = request.issuer.as_ref().is_some_and(|issuer| {
-            issuer.value == presenter_id && issuer.value == entry.service_provider
-        }) && issuer_format_is_entity(
-            request
-                .issuer
-                .as_ref()
-                .and_then(|issuer| issuer.format.as_deref()),
-        );
+            issuer.value == presenter_id && issuer_format_is_entity(issuer.format.as_deref())
+        });
         if !issuer_matches || presenter_id != entry.service_provider {
             return success_without(
                 &entity_id,
@@ -553,17 +548,17 @@ pub(crate) fn answer(
                 ArtifactWithheld::DifferentPresenter,
             );
         }
-    }
-    let Some(entry) = issued.entries.remove(artifact.as_str()) else {
-        return success_without(&entity_id, &request.id, ArtifactWithheld::NotOutstanding);
+        entry.message_xml.clone()
     };
-    answered(
+    let response = answered(
         &entity_id,
         &request.id,
         status_code::SUCCESS,
-        Some(&entry.message_xml),
+        Some(&message_xml),
         ArtifactRelease::Returned,
-    )
+    )?;
+    issued.entries.remove(artifact.as_str());
+    Ok(response)
 }
 
 fn success_without(

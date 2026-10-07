@@ -758,3 +758,90 @@ fn the_service_provider_rejects_an_artifact_response_it_cannot_attribute(
     ));
     Ok(())
 }
+
+#[test]
+fn a_non_entity_resolve_issuer_does_not_receive_the_message(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, web_sso_response()?, &mut issued)?;
+    let channel = confidential();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut ArtifactUses::allow_reuse(),
+    )?;
+    let email_issuer = resolution.request().envelope().replace(
+        "<saml:Issuer>",
+        "<saml:Issuer Format=\"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress\">",
+    );
+    let withheld = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        &email_issuer,
+        &mut issued,
+        channel,
+    )?;
+    assert_eq!(
+        withheld.release(),
+        ArtifactRelease::Withheld(ArtifactWithheld::DifferentPresenter)
+    );
+    assert!(!withheld.envelope().contains(WEB_SSO_MARKER));
+    let accepted = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    )?;
+    assert_eq!(accepted.release(), ArtifactRelease::Returned);
+    Ok(())
+}
+
+#[test]
+fn a_release_that_cannot_be_built_leaves_the_artifact_outstanding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let prefix = format!(
+        r#"<samlp:Response xmlns:samlp="{PROTOCOL}" ID="_response" Version="2.0" IssueInstant="2024-01-01T00:00:00Z">"#
+    );
+    let suffix = "</samlp:Response>";
+    let limit = saml_rs::xml::dom::DEFAULT_XML_MAX_BYTES;
+    let text_len = limit
+        .checked_sub(prefix.len() + suffix.len() + 256)
+        .ok_or("XML byte limit is smaller than the response shell")?;
+    let message = IssuedMessage::web_browser_sso_response(format!(
+        "{prefix}{}{suffix}",
+        "m".repeat(text_len)
+    ))?;
+    assert!(message.xml().len() < limit);
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, message, &mut issued)?;
+    let channel = confidential();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut ArtifactUses::enforce_single_use(),
+    )?;
+    let first = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    );
+    assert!(matches!(
+        &first,
+        Err(SamlError::Invalid(detail)) if detail.contains("ERR_XML_LIMIT_EXCEEDED")
+    ));
+    let second = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    );
+    assert!(matches!(
+        second,
+        Err(SamlError::Invalid(detail)) if detail.contains("ERR_XML_LIMIT_EXCEEDED")
+    ));
+    Ok(())
+}
