@@ -164,6 +164,10 @@ fn validate_entity_identifier(entity_id: &str) -> Result<(), SamlError> {
 }
 
 fn is_entity_identifier_uri(entity_id: &str) -> bool {
+    // Entity identifiers are URIs, so they are ASCII.
+    if !entity_id.is_ascii() {
+        return false;
+    }
     let Some((scheme, rest)) = entity_id.split_once(':') else {
         return false;
     };

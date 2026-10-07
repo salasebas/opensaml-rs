@@ -356,6 +356,15 @@ fn discovery_cookie_rejects_input_that_cannot_be_written() -> Result<(), Box<dyn
         ),
         "URI",
     )?;
+    assert_invalid(
+        remember(
+            "https://例え.jp/metadata",
+            "example.org",
+            DiscoveryCookieLifetime::Session,
+            None,
+        ),
+        "URI",
+    )?;
     Ok(())
 }
 
