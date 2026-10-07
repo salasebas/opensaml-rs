@@ -198,6 +198,14 @@ fn is_ascii_hostname(domain: &str) -> bool {
     if domain.len() > 253 || domain.ends_with('.') {
         return false;
     }
+    // An IPv4 literal or an all-numeric top-level domain is not a common domain.
+    if domain
+        .rsplit('.')
+        .next()
+        .is_some_and(|label| !label.is_empty() && label.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return false;
+    }
     domain.split('.').all(|label| {
         let bytes = label.as_bytes();
         !bytes.is_empty()

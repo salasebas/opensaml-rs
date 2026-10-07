@@ -144,6 +144,37 @@ fn writer_appends_this_identity_provider_and_moves_it_to_the_end(
 }
 
 #[test]
+fn common_domain_must_be_a_hostname_not_an_ip_address() -> Result<(), Box<dyn std::error::Error>> {
+    for domain in [
+        "192.168.1.1",
+        "127.0.0.1",
+        "10.0.0.1",
+        "1.2.3.4",
+        "example.123",
+    ] {
+        assert_invalid(
+            remember(
+                IDP_ENTITY_ID,
+                domain,
+                DiscoveryCookieLifetime::Session,
+                None,
+            ),
+            "ASCII hostname",
+        )?;
+    }
+
+    // A single-label hostname still works as a cookie domain.
+    let local = remember(
+        IDP_ENTITY_ID,
+        "localhost",
+        DiscoveryCookieLifetime::Session,
+        None,
+    )?;
+    assert_eq!(local.domain(), ".localhost");
+    Ok(())
+}
+
+#[test]
 fn cookie_value_percent_encodes_base64_plus_and_slash() -> Result<(), Box<dyn std::error::Error>> {
     let plus = remember(
         "https://idp.example/~",
