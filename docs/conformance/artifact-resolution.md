@@ -53,7 +53,7 @@ Bindings §3.6.5.
 | `ID`, `Version` `2.0`, and UTC `IssueInstant` are present | Requester | Generate ArtifactResolve | Mandatory. Protocol schema `RequestAbstractType`; Core §1.3.3 |
 | Do not generate a leap-second time | Requester | Generate any instant | Mandatory. Core §1.3.3. Receivers are not required to reject a leap second |
 | `Destination` is the artifact resolution endpoint | Requester | Generate ArtifactResolve | Set to the metadata location. Core treats `Destination` as optional. When a received request includes it, a different value does not release the message |
-| One `Artifact` value | Requester | Generate ArtifactResolve | Mandatory. Protocol schema |
+| One `Artifact` value | Requester | Generate ArtifactResolve | Mandatory. Protocol schema `ArtifactResolveType`. The value is the protocol element. A second direct child named `Artifact`, including one outside the protocol namespace, is malformed; the responder returns `SamlError` and leaves the artifact outstanding |
 | At most one `Issuer` | Requester | Generate ArtifactResolve | Protocol schema `ArtifactResolveType`. A second `Issuer` is malformed; the responder returns `SamlError` so the deployment can refuse it at HTTP |
 | Authenticate to the responder and protect integrity | Requester | Send ArtifactResolve | Recommendation. Profiles §5.3.1 and §5.4.1. Enforced for every dereference. There is no relaxation. Web SSO makes the same properties mandatory and adds confidentiality; that row is below |
 | The SOAP body contains exactly one SAML request | Requester | SOAP envelope | Mandatory. Bindings §3.2.2.1, as left by Errata 05 E19 |

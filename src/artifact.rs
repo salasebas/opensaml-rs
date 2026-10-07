@@ -712,7 +712,7 @@ fn parse_resolve(xml: &str) -> Result<ResolveRequest, SamlError> {
     if element
         .children
         .iter()
-        .filter(|child| child.local_name == "Artifact" && child.namespace == namespace::PROTOCOL)
+        .filter(|child| child.local_name == "Artifact")
         .count()
         != 1
     {

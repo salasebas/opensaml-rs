@@ -905,6 +905,74 @@ fn the_service_provider_rejects_an_artifact_response_without_id_or_instant(
 }
 
 #[test]
+fn a_foreign_artifact_sibling_does_not_release_the_message(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, web_sso_response()?, &mut issued)?;
+    let channel = confidential();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut ArtifactUses::allow_reuse(),
+    )?;
+    let foreign = resolution.request().envelope().replacen(
+        "</samlp:Artifact>",
+        "</samlp:Artifact><other:Artifact xmlns:other=\"urn:example:other\">extra</other:Artifact>",
+        1,
+    );
+    let refused =
+        parties
+            .idp
+            .answer_artifact_resolve(&parties.sp_metadata, &foreign, &mut issued, channel);
+    assert!(matches!(refused, Err(SamlError::ProtocolProfile(_))));
+
+    let accepted = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    )?;
+    assert_eq!(accepted.release(), ArtifactRelease::Returned);
+    assert!(accepted.envelope().contains(WEB_SSO_MARKER));
+    Ok(())
+}
+
+#[test]
+fn a_non_http_resolution_location_does_not_consume_single_use(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, web_sso_response()?, &mut issued)?;
+    let mut posted = parties.idp.metadata_xml().to_string();
+    let replaced = posted.replacen(RESOLUTION_URL, "urn:example:artifact", 1);
+    assert_ne!(replaced, posted);
+    posted = replaced;
+    let peer =
+        IdpDescriptor::from_metadata_xml(&posted, MetadataTrustPolicy::UnsignedForCompatibility)?;
+    let channel = confidential();
+    let mut uses = ArtifactUses::enforce_single_use();
+    let first = parties.sp.resolve_artifact(
+        &peer,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut uses,
+    );
+    assert!(matches!(first, Err(SamlError::Invalid(_))));
+
+    let second = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut uses,
+    )?;
+    assert!(second.request().envelope().contains("ArtifactResolve"));
+    assert!(second.request().envelope().contains(artifact.as_str()));
+    Ok(())
+}
+
+#[test]
 fn a_duplicate_resolve_issuer_is_refused_as_malformed() -> Result<(), Box<dyn std::error::Error>> {
     let parties = parties()?;
     let mut issued = IssuedArtifacts::new();

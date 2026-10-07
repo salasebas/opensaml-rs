@@ -490,4 +490,13 @@ mod tests {
         let envelope = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" soap:mustUnderstand="1"/></soap:Header><soap:Body><samlp:ArtifactResolve xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"/></soap:Body></soap:Envelope>"#;
         assert!(SoapProtocolMessage::from_envelope(envelope).is_err());
     }
+
+    #[test]
+    fn soap_header_unprefixed_must_understand_is_rejected() {
+        let envelope = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Header><extra mustUnderstand="1">note</extra></soap:Header><soap:Body><samlp:ArtifactResolve xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"/></soap:Body></soap:Envelope>"#;
+        assert!(matches!(
+            SoapProtocolMessage::from_envelope(envelope),
+            Err(SamlError::Xml(_))
+        ));
+    }
 }
