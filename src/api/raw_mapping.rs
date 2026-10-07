@@ -8,7 +8,8 @@ use crate::entity::EntitySetting;
 use crate::error::SamlError as Error;
 use crate::idp::IdentityProvider;
 use crate::metadata::{
-    IdpMetadataConfig as RawIdpMetadataConfig, SpMetadataConfig as RawSpMetadataConfig,
+    ArtifactResolutionEndpoint, IdpMetadataConfig as RawIdpMetadataConfig,
+    SpMetadataConfig as RawSpMetadataConfig,
 };
 use crate::model::{AuthnRequest, RelayStateParam};
 use crate::sp::ServiceProvider;
@@ -66,6 +67,15 @@ pub(super) fn raw_idp_metadata_config(config: &IdpConfig) -> RawIdpMetadataConfi
             .single_logout_service
             .iter()
             .map(|endpoint| endpoint.to_raw())
+            .collect(),
+        artifact_resolution_service: config
+            .metadata
+            .artifact_resolution_service
+            .iter()
+            .map(|service| ArtifactResolutionEndpoint {
+                index: service.index(),
+                location: service.location().as_str().to_string(),
+            })
             .collect(),
         elements_order: config.metadata.elements_order.clone(),
     }

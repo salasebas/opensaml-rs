@@ -4,6 +4,7 @@ mod date_time;
 pub mod dom;
 pub mod extract;
 pub mod fields;
+pub(crate) mod fragment;
 mod profile;
 pub(crate) mod write;
 

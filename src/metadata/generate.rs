@@ -5,6 +5,15 @@ use crate::error::SamlError;
 use crate::metadata::write::MetadataWriter;
 use crate::util::{is_non_empty_array, normalize_cert_string};
 
+/// Indexed `ArtifactResolutionService` location. The binding is SOAP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactResolutionEndpoint {
+    /// `index` selecting this endpoint from an artifact.
+    pub index: u16,
+    /// Endpoint URL.
+    pub location: String,
+}
+
 /// A protocol endpoint (`SingleSignOnService` / `SingleLogoutService` / ACS).
 #[derive(Debug, Clone)]
 pub struct Endpoint {
@@ -70,6 +79,8 @@ pub struct IdpMetadataConfig {
     pub single_sign_on_service: Vec<Endpoint>,
     /// `SingleLogoutService` endpoints.
     pub single_logout_service: Vec<Endpoint>,
+    /// `ArtifactResolutionService` endpoints. Each binding is SOAP.
+    pub artifact_resolution_service: Vec<ArtifactResolutionEndpoint>,
     /// Element ordering profile (defaults to [`elements_order::idp::DEFAULT`]).
     pub elements_order: Option<Vec<String>>,
 }
@@ -139,6 +150,23 @@ fn write_single_sign_on_service(w: &mut MetadataWriter, endpoints: &[Endpoint]) 
     }
 }
 
+fn write_artifact_resolution_service(
+    w: &mut MetadataWriter,
+    endpoints: &[ArtifactResolutionEndpoint],
+) {
+    for endpoint in endpoints {
+        let index = endpoint.index.to_string();
+        w.empty(
+            "ArtifactResolutionService",
+            &[
+                ("index", index.as_str()),
+                ("Binding", crate::constants::SOAP_BINDING_URN),
+                ("Location", endpoint.location.as_str()),
+            ],
+        );
+    }
+}
+
 fn write_sp_group(w: &mut MetadataWriter, cfg: &SpMetadataConfig, name: &str) {
     match name {
         "KeyDescriptor" => write_key_descriptors(w, &cfg.signing_certs, &cfg.encrypt_certs),
@@ -159,6 +187,7 @@ fn idp_group_has_content(cfg: &IdpMetadataConfig, name: &str) -> bool {
         "NameIDFormat" => is_non_empty_array(&cfg.name_id_format),
         "SingleSignOnService" => is_non_empty_array(&cfg.single_sign_on_service),
         "SingleLogoutService" => is_non_empty_array(&cfg.single_logout_service),
+        "ArtifactResolutionService" => is_non_empty_array(&cfg.artifact_resolution_service),
         _ => false,
     }
 }
@@ -169,6 +198,9 @@ fn write_idp_group(w: &mut MetadataWriter, cfg: &IdpMetadataConfig, name: &str) 
         "NameIDFormat" => write_name_id_formats(w, &cfg.name_id_format, false),
         "SingleSignOnService" => write_single_sign_on_service(w, &cfg.single_sign_on_service),
         "SingleLogoutService" => write_single_logout(w, &cfg.single_logout_service),
+        "ArtifactResolutionService" => {
+            write_artifact_resolution_service(w, &cfg.artifact_resolution_service)
+        }
         _ => {}
     }
 }
@@ -229,10 +261,22 @@ pub fn generate_sp_metadata(cfg: &SpMetadataConfig) -> String {
 /// Generate IdP metadata XML.
 pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
     let is_custom_order = cfg.elements_order.is_some();
-    let order = elements_order_or_default(&cfg.elements_order, elements_order::idp::DEFAULT);
+    let mut order = elements_order_or_default(&cfg.elements_order, elements_order::idp::DEFAULT);
+    if is_custom_order
+        && !order
+            .iter()
+            .any(|ordered| ordered == "ArtifactResolutionService")
+    {
+        let after_key_descriptor = order
+            .iter()
+            .position(|ordered| ordered == "KeyDescriptor")
+            .map_or(0, |position| position + 1);
+        order.insert(after_key_descriptor, "ArtifactResolutionService".into());
+    }
     let descriptors = [
         "KeyDescriptor",
         "NameIDFormat",
+        "ArtifactResolutionService",
         "SingleSignOnService",
         "SingleLogoutService",
     ];
@@ -650,12 +694,52 @@ mod tests {
     }
 
     #[test]
+    fn idp_custom_elements_order_writes_omitted_artifact_resolution_after_keys() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            signing_certs: vec!["MIIBsigning".into()],
+            name_id_format: vec![name_id_format::EMAIL_ADDRESS.to_string()],
+            single_sign_on_service: vec![Endpoint::new(Binding::Redirect, "https://idp/sso")],
+            single_logout_service: vec![Endpoint::new(Binding::Redirect, "https://idp/slo")],
+            artifact_resolution_service: vec![ArtifactResolutionEndpoint {
+                index: 0,
+                location: "https://idp/artifact".into(),
+            }],
+            elements_order: Some(
+                elements_order::idp::SHIBBOLETH
+                    .iter()
+                    .map(|name| (*name).to_string())
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+
+        let xml = generate_idp_metadata(&cfg);
+        let positions = [
+            "<KeyDescriptor",
+            "<ArtifactResolutionService",
+            "<SingleLogoutService",
+            "<NameIDFormat",
+            "<SingleSignOnService",
+        ]
+        .map(|element| xml.find(element));
+
+        assert_eq!(xml.matches("<ArtifactResolutionService").count(), 1);
+        assert!(positions.iter().all(Option::is_some));
+        assert!(positions.is_sorted());
+    }
+
+    #[test]
     fn idp_elements_order_profiles_match_upstream() {
+        // The default profile includes ArtifactResolutionService. OneLogin and
+        // Shibboleth stay the upstream lists; generation writes the service
+        // after KeyDescriptor when a custom list omits it.
         assert_eq!(
             elements_order::idp::DEFAULT,
             [
                 "KeyDescriptor",
                 "NameIDFormat",
+                "ArtifactResolutionService",
                 "SingleSignOnService",
                 "SingleLogoutService",
             ]
