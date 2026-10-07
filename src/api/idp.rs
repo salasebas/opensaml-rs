@@ -252,6 +252,10 @@ impl Saml<Idp> {
     /// identifier cannot be stored in that list, or the resulting cookie value
     /// is larger than 4096 bytes.
     ///
+    /// The example selects [`crate::IdpValidationPolicy::compatibility`] so it
+    /// builds without a crypto provider. [`crate::IdpConfig::builder`] starts
+    /// on [`crate::IdpValidationPolicy::recommended`].
+    ///
     /// # Examples
     ///
     /// ```

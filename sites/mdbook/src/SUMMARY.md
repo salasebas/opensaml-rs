@@ -32,6 +32,7 @@
     - [SSO acceptance](reference/conformance/web-browser-sso-acceptance.md)
     - [SSO generation](reference/conformance/web-browser-sso-generation.md)
     - [Logout](reference/conformance/single-logout.md)
+    - [Identity Provider Discovery](reference/conformance/identity-provider-discovery.md)
     - [Metadata and replay](reference/conformance/metadata-and-replay.md)
 
 # Explanation

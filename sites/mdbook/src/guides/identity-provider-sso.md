@@ -61,6 +61,19 @@ let response = idp.respond_sso(
 
 Assertion encryption stays off until you select `XmlEncryptionPolicy::encrypt_assertions`. On RustCrypto, software RSA key-transport decryption stays off until the caller opts in. See [Security](../reference/security.md).
 
+## Discovery cookie
+
+After authentication, ask the identity provider above for the `_saml_idp` cookie and write the header yourself. `respond_sso` does not write it. A service provider has no method that sets or reads it.
+
+```rust
+let cookie = idp.remember_identity_provider(CommonDomainCookieRequest::new(
+    "example.org",
+    DiscoveryCookieLifetime::Session,
+))?;
+```
+
+Pass the common domain without a leading period. The cookie domain is `.example.org`, the path is `/`, and the cookie is `Secure`. The rules are in [Identity Provider Discovery](../reference/conformance/identity-provider-discovery.md).
+
 ## Next
 
 The paired flow is [Service provider](service-provider-sso.md). A round trip that includes logout is [`examples/slo.rs`](https://github.com/salasebas/saml-rs/blob/main/examples/slo.rs).
