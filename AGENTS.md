@@ -8,6 +8,10 @@ work in the repo, not restate the README.
 
 - `src/` contains the implementation. Put protocol, XML, metadata, binding,
   validation, logout, and crypto-adapter changes there.
+- `docs/module-map.md` names the file for typed SSO, assertion acceptance,
+  raw parse, signature verification, validation presets, logout, and the
+  compatibility crates. Read it before searching `flow.rs`, `idp.rs`, `sp.rs`,
+  or `crypto/verify.rs`.
 - `tests/` contains integration tests and committed fixtures.
 - `examples/` contains runnable examples.
 - XML cryptography is delegated to `bergshamra` behind the default
@@ -30,6 +34,8 @@ work in the repo, not restate the README.
 - Keep non-mechanical diffs reviewable. If a change grows large, split it into
   the smallest coherent stages.
 - New SAML behavior must follow `docs/standards-conformance.md`.
+- Review judgements for doc comments, caller-visible changes, and stricter
+  receiver rules are in `CODING_STANDARDS.md`.
 
 ## Standards Conformance
 
@@ -54,7 +60,6 @@ work in the repo, not restate the README.
 - Do not present library safety or application policy as an OASIS wire
   requirement, and do not invent validation for unspecified behavior.
 - A stricter receiver rule is recorded as library policy in the pull request.
-  The wording is in `CODING_STANDARDS.md`.
 
 ## Fixture Provenance
 
@@ -100,7 +105,10 @@ job in `.github/workflows/ci.yml`.
 - When possible, make `match` statements exhaustive and avoid wildcard arms.
 - New traits should include doc comments explaining their role and how
   implementations are expected to use them.
-- Doc comments follow `CODING_STANDARDS.md`.
+- Comments describe behavior and API usage. Do not justify why an
+  implementation was chosen.
+- The normative note for a claimed feature is its row in `docs/conformance/`.
+  A code comment names the behavior.
 - Use inline format arguments, collapse nested `if` statements when clear, and
   prefer method references over redundant closures.
 - In tests, return `Result<(), Box<dyn std::error::Error>>` and use `?` instead
@@ -112,9 +120,8 @@ job in `.github/workflows/ci.yml`.
 - Keep security-sensitive validation fail-closed. Missing, malformed, unsigned,
   or untrusted inputs should produce explicit `SamlError` variants where
   practical.
-- Avoid growing large modules. Prefer new focused modules over extending files
-  that are already large, especially `idp.rs`, `logout.rs`, `flow.rs`, and
-  `sp.rs`.
+- Prefer new focused modules over extending a large module listed in
+  `docs/module-map.md`.
 
 ## Security-Sensitive Areas
 
@@ -136,8 +143,13 @@ Add regression tests for security fixes.
 - The published crate is `saml-rs`, and Rust imports use `saml_rs`.
 - Do not edit `CHANGELOG.md` by hand. release-plz writes it from Conventional
   Commits on the release PR.
-- Caller-visible changes update the migration guide in the same pull request.
-  The bar is in `CODING_STANDARDS.md`. The procedure is in `CONTRIBUTING.md`.
+- A caller-visible change updates `docs/migrations/` in the same change: what
+  breaks, who must change, and how to upgrade. That includes a breaking change,
+  a new error, and a new exhaustive enum variant. Follow
+  `docs/migrations/README.md`.
+  The last guide linked from that README covers the latest published minor.
+  An unreleased break is a new file, linked from that README.
+  Compatible features are recorded by their Conventional Commit.
 
 ## Agent skills
 

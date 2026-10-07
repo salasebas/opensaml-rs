@@ -1,8 +1,5 @@
 # Coding standards
 
-Review judgements for `saml-rs`. `/code-review` reads this file on the standards
-axis. Clippy, rustdoc, and CI keep the mechanical checks.
-
 ## Doc comments
 
 A doc comment says what the caller can do with the item.

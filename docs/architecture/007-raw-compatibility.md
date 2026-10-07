@@ -1,5 +1,9 @@
 # Raw compatibility
 
+> Design record for the typed API. The live file index is
+> [the module map](../module-map.md). A heading that says Proposed, Target,
+> or Today describes this design.
+
 The typed API is additive. The current flow API remains available because
 removing it would strand integrations that still need direct XML.
 
@@ -13,7 +17,9 @@ The current API remains useful for:
 - callers that need direct XML, `FlowResult`, or `BindingContext`;
 - cases where typed support has not yet been built.
 
-## Proposed Raw Module
+## Raw module
+
+The module in this design is `src/raw.rs`.
 
 ```rust
 pub mod raw {

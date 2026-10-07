@@ -1,12 +1,16 @@
 # Public API map
 
-This note records the root exports and the map from the raw API to the typed
-API, so a later change can see which names are canonical. The reasons for the
-role names are in [Naming](001-naming.md).
+> Design record for the typed API. The live file index is
+> [the module map](../module-map.md). A heading that says Proposed, Target,
+> or Today describes this design.
+
+This note records the names proposed for the typed facade and the map from
+raw names to those names. The reasons for the role names are in
+[Naming](001-naming.md).
 
 ## Root Exports
 
-Proposed root exports:
+Root exports in this design:
 
 ```rust
 pub use api::{Idp, Saml, Sp, Unknown};
@@ -59,9 +63,9 @@ Current hidden root modules are classified as:
 | Raw implementation modules | `sp`, `idp`, `flow`, `entity`, `logout` |
 | Protocol/helper modules | `binding`, `crypto`, `xml`, `context`, `template`, `util`, `validator` |
 
-## Current Raw API
+## Raw API in this design
 
-Today:
+The raw call shape this design kept:
 
 ```rust
 let request = sp.create_login_request(&idp, Binding::Post, None)?;
@@ -94,9 +98,9 @@ let name_id = result.extract.get_str("nameID");
 
 This remains available as raw compatibility.
 
-## New Typed API
+## Typed API in this design
 
-Target:
+The typed call shape this design called for:
 
 ```rust
 let sp_saml = Saml::sp(sp_config)?;
