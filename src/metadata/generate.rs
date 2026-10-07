@@ -261,7 +261,18 @@ pub fn generate_sp_metadata(cfg: &SpMetadataConfig) -> String {
 /// Generate IdP metadata XML.
 pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
     let is_custom_order = cfg.elements_order.is_some();
-    let order = elements_order_or_default(&cfg.elements_order, elements_order::idp::DEFAULT);
+    let mut order = elements_order_or_default(&cfg.elements_order, elements_order::idp::DEFAULT);
+    if is_custom_order
+        && !order
+            .iter()
+            .any(|ordered| ordered == "ArtifactResolutionService")
+    {
+        let after_key_descriptor = order
+            .iter()
+            .position(|ordered| ordered == "KeyDescriptor")
+            .map_or(0, |position| position + 1);
+        order.insert(after_key_descriptor, "ArtifactResolutionService".into());
+    }
     let descriptors = [
         "KeyDescriptor",
         "NameIDFormat",
@@ -297,12 +308,6 @@ pub fn generate_idp_metadata(cfg: &IdpMetadataConfig) -> String {
     if is_custom_order {
         if !order.iter().any(|ordered| ordered == "SingleSignOnService") {
             write_idp_group(&mut w, cfg, "SingleSignOnService");
-        }
-        if !order
-            .iter()
-            .any(|ordered| ordered == "ArtifactResolutionService")
-        {
-            write_idp_group(&mut w, cfg, "ArtifactResolutionService");
         }
     } else {
         for name in descriptors {
@@ -689,10 +694,46 @@ mod tests {
     }
 
     #[test]
+    fn idp_custom_elements_order_writes_omitted_artifact_resolution_after_keys() {
+        let cfg = IdpMetadataConfig {
+            entity_id: "https://idp.example.com/metadata".into(),
+            signing_certs: vec!["MIIBsigning".into()],
+            name_id_format: vec![name_id_format::EMAIL_ADDRESS.to_string()],
+            single_sign_on_service: vec![Endpoint::new(Binding::Redirect, "https://idp/sso")],
+            single_logout_service: vec![Endpoint::new(Binding::Redirect, "https://idp/slo")],
+            artifact_resolution_service: vec![ArtifactResolutionEndpoint {
+                index: 0,
+                location: "https://idp/artifact".into(),
+            }],
+            elements_order: Some(
+                elements_order::idp::SHIBBOLETH
+                    .iter()
+                    .map(|name| (*name).to_string())
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+
+        let xml = generate_idp_metadata(&cfg);
+        let positions = [
+            "<KeyDescriptor",
+            "<ArtifactResolutionService",
+            "<SingleLogoutService",
+            "<NameIDFormat",
+            "<SingleSignOnService",
+        ]
+        .map(|element| xml.find(element));
+
+        assert_eq!(xml.matches("<ArtifactResolutionService").count(), 1);
+        assert!(positions.iter().all(Option::is_some));
+        assert!(positions.is_sorted());
+    }
+
+    #[test]
     fn idp_elements_order_profiles_match_upstream() {
         // The default profile includes ArtifactResolutionService. OneLogin and
-        // Shibboleth stay the upstream lists; generation appends the service
-        // when a custom list omits it.
+        // Shibboleth stay the upstream lists; generation writes the service
+        // after KeyDescriptor when a custom list omits it.
         assert_eq!(
             elements_order::idp::DEFAULT,
             [

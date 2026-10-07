@@ -9,6 +9,7 @@ use quick_xml::reader::NsReader;
 use crate::error::SamlError;
 use crate::model::EndpointUrl;
 use crate::xml::dom::{self, Node};
+use crate::xml::fragment::standalone_element;
 use crate::xml::write::XmlWriter;
 
 const SOAP_NAMESPACE: &str = "http://schemas.xmlsoap.org/soap/envelope/";
@@ -228,15 +229,10 @@ pub(crate) fn read_soap_body(envelope: &str) -> Result<SoapBody, SamlError> {
             "SOAP body element does not match its namespace declaration".into(),
         ));
     }
-    if child.end < child.start || child.end > envelope.len() {
-        return Err(SamlError::Xml(
-            "SOAP body element is outside the envelope".into(),
-        ));
-    }
     Ok(SoapBody {
         local_name: child.local_name.clone(),
         namespace: child_namespace.namespace,
-        xml: envelope[child.start..child.end].to_string(),
+        xml: standalone_element(envelope, child.start, child.end)?,
     })
 }
 
@@ -439,7 +435,7 @@ fn reject_must_understand(
         let value = attribute
             .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .map_err(|err| SamlError::Xml(err.to_string()))?;
-        if value.as_ref() == "1" || value.as_ref() == "true" {
+        if matches!(value.trim(), "1" | "true") {
             return Err(SamlError::Xml(
                 "SOAP header requires processing this responder does not provide".into(),
             ));
@@ -489,6 +485,26 @@ mod tests {
     fn soap_header_must_understand_is_rejected() {
         let envelope = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" soap:mustUnderstand="1"/></soap:Header><soap:Body><samlp:ArtifactResolve xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"/></soap:Body></soap:Envelope>"#;
         assert!(SoapProtocolMessage::from_envelope(envelope).is_err());
+    }
+
+    #[test]
+    fn soap_header_padded_must_understand_is_rejected() {
+        let envelope = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Header><extra soap:mustUnderstand=" 1 ">note</extra></soap:Header><soap:Body><samlp:ArtifactResolve xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"/></soap:Body></soap:Envelope>"#;
+        assert!(matches!(
+            SoapProtocolMessage::from_envelope(envelope),
+            Err(SamlError::Xml(_))
+        ));
+    }
+
+    #[test]
+    fn soap_body_keeps_namespaces_declared_on_the_envelope() -> Result<(), SamlError> {
+        let envelope = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><soap:Body><samlp:LogoutRequest ID="_logout"/></soap:Body></soap:Envelope>"#;
+        let message = SoapProtocolMessage::from_envelope(envelope)?;
+        assert_eq!(
+            message.xml(),
+            r#"<samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_logout"/>"#
+        );
+        Ok(())
     }
 
     #[test]

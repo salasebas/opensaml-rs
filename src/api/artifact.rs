@@ -24,7 +24,7 @@ impl Saml<Idp> {
         issued: &mut IssuedArtifacts,
     ) -> Result<Artifact, SamlError> {
         artifact::issue(
-            self.metadata_xml(),
+            &self.raw_identity_provider().metadata,
             service_provider,
             message,
             endpoint_index,
@@ -119,7 +119,7 @@ impl Saml<Idp> {
         channel: SoapChannel,
     ) -> Result<AnsweredArtifact, SamlError> {
         artifact::answer(
-            self.metadata_xml(),
+            &self.raw_identity_provider().metadata,
             presenter,
             request_envelope,
             issued,

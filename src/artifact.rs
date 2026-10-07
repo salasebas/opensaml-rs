@@ -4,7 +4,8 @@
 //! answers `ArtifactResolve`. The service provider sends that request and
 //! returns the protocol message from `ArtifactResponse`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
 use base64::Engine;
@@ -23,6 +24,7 @@ use crate::soap::{
     SoapProtocolMessage, SoapRequest,
 };
 use crate::xml::dom::{self, Node};
+use crate::xml::fragment::standalone_element;
 use crate::xml::parse_saml_utc_date_time;
 use crate::xml::write::XmlWriter;
 
@@ -187,9 +189,8 @@ impl IssuedMessage {
                     .into(),
             ));
         }
-        let xml = root_span(xml.as_str())?;
         Ok(Self {
-            xml,
+            xml: xml[element.span].to_string(),
             web_browser_sso_response,
         })
     }
@@ -197,8 +198,8 @@ impl IssuedMessage {
 
 /// Artifacts an identity provider has issued and not yet resolved.
 ///
-/// The caller owns eviction: drop entries that will never resolve, for
-/// example after a deployment-selected timeout, to bound memory.
+/// The caller owns eviction: [`Self::remove`] an artifact that will never
+/// resolve, for example after a deployment-selected timeout, to bound memory.
 #[derive(Debug, Default)]
 pub struct IssuedArtifacts {
     entries: HashMap<String, IssuedEntry>,
@@ -216,6 +217,14 @@ impl IssuedArtifacts {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Discard `artifact` and its stored message without returning it.
+    ///
+    /// Returns whether the artifact was outstanding. A later
+    /// `ArtifactResolve` for it gets Success without the message.
+    pub fn remove(&mut self, artifact: &Artifact) -> bool {
+        self.entries.remove(artifact.as_str()).is_some()
+    }
 }
 
 /// Artifacts a receiver has already accepted for resolution.
@@ -225,7 +234,7 @@ impl IssuedArtifacts {
 #[derive(Debug)]
 pub struct ArtifactUses {
     enforce: bool,
-    seen: HashMap<String, ()>,
+    seen: HashSet<String>,
 }
 
 impl ArtifactUses {
@@ -233,7 +242,7 @@ impl ArtifactUses {
     pub fn enforce_single_use() -> Self {
         Self {
             enforce: true,
-            seen: HashMap::new(),
+            seen: HashSet::new(),
         }
     }
 
@@ -244,12 +253,12 @@ impl ArtifactUses {
     pub fn allow_reuse() -> Self {
         Self {
             enforce: false,
-            seen: HashMap::new(),
+            seen: HashSet::new(),
         }
     }
 
     fn record(&mut self, artifact: &str) -> Result<(), SamlError> {
-        if self.enforce && self.seen.insert(artifact.to_string(), ()).is_some() {
+        if self.enforce && !self.seen.insert(artifact.to_string()) {
             return Err(SamlError::ReplayDetected {
                 key: artifact.to_string(),
             });
@@ -336,8 +345,9 @@ impl ArtifactResolution {
     /// # Errors
     ///
     /// Returns [`SamlError`] when the envelope is not an `ArtifactResponse`
-    /// from the identity provider, the status is not success, or the response
-    /// does not contain the protocol message.
+    /// from the identity provider, the status is not success, the response
+    /// does not contain the protocol message, or the message is a `Response`
+    /// and the dereference is not [`ArtifactDereference::web_browser_sso`].
     pub fn finish(&self, response_envelope: &str) -> Result<ResolvedProtocolMessage, SamlError> {
         let body = read_soap_body(response_envelope)?;
         if body.local_name != "ArtifactResponse" || body.namespace != namespace::PROTOCOL {
@@ -383,8 +393,7 @@ impl ArtifactResolution {
         if top != status_code::SUCCESS {
             return Err(SamlError::StatusNotSuccess { top, second });
         }
-        let message = protocol_payload(&response)?;
-        let Some(message) = message else {
+        let Some(message) = protocol_payload(&response)? else {
             return Err(SamlError::ArtifactNotReturned);
         };
         if message.namespace != namespace::PROTOCOL {
@@ -397,9 +406,15 @@ impl ArtifactResolution {
                 "Web Browser SSO artifact payload must be a Response".into(),
             ));
         }
+        if !self.web_browser_sso && message.local_name == "Response" {
+            return Err(SamlError::ProtocolProfile(
+                "a protocol Response must be dereferenced with ArtifactDereference::web_browser_sso"
+                    .into(),
+            ));
+        }
         Ok(ResolvedProtocolMessage {
-            local_name: message.local_name,
-            xml: message.xml,
+            local_name: message.local_name.clone(),
+            xml: standalone_element(&body.xml, message.span.start, message.span.end)?,
         })
     }
 }
@@ -426,24 +441,18 @@ impl ResolvedProtocolMessage {
 }
 
 pub(crate) fn issue(
-    issuer_metadata_xml: &str,
+    metadata: &IdpMetadata,
     service_provider: &SpDescriptor,
     message: IssuedMessage,
     endpoint_index: u16,
     issued: &mut IssuedArtifacts,
 ) -> Result<Artifact, SamlError> {
-    let metadata = IdpMetadata::from_xml(issuer_metadata_xml)?;
     let entity_id = metadata
         .get_entity_id()
         .ok_or_else(|| SamlError::MissingMetadata("entityID".into()))?;
-    let _service = soap_service(&metadata, endpoint_index)?;
-    let mut handle = [0u8; SOURCE_ID_LEN];
-    let first = uuid::Uuid::new_v4().into_bytes();
-    let second = uuid::Uuid::new_v4().into_bytes();
-    handle[..16].copy_from_slice(&first);
-    handle[16..].copy_from_slice(&second[..4]);
+    let _service = soap_service(metadata, endpoint_index)?;
     let source_id = sha1(entity_id.as_bytes());
-    let encoded = encode_artifact(endpoint_index, source_id, handle);
+    let encoded = encode_artifact(endpoint_index, source_id, message_handle());
     if issued.entries.contains_key(&encoded) {
         return Err(SamlError::Invalid(
             "artifact value is already outstanding".into(),
@@ -503,13 +512,12 @@ pub(crate) fn resolve(
 }
 
 pub(crate) fn answer(
-    issuer_metadata_xml: &str,
+    metadata: &IdpMetadata,
     presenter: &SpDescriptor,
     request_envelope: &str,
     issued: &mut IssuedArtifacts,
     channel: SoapChannel,
 ) -> Result<AnsweredArtifact, SamlError> {
-    let metadata = IdpMetadata::from_xml(issuer_metadata_xml)?;
     let entity_id = metadata
         .get_entity_id()
         .ok_or_else(|| SamlError::MissingMetadata("entityID".into()))?
@@ -540,7 +548,7 @@ pub(crate) fn answer(
         let Some(entry) = issued.entries.get(artifact.as_str()) else {
             return success_without(&entity_id, &request.id, ArtifactWithheld::NotOutstanding);
         };
-        if let Ok(service) = soap_service(&metadata, artifact.endpoint_index()) {
+        if let Ok(service) = soap_service(metadata, artifact.endpoint_index()) {
             if let Some(destination) = request.destination.as_deref() {
                 if destination != service.location() {
                     return success_without(&entity_id, &request.id, ArtifactWithheld::Destination);
@@ -656,6 +664,19 @@ fn soap_service(
         ));
     }
     Ok(service)
+}
+
+/// 20 random bytes from two version 4 UUIDs, skipping the bytes that carry
+/// the fixed version and variant bits.
+fn message_handle() -> [u8; SOURCE_ID_LEN] {
+    let first = uuid::Uuid::new_v4().into_bytes();
+    let second = uuid::Uuid::new_v4().into_bytes();
+    let mut handle = [0u8; SOURCE_ID_LEN];
+    handle[..6].copy_from_slice(&first[..6]);
+    handle[6..13].copy_from_slice(&first[9..]);
+    handle[13..19].copy_from_slice(&second[..6]);
+    handle[19] = second[9];
+    handle
 }
 
 fn encode_artifact(
@@ -792,7 +813,7 @@ fn status_codes(response: &SamlElement) -> Result<(String, Option<String>), Saml
     Ok((top, second))
 }
 
-fn protocol_payload(response: &SamlElement) -> Result<Option<Payload>, SamlError> {
+fn protocol_payload(response: &SamlElement) -> Result<Option<&SamlElement>, SamlError> {
     let mut payloads = response.children.iter().filter(|child| {
         !matches!(
             (child.namespace.as_str(), child.local_name.as_str()),
@@ -807,26 +828,7 @@ fn protocol_payload(response: &SamlElement) -> Result<Option<Payload>, SamlError
             "ArtifactResponse must contain at most one protocol message".into(),
         ));
     }
-    payload
-        .map(|element| {
-            if element.xml.is_empty() {
-                return Err(SamlError::ProtocolProfile(
-                    "ArtifactResponse payload is empty".into(),
-                ));
-            }
-            Ok(Payload {
-                local_name: element.local_name.clone(),
-                namespace: element.namespace.clone(),
-                xml: element.xml.clone(),
-            })
-        })
-        .transpose()
-}
-
-struct Payload {
-    local_name: String,
-    namespace: String,
-    xml: String,
+    Ok(payload)
 }
 
 fn required_attr(element: &SamlElement, name: &str) -> Result<String, SamlError> {
@@ -848,7 +850,8 @@ struct SamlElement {
     attributes: Vec<(String, String)>,
     text: String,
     children: Vec<SamlElement>,
-    xml: String,
+    /// Byte range of the element in the parsed XML.
+    span: Range<usize>,
 }
 
 impl SamlElement {
@@ -863,12 +866,12 @@ impl SamlElement {
 fn parse_saml(xml: &str) -> Result<SamlElement, SamlError> {
     let document = dom::parse(xml)?;
     let mut namespaces = element_namespaces(xml)?;
-    annotate(&document.root, xml, &mut namespaces)
+    annotate(&document.root, xml.len(), &mut namespaces)
 }
 
 fn annotate(
     node: &Node,
-    xml: &str,
+    xml_len: usize,
     namespaces: &mut std::vec::IntoIter<(String, String)>,
 ) -> Result<SamlElement, SamlError> {
     let (local_name, namespace) = namespaces
@@ -881,9 +884,9 @@ fn annotate(
     }
     let mut children = Vec::new();
     for child in &node.children {
-        children.push(annotate(child, xml, namespaces)?);
+        children.push(annotate(child, xml_len, namespaces)?);
     }
-    if node.end < node.start || node.end > xml.len() {
+    if node.end < node.start || node.end > xml_len {
         return Err(SamlError::Xml("protocol element is incomplete".into()));
     }
     Ok(SamlElement {
@@ -892,7 +895,7 @@ fn annotate(
         attributes: node.attrs.clone(),
         text: node.text.clone(),
         children,
-        xml: xml[node.start..node.end].to_string(),
+        span: node.start..node.end,
     })
 }
 
@@ -921,14 +924,6 @@ fn element_namespaces(xml: &str) -> Result<std::vec::IntoIter<(String, String)>,
         buf.clear();
     }
     Ok(names.into_iter())
-}
-
-fn root_span(xml: &str) -> Result<String, SamlError> {
-    let document = dom::parse(xml)?;
-    if document.root.end < document.root.start || document.root.end > xml.len() {
-        return Err(SamlError::Xml("protocol element is incomplete".into()));
-    }
-    Ok(xml[document.root.start..document.root.end].to_string())
 }
 
 fn sha1(input: &[u8]) -> [u8; 20] {

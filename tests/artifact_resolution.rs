@@ -23,6 +23,7 @@ const SP_ENTITY_ID: &str = "https://sp.example.com/metadata";
 const OTHER_ENTITY_ID: &str = "https://other.example.com/metadata";
 const RESOLUTION_URL: &str = "https://idp.example.com/artifact";
 const PROTOCOL: &str = "urn:oasis:names:tc:SAML:2.0:protocol";
+const ASSERTION: &str = "urn:oasis:names:tc:SAML:2.0:assertion";
 const SUCCESS: &str = "urn:oasis:names:tc:SAML:2.0:status:Success";
 const VERSION_MISMATCH: &str = "urn:oasis:names:tc:SAML:2.0:status:VersionMismatch";
 const SOAP_BINDING: &str = "urn:oasis:names:tc:SAML:2.0:bindings:SOAP";
@@ -1044,5 +1045,114 @@ fn the_service_provider_rejects_an_artifact_response_with_two_statuses(
         resolution.finish(&duplicated),
         Err(SamlError::ProtocolProfile(_))
     ));
+    Ok(())
+}
+
+#[test]
+fn namespaces_declared_on_the_soap_envelope_reach_the_protocol_message(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, web_sso_response()?, &mut issued)?;
+    let channel = confidential();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut ArtifactUses::enforce_single_use(),
+    )?;
+    let declarations = format!(r#" xmlns:samlp="{PROTOCOL}" xmlns:saml="{ASSERTION}""#);
+    let hoisted_request = resolution
+        .request()
+        .envelope()
+        .replace(&declarations, "")
+        .replacen(
+            "<soap:Envelope",
+            &format!("<soap:Envelope{declarations}"),
+            1,
+        );
+    assert!(hoisted_request.contains("<samlp:ArtifactResolve ID="));
+    let answer = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        &hoisted_request,
+        &mut issued,
+        channel,
+    )?;
+    assert_eq!(answer.release(), ArtifactRelease::Returned);
+
+    let inherited_payload = answer.envelope().replace(
+        &format!(r#"<samlp:Response xmlns:samlp="{PROTOCOL}""#),
+        "<samlp:Response",
+    );
+    assert!(inherited_payload.contains("<samlp:Response ID="));
+    let hoisted_response = inherited_payload.replace(&declarations, "").replacen(
+        "<soap:Envelope",
+        &format!("<soap:Envelope{declarations}"),
+        1,
+    );
+    for envelope in [inherited_payload, hoisted_response] {
+        let resolved = resolution.finish(&envelope)?;
+        assert_eq!(
+            resolved.xml(),
+            format!(
+                r#"<samlp:Response xmlns:samlp="{PROTOCOL}" ID="_response" Version="2.0" IssueInstant="2024-01-01T00:00:00Z">{WEB_SSO_MARKER}</samlp:Response>"#
+            )
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_protocol_dereference_does_not_return_a_response() -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, logout_request()?, &mut issued)?;
+    let channel = authenticated_without_confidentiality();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::protocol(channel)?,
+        &mut ArtifactUses::enforce_single_use(),
+    )?;
+    let answer = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    )?;
+    let as_response = answer
+        .envelope()
+        .replace("samlp:LogoutRequest", "samlp:Response");
+    assert!(matches!(
+        resolution.finish(&as_response),
+        Err(SamlError::ProtocolProfile(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn a_removed_artifact_is_no_longer_outstanding() -> Result<(), Box<dyn std::error::Error>> {
+    let parties = parties()?;
+    let mut issued = IssuedArtifacts::new();
+    let artifact = issue(&parties, web_sso_response()?, &mut issued)?;
+    let channel = confidential();
+    let resolution = parties.sp.resolve_artifact(
+        &parties.idp_metadata,
+        &artifact,
+        ArtifactDereference::web_browser_sso(channel)?,
+        &mut ArtifactUses::enforce_single_use(),
+    )?;
+    assert!(issued.remove(&artifact));
+    assert!(!issued.remove(&artifact));
+    let answer = parties.idp.answer_artifact_resolve(
+        &parties.sp_metadata,
+        resolution.request().envelope(),
+        &mut issued,
+        channel,
+    )?;
+    assert_eq!(
+        answer.release(),
+        ArtifactRelease::Withheld(ArtifactWithheld::NotOutstanding)
+    );
     Ok(())
 }
