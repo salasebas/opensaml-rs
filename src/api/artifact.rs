@@ -49,9 +49,11 @@ impl Saml<Idp> {
     /// # Examples
     ///
     /// The builders start on Recommended. This example selects
-    /// [`IdpValidationPolicy::compatibility`] and
-    /// [`SpValidationPolicy::compatibility`] so `build` succeeds without the
-    /// default crypto feature. Artifact resolution does not read those presets.
+    /// [`IdpValidationPolicy::compatibility`](crate::IdpValidationPolicy::compatibility)
+    /// and
+    /// [`SpValidationPolicy::compatibility`](crate::SpValidationPolicy::compatibility)
+    /// so `build` succeeds without the default crypto feature. Artifact
+    /// resolution does not read those presets.
     ///
     /// ```
     /// use saml_rs::{
