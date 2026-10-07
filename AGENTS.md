@@ -34,6 +34,8 @@ work in the repo, not restate the README.
 - Keep non-mechanical diffs reviewable. If a change grows large, split it into
   the smallest coherent stages.
 - New SAML behavior must follow `docs/standards-conformance.md`.
+- Review judgements for doc comments, caller-visible changes, and stricter
+  receiver rules are in `CODING_STANDARDS.md`.
 
 ## Standards Conformance
 
@@ -57,6 +59,7 @@ work in the repo, not restate the README.
   or security impact, and ask for direction before changing it.
 - Do not present library safety or application policy as an OASIS wire
   requirement, and do not invent validation for unspecified behavior.
+- A stricter receiver rule is recorded as library policy in the pull request.
 
 ## Fixture Provenance
 
@@ -140,8 +143,10 @@ Add regression tests for security fixes.
 - The published crate is `saml-rs`, and Rust imports use `saml_rs`.
 - Do not edit `CHANGELOG.md` by hand. release-plz writes it from Conventional
   Commits on the release PR.
-- A breaking change updates `docs/migrations/` in the same change: what breaks,
-  who must change, and how to upgrade. Follow `docs/migrations/README.md`.
+- A caller-visible change updates `docs/migrations/` in the same change: what
+  breaks, who must change, and how to upgrade. That includes a breaking change,
+  a new error, and a new exhaustive enum variant. Follow
+  `docs/migrations/README.md`.
   The last guide linked from that README covers the latest published minor.
   An unreleased break is a new file, linked from that README.
   Compatible features are recorded by their Conventional Commit.
