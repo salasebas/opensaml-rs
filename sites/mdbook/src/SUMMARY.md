@@ -34,6 +34,7 @@
     - [Enhanced Client/Proxy](reference/conformance/enhanced-client-proxy.md)
     - [Logout](reference/conformance/single-logout.md)
     - [Metadata and replay](reference/conformance/metadata-and-replay.md)
+    - [Artifact resolution](reference/conformance/artifact-resolution.md)
 
 # Explanation
 

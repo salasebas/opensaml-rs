@@ -12,6 +12,8 @@ is in [`docs/architecture/`](architecture/README.md).
 | IdP `receive_sso`, `respond_sso`, `initiate_sso` | `src/api/idp.rs` |
 | Assertion conditions on an accepted response | `src/assertion_acceptance.rs` |
 | Typed `start_slo`, `receive_slo`, `respond_slo`, `finish_slo` | `src/api/slo.rs` |
+| IdP `issue_artifact`, `answer_artifact_resolve`; SP `resolve_artifact` | `src/api/artifact.rs`, `src/artifact.rs` |
+| SOAP 1.1 envelope | `src/soap.rs` |
 
 `finish_sso_with_outstanding_logout` and
 `accept_unsolicited_sso_with_outstanding_logout` are in `src/api/sp.rs`.
@@ -67,6 +69,7 @@ Logout is the directory `src/logout/`.
 | Outbound Web Browser SSO | [`web-browser-sso-generation.md`](conformance/web-browser-sso-generation.md) |
 | Single Logout | [`single-logout.md`](conformance/single-logout.md) |
 | Enhanced Client/Proxy SSO over PAOS | [`enhanced-client-proxy.md`](conformance/enhanced-client-proxy.md) |
+| Artifact resolution over SOAP | [`artifact-resolution.md`](conformance/artifact-resolution.md) |
 | Metadata trust and replay | [`metadata-and-replay.md`](conformance/metadata-and-replay.md) |
 
 ## Compatibility crates

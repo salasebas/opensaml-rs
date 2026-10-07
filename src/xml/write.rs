@@ -39,6 +39,10 @@ impl XmlWriter {
         self.write(Event::Text(BytesText::new(text)));
     }
 
+    pub(crate) fn raw(&mut self, xml: &str) {
+        self.inner.get_mut().extend_from_slice(xml.as_bytes());
+    }
+
     pub(crate) fn text_element<'a>(
         &mut self,
         name: &'a str,

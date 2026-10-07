@@ -18,6 +18,12 @@ pub enum Binding {
     Artifact,
 }
 
+/// SOAP binding for a synchronous SAML request and response.
+///
+/// This is not a browser binding. Artifact resolution and later back-channel
+/// exchanges name it directly.
+pub const SOAP_BINDING_URN: &str = "urn:oasis:names:tc:SAML:2.0:bindings:SOAP";
+
 impl Binding {
     /// Full binding URN.
     pub fn urn(self) -> &'static str {
@@ -358,6 +364,7 @@ pub mod elements_order {
         pub const DEFAULT: &[&str] = &[
             "KeyDescriptor",
             "NameIDFormat",
+            "ArtifactResolutionService",
             "SingleSignOnService",
             "SingleLogoutService",
         ];

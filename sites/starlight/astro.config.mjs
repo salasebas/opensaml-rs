@@ -79,6 +79,10 @@ export default defineConfig({
 								},
 								{ label: 'Logout', slug: 'reference/conformance/single-logout' },
 								{ label: 'Metadata and replay', slug: 'reference/conformance/metadata-and-replay' },
+								{
+									label: 'Artifact resolution',
+									slug: 'reference/conformance/artifact-resolution',
+								},
 							],
 						},
 					],
