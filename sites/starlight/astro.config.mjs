@@ -49,6 +49,7 @@ export default defineConfig({
 								{ label: '0.3 to 0.4', slug: 'guides/upgrade/v0-3-to-v0-4' },
 								{ label: '0.4 to 0.5', slug: 'guides/upgrade/v0-4-to-v0-5' },
 								{ label: '0.5 to 0.6', slug: 'guides/upgrade/v0-5-to-v0-6' },
+								{ label: '0.6 to 0.7', slug: 'guides/upgrade/v0-6-to-v0-7' },
 							],
 						},
 					],

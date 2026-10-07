@@ -5,7 +5,6 @@
 //! remove a protocol XML signature before DEFLATE and to verify the detached
 //! signature over parameters in a fixed order. CD-04 §2.5 and §2.6 require
 //! SimpleSign to sign the raw XML octets, including RelayState when present.
-#![allow(deprecated, reason = "one fixture uses the deprecated strict() preset")]
 #![cfg(any(
     feature = "crypto-rustcrypto",
     feature = "crypto-aws-lc",
@@ -16,11 +15,12 @@ use std::time::SystemTime;
 
 use saml_rs::binding::{base64_decode, deflate_raw_decode};
 use saml_rs::{
-    AcsEndpoint, AuthnRequest, BrowserInput, Credentials, EntityId, FormField, IdpConfig,
-    IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId, PrivateKeyPem,
-    RelayStateParam, ReplayPolicy, RespondSso, Saml, SamlError, SamlValidationContext, SpConfig,
-    SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse, StartSso, Subject, TemplatePolicy,
-    MAX_RELAY_STATE_BYTES,
+    AcsEndpoint, AssertionSignaturePolicy, AudienceValidationPolicy, AuthnRequest,
+    AuthnRequestSigningPolicy, AuthnRequestValidationPolicy, BrowserInput, Credentials, EntityId,
+    FormField, IdpConfig, IdpDescriptor, IdpValidationPolicy, MetadataTrustPolicy, NameId,
+    PrivateKeyPem, RelayStateParam, ReplayPolicy, RespondSso, Saml, SamlError,
+    SamlValidationContext, SpConfig, SpDescriptor, SpValidationPolicy, SsoEndpoint, SsoResponse,
+    StartSso, Subject, TemplatePolicy, MAX_RELAY_STATE_BYTES,
 };
 use url::Url;
 
@@ -56,6 +56,22 @@ fn credentials() -> Credentials {
         signing_key: Some(PrivateKeyPem::new(PRIVKEY)),
         signing_certificate: Some(saml_rs::CertificatePem::new(CERT)),
         ..Credentials::default()
+    }
+}
+
+fn signing_sp_validation() -> SpValidationPolicy {
+    SpValidationPolicy {
+        assertions: AssertionSignaturePolicy::RequireSigned,
+        authn_requests: AuthnRequestSigningPolicy::Sign,
+        audience: AudienceValidationPolicy::Validate,
+        ..SpValidationPolicy::recommended()
+    }
+}
+
+fn signed_authn_request_idp_validation() -> IdpValidationPolicy {
+    IdpValidationPolicy {
+        authn_requests: AuthnRequestValidationPolicy::RequireSigned,
+        ..IdpValidationPolicy::recommended()
     }
 }
 
@@ -166,8 +182,8 @@ fn typed_send_rejects_relay_state_longer_than_80_bytes() -> Result<(), Box<dyn s
 #[test]
 fn typed_receive_rejects_relay_state_longer_than_80_bytes() -> Result<(), Box<dyn std::error::Error>>
 {
-    let sp = sp_with(SpValidationPolicy::strict(), TemplatePolicy::default())?;
-    let idp = idp_with(IdpValidationPolicy::strict())?;
+    let sp = sp_with(signing_sp_validation(), TemplatePolicy::default())?;
+    let idp = idp_with(signed_authn_request_idp_validation())?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let started = sp.start_sso(&idp_descriptor, StartSso::redirect())?;
     let mut query = started
@@ -229,8 +245,8 @@ fn typed_redirect_removes_protocol_signature_and_verifies_parameter_order(
         }
     }
 
-    let sp = sp_with(SpValidationPolicy::strict(), templates)?;
-    let idp = idp_with(IdpValidationPolicy::strict())?;
+    let sp = sp_with(signing_sp_validation(), templates)?;
+    let idp = idp_with(signed_authn_request_idp_validation())?;
     let (_, idp_descriptor) = descriptors(&sp, &idp)?;
     let relay_state = RelayStateParam::try_from_option(Some("ordered-state".to_string()))?;
     let started = sp.start_sso(
@@ -255,7 +271,7 @@ fn typed_redirect_removes_protocol_signature_and_verifies_parameter_order(
         ]
     );
 
-    let sp = sp_with(SpValidationPolicy::strict(), TemplatePolicy::default())?;
+    let sp = sp_with(signing_sp_validation(), TemplatePolicy::default())?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let relay_state = RelayStateParam::try_from_option(Some("ordered-state".to_string()))?;
     let started = sp.start_sso(
@@ -285,8 +301,8 @@ fn typed_redirect_removes_protocol_signature_and_verifies_parameter_order(
 #[test]
 fn typed_simplesign_binds_relay_state_to_the_raw_xml_signature(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let sp = sp_with(SpValidationPolicy::strict(), TemplatePolicy::default())?;
-    let idp = idp_with(IdpValidationPolicy::strict())?;
+    let sp = sp_with(signing_sp_validation(), TemplatePolicy::default())?;
+    let idp = idp_with(signed_authn_request_idp_validation())?;
     let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
     let relay_state = RelayStateParam::try_from_option(Some("signed-state".to_string()))?;
     let started = sp.start_sso(

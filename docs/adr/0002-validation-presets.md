@@ -20,9 +20,7 @@ level.
 
 Web Browser SSO, Single Logout, metadata, and replay are classified under
 `docs/conformance/`. `recommended()` publishes that combination.
-`strict()` is deprecated, keeps its current behaviour, and does not gain the
-RSA-SHA2 XML-DSig profile. The deprecation tells callers to start from
-Recommended and add only the named hardenings they want. `Default`, `new`,
-and `try_new` stay on Compatibility. Config builders stay on the deprecated
-`strict()` method. The following release removes `strict()` and points
-`Default`, `new`, `try_new`, and the builders at Recommended together.
+`strict()` is removed. `Default`, `new`, `try_new`, and the config builders
+start on Recommended so typed construction has one preset. A direct Assertion
+signature and the RSA-SHA2 XML-DSig profile stay independent options on that
+preset. `compatibility()` remains the legacy permissive preset.

@@ -3,8 +3,6 @@
     feature = "crypto-aws-lc",
     feature = "crypto-fips"
 ))]
-#![allow(deprecated, reason = "these tests pin the deprecated strict() preset")]
-
 use saml_rs::{
     AcsEndpoint, AuthnRequest, CertificatePem, Credentials, EntityId, IdpConfig, IdpConfigBuilder,
     IdpDescriptor, IdpValidationPolicy, LogoutRequest, LogoutSubject, MetadataTrustPolicy, NameId,
@@ -38,7 +36,7 @@ fn sp_config() -> Result<SpConfig, SamlError> {
         .acs_endpoint(AcsEndpoint::post(SP_ACS_POST)?)
         .slo_endpoint(SloEndpoint::post(SP_SLO_POST)?)
         .credentials(credentials())
-        .validation(SpValidationPolicy::strict())
+        .validation(SpValidationPolicy::recommended())
         .build()
 }
 
@@ -47,7 +45,7 @@ fn idp_config() -> Result<IdpConfig, SamlError> {
         .sso_endpoint(SsoEndpoint::post(IDP_SSO_POST)?)
         .slo_endpoint(SloEndpoint::post(IDP_SLO_POST)?)
         .credentials(credentials())
-        .validation(IdpValidationPolicy::strict())
+        .validation(IdpValidationPolicy::recommended())
         .build()
 }
 

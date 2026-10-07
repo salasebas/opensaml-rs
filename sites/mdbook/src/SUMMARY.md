@@ -20,6 +20,7 @@
     - [0.3 to 0.4](guides/upgrade/v0-3-to-v0-4.md)
     - [0.4 to 0.5](guides/upgrade/v0-4-to-v0-5.md)
     - [0.5 to 0.6](guides/upgrade/v0-5-to-v0-6.md)
+    - [0.6 to 0.7](guides/upgrade/v0-6-to-v0-7.md)
 
 # Reference
 

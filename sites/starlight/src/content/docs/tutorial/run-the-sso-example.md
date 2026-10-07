@@ -25,8 +25,6 @@ The request id changes every run. The example does not open a browser. It posts 
 
 The example has to compile on its own, so it imports unsigned metadata and does not store replay identifiers. A service you deploy pins the metadata signing certificate and passes a replay cache. That is [Service provider](../guides/service-provider-sso.md).
 
-The example also calls `strict()`. New code starts from `recommended()`. See [Validation](../guides/validation-preset.md).
-
 ## Next
 
 - Accept the login in your application: [Service provider](../guides/service-provider-sso.md).
