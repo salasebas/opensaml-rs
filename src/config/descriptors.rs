@@ -1,8 +1,34 @@
 use core::str::FromStr;
+use std::collections::HashSet;
 
 use crate::browser::{AcsEndpoint, SloEndpoint, SsoEndpoint};
 use crate::error::SamlError;
 use crate::metadata::{IdpMetadata, SpMetadata};
+use crate::model::EndpointUrl;
+
+/// SOAP `ArtifactResolutionService` published by an artifact issuer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactResolutionService {
+    index: u16,
+    location: EndpointUrl,
+}
+
+impl ArtifactResolutionService {
+    /// Publish a SOAP artifact resolution endpoint at `index`.
+    pub fn new(index: u16, location: EndpointUrl) -> Self {
+        Self { index, location }
+    }
+
+    /// Metadata index carried in the artifact's endpoint index.
+    pub fn index(&self) -> u16 {
+        self.index
+    }
+
+    /// Endpoint location.
+    pub fn location(&self) -> &EndpointUrl {
+        &self.location
+    }
+}
 
 use super::algorithms::NameIdFormat;
 use super::metadata_trust::{
@@ -137,6 +163,8 @@ pub struct IdpMetadataConfig {
     pub single_sign_on_service: Vec<SsoEndpoint>,
     /// `SingleLogoutService` endpoints.
     pub single_logout_service: Vec<SloEndpoint>,
+    /// SOAP `ArtifactResolutionService` endpoints.
+    pub artifact_resolution_service: Vec<ArtifactResolutionService>,
     /// Element ordering profile for generated metadata.
     pub elements_order: Option<Vec<String>>,
 }
@@ -151,6 +179,7 @@ impl IdpMetadataConfig {
             name_id_format: Vec::new(),
             single_sign_on_service,
             single_logout_service: Vec::new(),
+            artifact_resolution_service: Vec::new(),
             elements_order: None,
         }
     }
@@ -174,6 +203,15 @@ impl IdpMetadataConfig {
     pub fn validate(&self) -> Result<(), SamlError> {
         if self.single_sign_on_service.is_empty() {
             return Err(SamlError::MissingMetadata("SingleSignOnService".into()));
+        }
+        let mut seen_indexes = HashSet::new();
+        for service in &self.artifact_resolution_service {
+            if !seen_indexes.insert(service.index()) {
+                return Err(SamlError::Invalid(format!(
+                    "duplicate ArtifactResolutionService index {}",
+                    service.index()
+                )));
+            }
         }
         Ok(())
     }

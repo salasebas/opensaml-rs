@@ -39,6 +39,10 @@ impl XmlWriter {
         self.write(Event::Text(BytesText::new(text)));
     }
 
+    pub(crate) fn raw(&mut self, xml: &str) {
+        self.inner.get_mut().extend_from_slice(xml.as_bytes());
+    }
+
     pub(crate) fn text_element<'a>(
         &mut self,
         name: &'a str,
@@ -63,4 +67,16 @@ fn element<'a>(name: &'a str, attrs: &[(&'a str, &'a str)]) -> BytesStart<'a> {
         elem.push_attribute(*attr);
     }
     elem
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attribute_values_are_escaped() {
+        let mut writer = XmlWriter::new();
+        writer.empty("e", &[("n", "a\"b&c")]);
+        assert_eq!(writer.finish(), "<e n=\"a&quot;b&amp;c\"/>");
+    }
 }

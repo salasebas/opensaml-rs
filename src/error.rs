@@ -216,6 +216,12 @@ pub enum SamlError {
     /// `SPNameQualifier`. An omitted `Format` is unspecified.
     #[error("assertions do not refer to one principal")]
     PrincipalMismatch,
+    /// An `ArtifactResponse` did not contain the dereferenced protocol message.
+    #[error("artifact response did not contain the protocol message")]
+    ArtifactNotReturned,
+    /// The SOAP channel lacks the protection this artifact dereference requires.
+    #[error("SOAP channel protection is not sufficient for this artifact dereference")]
+    SoapChannelProtection,
     /// Response carried a non-success SAML status code.
     #[error("status not success: top={top}, second={second:?}")]
     StatusNotSuccess {

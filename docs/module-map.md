@@ -12,9 +12,24 @@ is in [`docs/architecture/`](architecture/README.md).
 | IdP `receive_sso`, `respond_sso`, `initiate_sso` | `src/api/idp.rs` |
 | Assertion conditions on an accepted response | `src/assertion_acceptance.rs` |
 | Typed `start_slo`, `receive_slo`, `respond_slo`, `finish_slo` | `src/api/slo.rs` |
+| IdP `issue_artifact`, `answer_artifact_resolve`; SP `resolve_artifact` | `src/api/artifact.rs`, `src/artifact.rs` |
+| SOAP 1.1 envelope | `src/soap.rs` |
 
 `finish_sso_with_outstanding_logout` and
 `accept_unsolicited_sso_with_outstanding_logout` are in `src/api/sp.rs`.
+
+## Enhanced Client/Proxy SSO
+
+| Behaviour | File |
+| --- | --- |
+| SP `start_paos_sso`, `finish_paos_sso`, `finish_paos_sso_with_outstanding_logout` | `src/api/paos/mod.rs` |
+| IdP `receive_paos_sso`, `respond_paos_sso`, `reject_paos_sso`, `paos_soap_fault` | `src/api/paos/mod.rs` |
+| PAOS header and SOAP envelopes | `src/api/paos/protocol.rs` |
+| Raw PAOS AuthnRequest rendering | `src/sp/paos.rs` |
+| Raw PAOS response rendering | `src/idp/paos.rs` |
+
+The enhanced-client role is not a facade. The IdP and SP operational modes
+stay unclaimed.
 
 ## Identity Provider Discovery
 
@@ -59,7 +74,9 @@ Logout is the directory `src/logout/`.
 | Inbound Web Browser SSO | [`web-browser-sso-acceptance.md`](conformance/web-browser-sso-acceptance.md) |
 | Outbound Web Browser SSO | [`web-browser-sso-generation.md`](conformance/web-browser-sso-generation.md) |
 | Single Logout | [`single-logout.md`](conformance/single-logout.md) |
+| Enhanced Client/Proxy SSO over PAOS | [`enhanced-client-proxy.md`](conformance/enhanced-client-proxy.md) |
 | Identity Provider Discovery | [`identity-provider-discovery.md`](conformance/identity-provider-discovery.md) |
+| Artifact resolution over SOAP | [`artifact-resolution.md`](conformance/artifact-resolution.md) |
 | Metadata trust and replay | [`metadata-and-replay.md`](conformance/metadata-and-replay.md) |
 
 ## Compatibility crates

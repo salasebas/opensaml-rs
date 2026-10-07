@@ -73,12 +73,20 @@ export default defineConfig({
 									label: 'SSO generation',
 									slug: 'reference/conformance/web-browser-sso-generation',
 								},
+								{
+									label: 'Enhanced Client/Proxy',
+									slug: 'reference/conformance/enhanced-client-proxy',
+								},
 								{ label: 'Logout', slug: 'reference/conformance/single-logout' },
 								{
 									label: 'Identity Provider Discovery',
 									slug: 'reference/conformance/identity-provider-discovery',
 								},
 								{ label: 'Metadata and replay', slug: 'reference/conformance/metadata-and-replay' },
+								{
+									label: 'Artifact resolution',
+									slug: 'reference/conformance/artifact-resolution',
+								},
 							],
 						},
 					],

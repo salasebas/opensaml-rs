@@ -17,6 +17,10 @@ use crate::template::{replace_tags_by_optional_value, LOGIN_REQUEST_TEMPLATE};
 use crate::xml::write::XmlWriter;
 use std::time::SystemTime;
 
+mod paos;
+
+pub(crate) use paos::PaosAuthnRequestInput;
+
 /// A SAML 2.0 Service Provider: runtime [`EntitySetting`] plus parsed [`SpMetadata`].
 #[derive(Debug, Clone)]
 pub struct ServiceProvider {
@@ -50,6 +54,7 @@ struct AuthnRequestXml<'a> {
     protocol_binding: Option<&'a str>,
     assertion_consumer_service_url: Option<&'a str>,
     assertion_consumer_service_index: Option<u16>,
+    is_passive: Option<bool>,
     issuer: &'a str,
     name_id_format: Option<&'a str>,
     allow_create: AllowCreateAttribute,
@@ -117,6 +122,9 @@ impl<'a> LoginResponseParseOptions<'a> {
 
 fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
     let force_authn = input.force_authn.map(|value| value.to_string());
+    let is_passive = input
+        .is_passive
+        .map(|value| if value { "true" } else { "false" });
     let assertion_consumer_service_index = input
         .assertion_consumer_service_index
         .map(|value| value.to_string());
@@ -142,6 +150,9 @@ fn render_default_authn_request_xml(input: &AuthnRequestXml<'_>) -> String {
     attrs.push(("Destination", input.destination));
     if let Some(force_authn) = force_authn.as_deref() {
         attrs.push(("ForceAuthn", force_authn));
+    }
+    if let Some(is_passive) = is_passive {
+        attrs.push(("IsPassive", is_passive));
     }
     if let Some(protocol_binding) = input.protocol_binding {
         attrs.push(("ProtocolBinding", protocol_binding));
@@ -351,6 +362,7 @@ impl ServiceProvider {
                         protocol_binding: protocol_binding.as_deref(),
                         assertion_consumer_service_url: acs_url.as_deref(),
                         assertion_consumer_service_index: options.assertion_consumer_service_index,
+                        is_passive: None,
                         issuer: &issuer,
                         name_id_format: name_id_format_attr,
                         allow_create,

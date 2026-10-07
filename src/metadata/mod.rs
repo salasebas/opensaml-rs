@@ -12,10 +12,10 @@ mod write;
 ))]
 pub use crate::crypto::MetadataSignatureVerification;
 pub use generate::{
-    generate_idp_metadata, generate_sp_metadata, try_generate_idp_metadata, Endpoint,
-    IdpMetadataConfig, SpMetadataConfig,
+    generate_idp_metadata, generate_sp_metadata, try_generate_idp_metadata,
+    ArtifactResolutionEndpoint, Endpoint, IdpMetadataConfig, SpMetadataConfig,
 };
-pub use idp::IdpMetadata;
+pub use idp::{ArtifactResolutionServiceEndpoint, IdpMetadata};
 pub use sp::SpMetadata;
 
 use crate::constants::{Binding, CertUse};

@@ -1,11 +1,41 @@
 //! Identity Provider metadata.
 
-use super::Metadata;
-use crate::constants::Binding;
+use super::{as_object_list, Metadata};
+use crate::constants::{Binding, SOAP_BINDING_URN};
 use crate::error::SamlError;
 use crate::util::Value;
 use crate::xml::{ExtractorField, XmlLimits};
 use std::ops::Deref;
+
+/// One `ArtifactResolutionService` endpoint read from IdP metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactResolutionServiceEndpoint {
+    index: u16,
+    binding: String,
+    location: String,
+}
+
+impl ArtifactResolutionServiceEndpoint {
+    /// Metadata `index`.
+    pub fn index(&self) -> u16 {
+        self.index
+    }
+
+    /// Binding URI. Artifact resolution uses the SOAP binding.
+    pub fn binding(&self) -> &str {
+        &self.binding
+    }
+
+    /// Endpoint location.
+    pub fn location(&self) -> &str {
+        &self.location
+    }
+
+    /// Whether this endpoint's binding is the SAML SOAP binding.
+    pub fn is_soap(&self) -> bool {
+        self.binding == SOAP_BINDING_URN
+    }
+}
 
 /// Parsed IdP metadata. Derefs to [`Metadata`] for the shared accessors.
 #[derive(Debug, Clone)]
@@ -47,6 +77,15 @@ impl IdpMetadata {
             )
             .aggregate(&["Binding"], &[])
             .attrs(&["Location"]),
+            ExtractorField::new(
+                "artifactResolutionService",
+                &[
+                    "EntityDescriptor",
+                    "IDPSSODescriptor",
+                    "ArtifactResolutionService",
+                ],
+            )
+            .attrs(&["Binding", "Location", "index"]),
         ];
         Ok(Self {
             inner: Metadata::parse_with_limits(xml, extra, limits)?,
@@ -67,6 +106,64 @@ impl IdpMetadata {
             .and_then(Value::as_str)
             .map(str::to_string)
     }
+
+    /// `ArtifactResolutionService` endpoints.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when an endpoint is missing `Binding`,
+    /// `Location`, or `index`, when `index` is not a 16-bit integer, or when
+    /// two endpoints share one `index`.
+    pub fn artifact_resolution_services(
+        &self,
+    ) -> Result<Vec<ArtifactResolutionServiceEndpoint>, SamlError> {
+        let Some(services) = self.inner.meta.get("artifactResolutionService") else {
+            return Ok(Vec::new());
+        };
+        let mut endpoints = Vec::new();
+        for value in as_object_list(services) {
+            let endpoint = artifact_resolution_service_from_value(value)?;
+            if endpoints
+                .iter()
+                .any(|existing: &ArtifactResolutionServiceEndpoint| {
+                    existing.index == endpoint.index
+                })
+            {
+                return Err(SamlError::Invalid(format!(
+                    "duplicate ArtifactResolutionService index {}",
+                    endpoint.index
+                )));
+            }
+            endpoints.push(endpoint);
+        }
+        Ok(endpoints)
+    }
+}
+
+fn artifact_resolution_service_from_value(
+    value: &Value,
+) -> Result<ArtifactResolutionServiceEndpoint, SamlError> {
+    let binding = required_artifact_attribute(value, "Binding")?;
+    let location = required_artifact_attribute(value, "Location")?;
+    let index_text = required_artifact_attribute(value, "index")?;
+    let index = index_text.parse::<u16>().map_err(|_| {
+        SamlError::Invalid(format!(
+            "ArtifactResolutionService index is not a 16-bit integer: {index_text}"
+        ))
+    })?;
+    Ok(ArtifactResolutionServiceEndpoint {
+        index,
+        binding,
+        location,
+    })
+}
+
+fn required_artifact_attribute(value: &Value, name: &str) -> Result<String, SamlError> {
+    value
+        .get_str(&name.to_ascii_lowercase())
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| SamlError::Invalid(format!("ArtifactResolutionService is missing {name}")))
 }
 
 impl Deref for IdpMetadata {

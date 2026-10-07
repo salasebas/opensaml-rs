@@ -31,9 +31,11 @@
 - [Conformance](reference/conformance.md)
     - [SSO acceptance](reference/conformance/web-browser-sso-acceptance.md)
     - [SSO generation](reference/conformance/web-browser-sso-generation.md)
+    - [Enhanced Client/Proxy](reference/conformance/enhanced-client-proxy.md)
     - [Logout](reference/conformance/single-logout.md)
     - [Identity Provider Discovery](reference/conformance/identity-provider-discovery.md)
     - [Metadata and replay](reference/conformance/metadata-and-replay.md)
+    - [Artifact resolution](reference/conformance/artifact-resolution.md)
 
 # Explanation
 

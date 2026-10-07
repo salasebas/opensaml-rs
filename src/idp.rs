@@ -16,11 +16,13 @@ use crate::template::{
 };
 
 mod login_response;
+mod paos;
 
 use login_response::{
     render_default_login_response, render_error_login_response, ErrorLoginResponseXml,
     LoginResponseXml,
 };
+pub(crate) use paos::PaosSsoResponseInput;
 use std::time::SystemTime;
 
 /// Optional inputs for [`IdentityProvider::create_login_response`].
