@@ -19,6 +19,16 @@ pub(crate) struct AcsMetadataEndpoint {
     pub(crate) is_default: bool,
 }
 
+impl AcsMetadataEndpoint {
+    /// Whether the binding is HTTP-POST or HTTP-POST-SimpleSign.
+    pub(crate) fn accepts_posted_response(&self) -> bool {
+        match self.binding {
+            Binding::Post | Binding::SimpleSign => true,
+            Binding::Redirect | Binding::Artifact => false,
+        }
+    }
+}
+
 /// Parsed SP metadata. Derefs to [`Metadata`] for the shared accessors.
 #[derive(Debug, Clone)]
 pub struct SpMetadata {
@@ -141,10 +151,7 @@ impl SpMetadata {
     fn posted_response_endpoints(&self) -> Vec<AcsMetadataEndpoint> {
         self.assertion_consumer_service_endpoints()
             .into_iter()
-            .filter(|endpoint| match endpoint.binding {
-                Binding::Post | Binding::SimpleSign => true,
-                Binding::Redirect | Binding::Artifact => false,
-            })
+            .filter(AcsMetadataEndpoint::accepts_posted_response)
             .collect()
     }
 

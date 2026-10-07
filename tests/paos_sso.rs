@@ -647,6 +647,14 @@ fn protocol_binding_naming_paos_is_received() -> Result<(), Box<dyn std::error::
         validation(),
     )?;
     assert_eq!(received.message().protocol_binding(), None);
+    assert_eq!(
+        received
+            .message()
+            .raw_flow()
+            .extract
+            .get_str("request.protocolBinding"),
+        Some("urn:oasis:names:tc:SAML:2.0:bindings:PAOS")
+    );
     let answered = idp.respond_paos_sso(&sp_descriptor, &received, subject())?;
     assert_eq!(answered.http_status(), 200);
     Ok(())
@@ -673,14 +681,11 @@ fn assertion_consumer_of_a_binding_that_cannot_carry_the_response_is_rejected(
         StartPaosSso::to_soap_endpoint(IDP_SOAP)?.allow_unsigned_authn_request(),
     )?;
     let (_, idp_request) = enhanced_client_takes_authn_request(started.response.soap_envelope())?;
-    for (tampered, expect_undefined_binding) in [
-        (idp_request.replace(SP_ACS, artifact_acs), false),
-        (
-            idp_request.replace(
-                &format!(" AssertionConsumerServiceURL=\"{SP_ACS}\""),
-                " AssertionConsumerServiceIndex=\"7\"",
-            ),
-            true,
+    for tampered in [
+        idp_request.replace(SP_ACS, artifact_acs),
+        idp_request.replace(
+            &format!(" AssertionConsumerServiceURL=\"{SP_ACS}\""),
+            " AssertionConsumerServiceIndex=\"7\"",
         ),
     ] {
         assert_ne!(tampered, idp_request);
@@ -693,11 +698,7 @@ fn assertion_consumer_of_a_binding_that_cannot_carry_the_response_is_rejected(
             Err(error) => error,
             Ok(_) => return Err("an HTTP-Artifact assertion consumer is rejected".into()),
         };
-        if expect_undefined_binding {
-            assert!(matches!(error, SamlError::UndefinedBinding));
-        } else {
-            assert!(matches!(error, SamlError::Invalid(_)));
-        }
+        assert!(matches!(error, SamlError::Invalid(_)));
     }
     Ok(())
 }

@@ -6,10 +6,9 @@ mod protocol;
 
 use std::marker::PhantomData;
 
-use crate::browser::SsoResponseBinding;
 use crate::config::{EntityId, IdpDescriptor, SpDescriptor};
 use crate::entity::User;
-use crate::flow::{FlowResult, HttpRequest};
+use crate::flow::HttpRequest;
 use crate::idp::PaosSsoResponseInput;
 use crate::model::{
     AuthnRequest, EndpointUrl, ForceAuthn, IsPassive, MessageId, OutstandingLogout,
@@ -17,14 +16,12 @@ use crate::model::{
     TopLevelStatusCode,
 };
 use crate::sp::{LoginResponseParseOptions, PaosAuthnRequestInput};
-use crate::util::Value;
 
 use super::raw_mapping::{ensure_entity_id, raw_idp_descriptor, raw_sp_descriptor};
 use super::{Idp, Saml, SamlError, Sp};
 use protocol::{
     idp_to_ecp_envelope, parse_client_headers, read_soap_body, soap_fault_envelope,
-    sp_to_ecp_envelope, IdpToEcp, SpToEcp, E54_PAOS_HEADER, PAOS_BINDING, PAOS_MEDIA_TYPE,
-    SOAP_MEDIA_TYPE,
+    sp_to_ecp_envelope, IdpToEcp, SpToEcp, E54_PAOS_HEADER, PAOS_MEDIA_TYPE, SOAP_MEDIA_TYPE,
 };
 
 /// HTTP headers an enhanced client sends when it can carry this login.
@@ -570,7 +567,8 @@ impl Saml<Idp> {
     /// Read the SOAP AuthnRequest an enhanced client forwarded.
     ///
     /// A `ProtocolBinding` that names the PAOS binding is accepted, and
-    /// [`AuthnRequest::protocol_binding`] then reports none.
+    /// [`AuthnRequest::protocol_binding`] then reports none. The raw flow
+    /// keeps the attribute.
     ///
     /// # Errors
     ///
@@ -597,7 +595,7 @@ impl Saml<Idp> {
             validation.now(),
             validation.clock_skew().as_millis(),
         )?;
-        let authn = AuthnRequest::try_from(without_paos_protocol_binding(flow))?;
+        let authn = AuthnRequest::try_from_paos_flow(flow)?;
         let verify_present_signature = self
             .raw_identity_provider()
             .setting
@@ -704,19 +702,6 @@ impl Saml<Idp> {
     }
 }
 
-/// `flow` with `ProtocolBinding` cleared when it names the PAOS binding.
-fn without_paos_protocol_binding(mut flow: FlowResult) -> FlowResult {
-    if flow.extract.get_str("request.protocolBinding") != Some(PAOS_BINDING) {
-        return flow;
-    }
-    if let Value::Object(entries) = &mut flow.extract {
-        if let Some((_, request)) = entries.iter_mut().find(|(key, _)| key == "request") {
-            request.insert("protocolBinding", Value::Null);
-        }
-    }
-    flow
-}
-
 /// Whether XML 1.0 allows `character` in a document.
 fn is_xml_char(character: char) -> bool {
     matches!(
@@ -763,7 +748,7 @@ fn assertion_consumer_for_request(
             return Ok(url.clone());
         }
         return Err(SamlError::Invalid(
-            "AuthnRequest AssertionConsumerServiceURL is not published in service provider metadata"
+            "AuthnRequest AssertionConsumerServiceURL is not published for HTTP-POST or HTTP-POST-SimpleSign in service provider metadata"
                 .into(),
         ));
     }
@@ -777,6 +762,11 @@ fn assertion_consumer_for_request(
         .metadata()
         .get_assertion_consumer_service_by_index(index)?
         .ok_or_else(|| SamlError::MissingMetadata("AssertionConsumerService".into()))?;
-    SsoResponseBinding::try_from(endpoint.binding)?;
+    if !endpoint.accepts_posted_response() {
+        return Err(SamlError::Invalid(
+            "AuthnRequest AssertionConsumerServiceIndex is not published for HTTP-POST or HTTP-POST-SimpleSign in service provider metadata"
+                .into(),
+        ));
+    }
     EndpointUrl::try_new(endpoint.location)
 }

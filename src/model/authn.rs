@@ -170,12 +170,34 @@ impl TryFrom<FlowResult> for AuthnRequest {
     type Error = SamlError;
 
     fn try_from(raw_flow: FlowResult) -> Result<Self, Self::Error> {
+        Self::from_flow(raw_flow, optional_response_binding)
+    }
+}
+
+impl AuthnRequest {
+    /// Typed request from the SOAP leg of Enhanced Client/Proxy SSO.
+    ///
+    /// A `ProtocolBinding` that names the PAOS binding is reported as none.
+    /// The raw flow keeps the attribute.
+    pub(crate) fn try_from_paos_flow(raw_flow: FlowResult) -> Result<Self, SamlError> {
+        Self::from_flow(raw_flow, |extract| {
+            if extract.get_str("request.protocolBinding") == Some(PAOS_BINDING) {
+                return Ok(None);
+            }
+            optional_response_binding(extract)
+        })
+    }
+
+    fn from_flow(
+        raw_flow: FlowResult,
+        response_binding: fn(&crate::util::Value) -> Result<Option<SsoResponseBinding>, SamlError>,
+    ) -> Result<Self, SamlError> {
         let id = MessageId::try_new(required_str(&raw_flow.extract, "request.id")?)?;
         let issue_instant = issue_instant_from_extract(&raw_flow.extract)?;
         let issuer = EntityId::try_new(required_str(&raw_flow.extract, "issuer")?)?;
         let destination = optional_endpoint(&raw_flow.extract, "request.destination")?;
         let acs_url = optional_endpoint(&raw_flow.extract, "request.assertionConsumerServiceUrl")?;
-        let protocol_binding = optional_response_binding(&raw_flow.extract)?;
+        let protocol_binding = response_binding(&raw_flow.extract)?;
         let acs_index = optional_u16(&raw_flow.extract, "request.assertionConsumerServiceIndex")?;
         let name_id_policy = name_id_policy_from_extract(&raw_flow.extract)?;
         let force_authn = optional_flag(&raw_flow.extract, "request.forceAuthn", "ForceAuthn")?
@@ -309,6 +331,8 @@ fn issue_instant_from_extract(extract: &crate::util::Value) -> Result<SamlInstan
     })?;
     SamlInstant::try_new(issue_instant)
 }
+
+const PAOS_BINDING: &str = "urn:oasis:names:tc:SAML:2.0:bindings:PAOS";
 
 fn optional_response_binding(
     extract: &crate::util::Value,
