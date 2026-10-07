@@ -21,6 +21,6 @@ level.
 Web Browser SSO, Single Logout, metadata, and replay are classified under
 `docs/conformance/`. `recommended()` publishes that combination.
 `strict()` is removed. `Default`, `new`, `try_new`, and the config builders
-start on Recommended. A direct Assertion signature and the RSA-SHA2 XML-DSig
-profile are selected by name on that preset, and neither is implied by it.
-`compatibility()` remains the legacy permissive preset.
+start on Recommended so typed construction has one preset. A direct Assertion
+signature and the RSA-SHA2 XML-DSig profile stay independent options on that
+preset. `compatibility()` remains the legacy permissive preset.

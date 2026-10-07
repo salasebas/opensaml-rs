@@ -40,10 +40,11 @@ config.validate()?;
 ```
 
 Builders keep large setup ergonomic while still returning `Result`. `Default`,
-`new`, `try_new`, and the config builders start on Recommended. `recommended()`
-is the preset for claimed features and is not an implementation of SAML V2.0
-as a whole. `compatibility()` remains the legacy permissive preset for callers
-leaving the raw API.
+`new`, `try_new`, and the config builders start on Recommended so typed
+construction has one preset. `recommended()` is the preset for claimed
+features and is not an implementation of SAML V2.0 as a whole.
+`compatibility()` remains the legacy permissive preset for callers leaving
+the raw API.
 
 ```rust
 let config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)

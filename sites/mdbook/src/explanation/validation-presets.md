@@ -10,6 +10,6 @@ Library hardening that OASIS does not require stays off Recommended. Two example
 
 `recommended()` publishes the combination recorded under [Conformance](../reference/conformance.md).
 
-`strict()` is removed. `Default`, `new`, `try_new`, and the config builders start on Recommended. `compatibility()` stays available by name and keeps the legacy permissive behaviour. Raw settings keep their historical defaults.
+With that bundle gone, `Default`, `new`, `try_new`, and the config builders share Recommended. One construction path avoids a silent split between a permissive `Default` and a hardened builder. `compatibility()` remains the named legacy preset. Raw settings keep their historical defaults.
 
-The calls are in [Validation](../guides/validation-preset.md). This page restates [ADR 0002](https://github.com/salasebas/saml-rs/blob/main/docs/adr/0002-validation-presets.md).
+How to select the preset is [Validation](../guides/validation-preset.md). How to upgrade from 0.6 is [0.6 to 0.7](../guides/upgrade/v0-6-to-v0-7.md). This page restates [ADR 0002](https://github.com/salasebas/saml-rs/blob/main/docs/adr/0002-validation-presets.md).

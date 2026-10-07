@@ -7,9 +7,10 @@ also includes the Single Logout accept combination and leaves AuthnRequest
 signing and identifier creation off. Those last three are not part of this
 accept combination; they are recorded with logout and generation.
 `IdpValidationPolicy::recommended` includes the identity-provider rows below
-and the same logout accept combination. `Default`, `new`, `try_new`, and the config builders start on
-Recommended. Recommended does not select the RSA-SHA2 XML-DSig profile.
-`compatibility()` stays available by name. Why those presets differ is in
+and the same logout accept combination. `Default`, `new`, `try_new`, and
+the config builders are Recommended. Recommended does not select the
+RSA-SHA2 XML-DSig profile. `compatibility()` is available by name. The
+preset distinction is recorded in
 [Validation presets](../../explanation/validation-presets.md).
 
 Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected
@@ -31,7 +32,7 @@ select the accept combination by setting the fields below.
 | Do not require a signature directly on the Assertion | Accepting service provider | Inbound | Library hardening, off. `AssertionSignaturePolicy::AllowUnsignedForCompatibility`. `RequireSigned` is the hardening |
 | Require a Response signature when an `EncryptedAssertion` uses CBC | Accepting service provider | Inbound | Recommendation, on. `ResponseSignaturePolicy::RequireForEncryptedCbc`. Relax it with `AllowUnsignedEncryptedCbc`. `RequireSigned` on every response is separate library hardening |
 | Do not require the RSA-SHA2 XML signature profile | Accepting service provider | Inbound | Library hardening, off. `XmlSignatureProfile::AllowProviderSupportedForCompatibility`. Conformance §4.1 requires RSAwithSHA1, and Core §5.4.4 does not require a verifier to reject other transforms |
-| Evaluate an `<AudienceRestriction>` that is present | Accepting service provider | Inbound | Mandatory when the element is present. `AudienceValidationPolicy::EvaluatePresentRestrictions`. `Validate` also rejects a missing restriction; that extra rejection is library hardening and stays off until the caller selects `Validate` |
+| Evaluate an `<AudienceRestriction>` that is present | Accepting service provider | Inbound | Mandatory when the element is present. `AudienceValidationPolicy::EvaluatePresentRestrictions`. `Validate` also rejects a missing restriction. That extra rejection is library hardening. Recommended uses `EvaluatePresentRestrictions` |
 | Several `<AudienceRestriction>` elements are all required, and audiences inside one restriction are alternatives | Accepting service provider | Inbound | Mandatory when the elements are present. Core §2.5.1.4, Approved Errata 05 E46. No off switch beyond the audience policy above |
 | Reject a `<Conditions>` child that is not understood | Accepting service provider | Inbound | Mandatory. Core §2.5.1.1. Indeterminate is rejected. No off switch |
 | `<OneTimeUse>` does not affect validity and the assertion is not retained | Accepting service provider | Inbound | Mandatory when the element is present. Core §2.5.1.5. Always Valid. The typed session is not kept for a later exchange |

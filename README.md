@@ -70,14 +70,11 @@ with a caller-owned replay cache. Choose the metadata policy in
 [metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and
 [`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html).
 
-`Default`, `new`, `try_new`, and the config builders start on
-`SpValidationPolicy::recommended` or `IdpValidationPolicy::recommended`. Add a
-direct Assertion signature or the RSA-SHA2 XML-DSig profile by name when you
-want that hardening. Neither is implied by `recommended()`. `compatibility()`
-is the legacy permissive preset, selected by name. Why those presets differ is
-in [validation presets](docs/adr/0002-validation-presets.md). Callers moving
-off `strict()` follow
-[How to upgrade from 0.6](docs/migrations/unreleased.md).
+`Default`, `new`, `try_new`, and the config builders use Recommended.
+Hardenings are separate fields on that preset. The legacy permissive preset
+is `compatibility()`, selected by name. Why the presets differ is in
+[validation presets](docs/adr/0002-validation-presets.md). An upgrade from
+0.6 is [How to upgrade from 0.6 to 0.7](docs/migrations/0.6-to-0.7.md).
 
 `finish_sso` returns an `SsoSession`. Read embedded XML signature evidence from
 `verified_xml_signatures()`: one item per verified signature over the Response

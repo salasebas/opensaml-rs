@@ -72,7 +72,7 @@ impl SpConfig {
             entity_id,
             metadata,
             credentials: Credentials::default(),
-            validation: SpValidationPolicy::default(),
+            validation: SpValidationPolicy::recommended(),
             algorithms: AlgorithmPolicy::default(),
             xml: XmlPolicy::default(),
             templates: TemplatePolicy::default(),
@@ -104,8 +104,9 @@ impl SpConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`SamlError`] when the entity ID is empty or required SP
-    /// metadata endpoints are missing.
+    /// Returns [`SamlError`] when the entity ID is empty, required SP
+    /// metadata endpoints are missing, or the selected policy requires crypto
+    /// in a build without a crypto provider.
     pub fn validate(&self) -> Result<(), SamlError> {
         validate_entity_id(&self.entity_id)?;
         self.metadata.validate()?;
@@ -273,7 +274,7 @@ impl IdpConfig {
             metadata,
             credentials: Credentials::default(),
             issuance_lifetime: Duration::from_secs(300),
-            validation: IdpValidationPolicy::default(),
+            validation: IdpValidationPolicy::recommended(),
             algorithms: AlgorithmPolicy::default(),
             xml: XmlPolicy::default(),
             templates: TemplatePolicy::default(),
@@ -305,8 +306,10 @@ impl IdpConfig {
     /// # Errors
     ///
     /// Returns [`SamlError`] when the entity ID is empty, required IdP
-    /// metadata endpoints are missing, or the issuance lifetime is zero or
-    /// outside the range supported by the internal time representation.
+    /// metadata endpoints are missing, the issuance lifetime is zero or
+    /// outside the range supported by the internal time representation, or
+    /// the selected policy requires crypto in a build without a crypto
+    /// provider.
     pub fn validate(&self) -> Result<(), SamlError> {
         validate_entity_id(&self.entity_id)?;
         self.metadata.validate()?;
@@ -746,6 +749,26 @@ mod no_crypto_tests {
             IdpMetadataConfig::new(vec![SsoEndpoint::post("https://idp.example.com/sso")?]),
         );
         assert!(matches!(idp, Err(SamlError::Unsupported(_))));
+
+        let sp_builder = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+            .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+            .build();
+        assert!(matches!(sp_builder, Err(SamlError::Unsupported(_))));
+
+        let idp_builder =
+            IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+                .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+                .build();
+        assert!(matches!(idp_builder, Err(SamlError::Unsupported(_))));
+
+        SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
+            .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
+            .validation(SpValidationPolicy::compatibility())
+            .build()?;
+        IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
+            .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
+            .validation(IdpValidationPolicy::compatibility())
+            .build()?;
 
         let mut sp = SpConfig::new(
             EntityId::try_new("https://sp.example.com/metadata")?,
