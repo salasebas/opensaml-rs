@@ -916,7 +916,7 @@ fn sha1(input: &[u8]) -> [u8; 20] {
         data.push(0);
     }
     data.extend_from_slice(&bit_len.to_be_bytes());
-    for chunk in data.chunks_exact(64) {
+    for chunk in data.as_chunks::<64>().0 {
         let mut words = [0u32; 80];
         for (index, word) in words.iter_mut().enumerate().take(16) {
             let start = index * 4;
