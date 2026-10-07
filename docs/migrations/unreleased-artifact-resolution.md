@@ -24,13 +24,13 @@ existing fields. On the raw struct, the same field holds
 `saml_rs::metadata::ArtifactResolutionEndpoint`. `..Default::default()` still
 fills it.
 
-To publish the SOAP endpoint from the typed builder:
+Publish the SOAP endpoint from the typed builder. The builder starts on
+Recommended, and this snippet leaves that preset in place. Select
+`compatibility()` only for the legacy permissive preset, including a build
+without the crypto feature.
 
 ```rust
-use saml_rs::{
-    ArtifactResolutionService, EndpointUrl, EntityId, IdpConfig, IdpValidationPolicy,
-    SsoEndpoint,
-};
+use saml_rs::{ArtifactResolutionService, EndpointUrl, EntityId, IdpConfig, SsoEndpoint};
 
 fn publish() -> Result<IdpConfig, saml_rs::SamlError> {
     IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
@@ -39,7 +39,6 @@ fn publish() -> Result<IdpConfig, saml_rs::SamlError> {
             0,
             EndpointUrl::try_new("https://idp.example.com/artifact")?,
         ))
-        .validation(IdpValidationPolicy::compatibility())
         .build()
 }
 ```

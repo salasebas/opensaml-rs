@@ -4,6 +4,9 @@
 //! The identity provider stores a protocol message and answers `ArtifactResolve`.
 //! The service provider sends that request and reads the message from
 //! `ArtifactResponse`. The deployment still performs HTTP and TLS.
+//!
+//! Config helpers select `compatibility()` so they build without a crypto
+//! provider. Artifact resolution does not read that preset.
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;

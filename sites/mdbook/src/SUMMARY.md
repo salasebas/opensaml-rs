@@ -33,6 +33,7 @@
     - [SSO generation](reference/conformance/web-browser-sso-generation.md)
     - [Logout](reference/conformance/single-logout.md)
     - [Metadata and replay](reference/conformance/metadata-and-replay.md)
+    - [Artifact resolution](reference/conformance/artifact-resolution.md)
 
 # Explanation
 
