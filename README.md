@@ -75,8 +75,10 @@ direct Assertion signature or the RSA-SHA2 XML-DSig profile by name when you
 want that hardening. Neither is implied by `recommended()`, and `strict()`
 does not gain the RSA-SHA2 profile. `compatibility()` is the legacy permissive
 preset. `Default`, `new`, and `try_new` stay on that preset. Config builders
-still start on the deprecated `strict()` bundle. Why those presets differ is
-in [validation presets](docs/adr/0002-validation-presets.md).
+still start on the deprecated `strict()` bundle. The following release removes
+`strict()` and points `Default`, `new`, `try_new`, and the config builders at
+Recommended together. Why those presets differ is in
+[validation presets](docs/adr/0002-validation-presets.md).
 
 `finish_sso` returns an `SsoSession`. Read embedded XML signature evidence from
 `verified_xml_signatures()`: one item per verified signature over the Response

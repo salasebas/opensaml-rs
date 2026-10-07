@@ -104,6 +104,8 @@ pub enum TimeWindowField {
     Conditions,
     /// Replay cache retention window could not be computed or has elapsed.
     ReplayExpiration,
+    /// AuthnRequest `IssueInstant` age window.
+    AuthnRequestIssueInstant,
 }
 
 impl fmt::Display for TimeWindowField {
@@ -114,6 +116,7 @@ impl fmt::Display for TimeWindowField {
             Self::SessionNotOnOrAfter => f.write_str("SessionNotOnOrAfter"),
             Self::Conditions => f.write_str("Conditions"),
             Self::ReplayExpiration => f.write_str("ReplayExpiration"),
+            Self::AuthnRequestIssueInstant => f.write_str("AuthnRequest@IssueInstant"),
         }
     }
 }
