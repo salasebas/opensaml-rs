@@ -52,10 +52,26 @@ An extra rejection the SAML specifications do not require, selected by name
 on top of a validation preset.
 _Avoid_: strict, profile
 
+**Name identifier management**:
+The protocol by which an IdP and an SP change or end a principal's name
+identifier. It belongs to the base IdP and SP operational modes.
+_Avoid_: name identifier mapping
+
+**Name identifier mapping**:
+A request that an IdP Extended or SP Extended translate one name identifier
+into another. It is a separate operational mode from the base IdP and SP.
+_Avoid_: name identifier management
+
+**Operational mode**:
+An OASIS conformance role and the full column of features that role implements.
+The roles are IdP, IdP Lite, SP, SP Lite, ECP, and the SAML authorities. IdP
+Lite and SP Lite are smaller columns of the same table, not separate profiles.
+_Avoid_: Web Browser SSO operational mode, claimed feature
+
 **Claimed feature**:
 A SAML behaviour saml-rs already implements, bounded by role, direction,
 profile or flow, and binding.
-_Avoid_: SAML V2.0 as a whole
+_Avoid_: SAML V2.0 as a whole, operational mode
 
 **Recommended**:
 The validation preset for claimed features. For the obligated actor, mandatory
