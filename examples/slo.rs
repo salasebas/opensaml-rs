@@ -2,10 +2,6 @@
 //!
 //! Run with: `cargo run -p saml-rs --example slo`
 //! (the `crypto-bergshamra` feature is on by default).
-#![allow(
-    deprecated,
-    reason = "the example keeps exercising the deprecated strict() preset"
-)]
 
 #[cfg(any(
     feature = "crypto-rustcrypto",
@@ -38,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
             .slo_endpoint(SloEndpoint::post("https://sp.example.com/slo")?)
             .credentials(credentials())
-            .validation(SpValidationPolicy::strict())
+            .validation(SpValidationPolicy::recommended())
             .build()?,
     )?;
     let idp = Saml::idp(
@@ -46,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .sso_endpoint(SsoEndpoint::post("https://idp.example.com/sso")?)
             .slo_endpoint(SloEndpoint::post("https://idp.example.com/slo")?)
             .credentials(credentials())
-            .validation(IdpValidationPolicy::strict())
+            .validation(IdpValidationPolicy::recommended())
             .build()?,
     )?;
     let sp_descriptor = SpDescriptor::from_metadata_xml_for(

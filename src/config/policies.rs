@@ -122,8 +122,8 @@ pub enum LogoutSignaturePolicy {
 pub enum AudienceValidationPolicy {
     /// Evaluate audience restrictions and reject a bearer assertion that omits one.
     ///
-    /// Rejecting a missing restriction is library hardening. `strict()` keeps
-    /// this variant.
+    /// Rejecting a missing restriction is library hardening. Recommended uses
+    /// [`Self::EvaluatePresentRestrictions`].
     #[default]
     Validate,
     /// Evaluate `<AudienceRestriction>` elements that are present.
@@ -148,7 +148,7 @@ pub enum NameIdCreationPolicy {
 ///
 /// [`Self::recommended`] is the preset for claimed Web Browser SSO and Single
 /// Logout features. [`Self::compatibility`] is the legacy permissive preset.
-/// `strict()` is deprecated and keeps its current bundle. Field classification
+/// [`Default`](Default::default) is [`Self::recommended`]. Field classification
 /// is in `docs/conformance/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpValidationPolicy {
@@ -200,30 +200,6 @@ impl SpValidationPolicy {
         }
     }
 
-    /// Deprecated bundle of SP validation choices.
-    ///
-    /// Removed in the following release. Start from [`Self::recommended`] and
-    /// add only the named hardenings you want. The returned fields are
-    /// unchanged from earlier releases.
-    #[deprecated(
-        note = "removed in the following release; start from recommended() and add only the named hardenings you want"
-    )]
-    #[expect(
-        deprecated,
-        reason = "the deprecated strict preset keeps its current logout bundle"
-    )]
-    pub fn strict() -> Self {
-        Self {
-            assertions: AssertionSignaturePolicy::RequireSigned,
-            responses: ResponseSignaturePolicy::RequireForEncryptedCbc,
-            xml_signatures: XmlSignatureProfile::AllowProviderSupportedForCompatibility,
-            authn_requests: AuthnRequestSigningPolicy::Sign,
-            audience: AudienceValidationPolicy::Validate,
-            name_id_creation: NameIdCreationPolicy::DoNotAllowCreate,
-            logout: LogoutPolicy::strict(),
-        }
-    }
-
     /// Legacy permissive preset: samlify-port behavior for a caller leaving
     /// the raw API.
     pub fn compatibility() -> Self {
@@ -241,7 +217,7 @@ impl SpValidationPolicy {
 
 impl Default for SpValidationPolicy {
     fn default() -> Self {
-        Self::compatibility()
+        Self::recommended()
     }
 }
 
@@ -249,7 +225,7 @@ impl Default for SpValidationPolicy {
 ///
 /// [`Self::recommended`] is the preset for claimed Web Browser SSO and Single
 /// Logout features. [`Self::compatibility`] is the legacy permissive preset.
-/// `strict()` is deprecated and keeps its current bundle. Field classification
+/// [`Default`](Default::default) is [`Self::recommended`]. Field classification
 /// is in `docs/conformance/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdpValidationPolicy {
@@ -271,26 +247,6 @@ impl IdpValidationPolicy {
         }
     }
 
-    /// Deprecated bundle of IdP validation choices.
-    ///
-    /// Removed in the following release. Start from [`Self::recommended`] and
-    /// add only the named hardenings you want. Inbound `AuthnRequest` and
-    /// logout messages must be signed. The returned fields are unchanged from
-    /// earlier releases.
-    #[deprecated(
-        note = "removed in the following release; start from recommended() and add only the named hardenings you want"
-    )]
-    #[expect(
-        deprecated,
-        reason = "the deprecated strict preset keeps its current logout bundle"
-    )]
-    pub fn strict() -> Self {
-        Self {
-            authn_requests: AuthnRequestValidationPolicy::RequireSigned,
-            logout: LogoutPolicy::strict(),
-        }
-    }
-
     /// Legacy permissive preset.
     ///
     /// Samlify-port behavior for a caller leaving the raw API. A signature
@@ -305,21 +261,21 @@ impl IdpValidationPolicy {
 
 impl Default for IdpValidationPolicy {
     fn default() -> Self {
-        Self::compatibility()
+        Self::recommended()
     }
 }
 
 /// Logout request and response signature policy.
 ///
 /// [`Self::recommended`] requires a signature on requests and responses.
-/// [`Self::compatibility`] is the legacy permissive preset. `strict()` is
-/// deprecated and unchanged.
+/// [`Default`](Default::default) is that preset. [`Self::compatibility`] is
+/// the legacy permissive preset.
 ///
 /// `finish_slo` reads `responses`. `receive_slo` reads `requests`. With
 /// [`crate::LogoutSigning::FollowLocalPolicy`], `requests` also decides
 /// whether an outbound `LogoutRequest` is signed. See
 /// `docs/conformance/single-logout.md`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LogoutPolicy {
     /// LogoutRequest signature behavior.
     pub requests: LogoutSignaturePolicy,
@@ -336,21 +292,6 @@ impl LogoutPolicy {
         }
     }
 
-    /// Deprecated logout signature bundle.
-    ///
-    /// Removed in the following release. Start from [`Self::recommended`] and
-    /// add only the named hardenings you want. Logout requests and responses
-    /// must still be signed.
-    #[deprecated(
-        note = "removed in the following release; start from recommended() and add only the named hardenings you want"
-    )]
-    pub fn strict() -> Self {
-        Self {
-            requests: LogoutSignaturePolicy::RequireSigned,
-            responses: LogoutSignaturePolicy::RequireSigned,
-        }
-    }
-
     /// Legacy permissive preset.
     ///
     /// Unsigned logout requests and responses are accepted. This is the
@@ -360,6 +301,12 @@ impl LogoutPolicy {
             requests: LogoutSignaturePolicy::AllowUnsignedForCompatibility,
             responses: LogoutSignaturePolicy::AllowUnsignedForCompatibility,
         }
+    }
+}
+
+impl Default for LogoutPolicy {
+    fn default() -> Self {
+        Self::recommended()
     }
 }
 

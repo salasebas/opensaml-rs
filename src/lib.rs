@@ -2,6 +2,8 @@
 //!
 //! # Start here
 //!
+//! Guides are at <https://samlrs.vercel.app>.
+//!
 //! Start new browser SSO/SLO integrations with [`Saml`]. The typed facade keeps
 //! local role state in [`Saml<Sp>`] or [`Saml<Idp>`], accepts peer metadata
 //! through typed descriptors, and returns pending transaction values that
@@ -9,8 +11,7 @@
 //!
 //! [`SpValidationPolicy::recommended`] is the preset for claimed features.
 //! [`SpValidationPolicy::compatibility`] keeps the samlify-port behavior.
-//! Config builders still start on the deprecated `strict()` bundle. `Default`,
-//! `new`, and `try_new` stay on `compatibility()`.
+//! `Default`, `new`, `try_new`, and the config builders start on Recommended.
 //!
 //! Where the compact flow examples below use
 //! [`ReplayPolicy::DisabledForCompatibility`] or unsigned metadata, treat those
@@ -258,8 +259,8 @@
 //!
 //! The [`raw`] module is the samlify-port surface. [`SpValidationPolicy::compatibility`]
 //! keeps that behavior when leaving the raw API. The two surfaces keep their
-//! own defaults. Config builders still start on the deprecated `strict()`
-//! bundle. Advanced callers should import
+//! own defaults. `Default`, `new`, `try_new`, and the config builders start
+//! on Recommended. Advanced callers should import
 //! [`raw::ServiceProvider`], [`raw::IdentityProvider`], [`raw::HttpRequest`],
 //! and [`raw::BindingContext`] from there rather than using the root re-exports.
 //!

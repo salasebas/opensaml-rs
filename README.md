@@ -13,6 +13,7 @@ message signatures go through
 
 The Cargo package is `saml-rs`. The Rust import path is `saml_rs`. Source and
 issues live in [salasebas/saml-rs](https://github.com/salasebas/saml-rs).
+Guides are at [samlrs.vercel.app](https://samlrs.vercel.app).
 
 **Status:** pre-1.0. A minor release can change the API or runtime behaviour.
 There has been no external security audit. Review the crate, your
@@ -69,16 +70,11 @@ with a caller-owned replay cache. Choose the metadata policy in
 [metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and
 [`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html).
 
-If you want the preset for claimed features, start from
-`SpValidationPolicy::recommended` or `IdpValidationPolicy::recommended`. Add a
-direct Assertion signature or the RSA-SHA2 XML-DSig profile by name when you
-want that hardening. Neither is implied by `recommended()`, and `strict()`
-does not gain the RSA-SHA2 profile. `compatibility()` is the legacy permissive
-preset. `Default`, `new`, and `try_new` stay on that preset. Config builders
-still start on the deprecated `strict()` bundle. The following release removes
-`strict()` and points `Default`, `new`, `try_new`, and the config builders at
-Recommended together. Why those presets differ is in
-[validation presets](docs/adr/0002-validation-presets.md).
+`Default`, `new`, `try_new`, and the config builders use Recommended.
+Hardenings are separate fields on that preset. The legacy permissive preset
+is `compatibility()`, selected by name. Why the presets differ is in
+[validation presets](docs/adr/0002-validation-presets.md). An upgrade from
+0.6 is [How to upgrade from 0.6 to 0.7](docs/migrations/0.6-to-0.7.md).
 
 `finish_sso` returns an `SsoSession`. Read embedded XML signature evidence from
 `verified_xml_signatures()`: one item per verified signature over the Response
@@ -122,6 +118,7 @@ minimal expected flow on
 
 | Need | Start here |
 | --- | --- |
+| Read the guides | [samlrs.vercel.app](https://samlrs.vercel.app) |
 | Run a full flow | [`examples/sso.rs`](examples/sso.rs) and [`examples/slo.rs`](examples/slo.rs) |
 | Change an existing integration | [Migration guides](docs/migrations/README.md) |
 | Look up a type or method | [docs.rs](https://docs.rs/saml-rs/latest/saml_rs/) |
