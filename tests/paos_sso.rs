@@ -451,3 +451,91 @@ fn cbc_encrypted_response_is_signed() -> Result<(), Box<dyn std::error::Error>> 
     assert_eq!(session.name_id().value(), "alice@example.com");
     Ok(())
 }
+
+#[test]
+fn relay_state_is_checked_after_the_response_signature() -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = parties()?;
+    let started = sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::enhanced_client(),
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?
+            .relay_state(RelayStateParam::try_from_option(Some("state".to_string()))?),
+    )?;
+    let (client, idp_request) =
+        enhanced_client_takes_authn_request(started.response.soap_envelope())?;
+    let received = idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(idp_request, IDP_SOAP)?,
+        validation(),
+    )?;
+    let answered = idp.respond_paos_sso(&sp_descriptor, &received, subject())?;
+    let sp_request = enhanced_client_takes_response(&client, answered.soap_envelope())?;
+    // Break the response signature without touching the SOAP relay state header.
+    let tampered = sp_request.replace("alice@example.com", "mallory@example.com");
+    assert_ne!(sp_request, tampered);
+    let with_expected_relay = sp
+        .finish_paos_sso(
+            &idp_descriptor,
+            &started.pending,
+            &PaosSsoResponse::from_soap(tampered.clone())?,
+            validation(),
+        )
+        .err()
+        .ok_or("a broken response signature does not return a session")?;
+    let mut wrong_snapshot = started.pending.snapshot();
+    wrong_snapshot.relay_state = RelayStateParam::try_from_option(Some("other".to_string()))?;
+    let wrong_pending = saml_rs::PendingPaosSso::from_snapshot(wrong_snapshot)?;
+    let with_wrong_relay = sp
+        .finish_paos_sso(
+            &idp_descriptor,
+            &wrong_pending,
+            &PaosSsoResponse::from_soap(tampered)?,
+            validation(),
+        )
+        .err()
+        .ok_or("a broken response signature does not return a session")?;
+    // A wrong relay state must not surface while the signature is broken: the
+    // expected value cannot be probed without a valid signature.
+    assert!(!matches!(
+        with_wrong_relay,
+        SamlError::RelayStateMismatch { .. }
+    ));
+    assert_eq!(
+        std::mem::discriminant(&with_expected_relay),
+        std::mem::discriminant(&with_wrong_relay)
+    );
+    Ok(())
+}
+
+#[test]
+fn overlong_relay_state_in_response_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let (sp, idp, sp_descriptor, idp_descriptor) = parties()?;
+    let started = sp.start_paos_sso(
+        &idp_descriptor,
+        PaosClientRequest::enhanced_client(),
+        StartPaosSso::to_soap_endpoint(IDP_SOAP)?
+            .relay_state(RelayStateParam::try_from_option(Some("state".to_string()))?),
+    )?;
+    let (_, idp_request) = enhanced_client_takes_authn_request(started.response.soap_envelope())?;
+    let received = idp.receive_paos_sso(
+        &sp_descriptor,
+        &PaosAuthnRequest::received_at(idp_request, IDP_SOAP)?,
+        validation(),
+    )?;
+    let answered = idp.respond_paos_sso(&sp_descriptor, &received, subject())?;
+    let document = parse(answered.soap_envelope())?;
+    let response = body_element(answered.soap_envelope(), &document.root, "Response")?;
+    let long = "r".repeat(81);
+    let sp_request = soap_envelope(&relay_state_header(&long), &response);
+    let error = match sp.finish_paos_sso(
+        &idp_descriptor,
+        &started.pending,
+        &PaosSsoResponse::from_soap(sp_request)?,
+        validation(),
+    ) {
+        Err(error) => error,
+        Ok(_) => return Err("an overlong relay state is rejected".into()),
+    };
+    assert!(matches!(error, SamlError::Invalid(_)));
+    Ok(())
+}

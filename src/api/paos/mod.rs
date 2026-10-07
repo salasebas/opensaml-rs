@@ -482,9 +482,6 @@ impl Saml<Sp> {
         ensure_entity_id(pending.idp_entity_id(), idp.entity_id())?;
         let limits = self.raw_service_provider().setting.xml_limits;
         let body = read_soap_body(&response.envelope, "Response", limits)?;
-        if pending.relay_state() != &RelayStateParam::absent() {
-            super::raw_mapping::ensure_relay_state(pending.relay_state(), &body.relay_state)?;
-        }
         let raw_idp = raw_idp_descriptor(idp)?;
         let request = HttpRequest::post(vec![(
             "SAMLResponse".into(),
@@ -503,6 +500,11 @@ impl Saml<Sp> {
                 )
                 .with_expected_recipient(pending.assertion_consumer_url().as_str()),
             )?;
+        // The expected value is compared after the response signature verifies,
+        // so a wrong or missing value cannot be probed without a valid signature.
+        if pending.relay_state() != &RelayStateParam::absent() {
+            super::raw_mapping::ensure_relay_state(pending.relay_state(), &body.relay_state)?;
+        }
         let session = super::sp::session_from_verified_flow(parsed)?;
         session.check_and_store_replay(&mut validation)?;
         Ok(session)

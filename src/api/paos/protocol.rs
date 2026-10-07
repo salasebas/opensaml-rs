@@ -35,7 +35,7 @@ pub(super) fn parse_client_headers(accept: &str, paos: &str) -> Result<(), SamlE
             "PAOS header must include ver=\"urn:liberty:paos:2003-08\" with double quotes".into(),
         ));
     }
-    if !double_quoted_values(paos).contains(&ECP_PROFILE) {
+    if !has_ecp_service(paos) {
         return Err(SamlError::ProtocolProfile(
             "PAOS header must include \"urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp\" with double quotes"
                 .into(),
@@ -157,6 +157,31 @@ pub(super) fn read_soap_body(
             "SOAP child count did not match the envelope".into(),
         ));
     }
+    // A SOAP 1.1 envelope carries at most one Header followed by exactly one
+    // Body. Anything else is not this profile's exchange.
+    let mut saw_header = false;
+    let mut saw_body = false;
+    for (node, is_soap) in document.root.children.iter().zip(&child_is_soap) {
+        if !is_soap || (node.local_name != "Header" && node.local_name != "Body") {
+            return Err(SamlError::ProtocolProfile(
+                "SOAP envelope must contain only a Header and a Body".into(),
+            ));
+        }
+        if node.local_name == "Header" {
+            if saw_header || saw_body {
+                return Err(SamlError::ProtocolProfile(
+                    "SOAP envelope must contain at most one Header before the Body".into(),
+                ));
+            }
+            saw_header = true;
+        } else if saw_body {
+            return Err(SamlError::ProtocolProfile(
+                "SOAP envelope must contain exactly one Body".into(),
+            ));
+        } else {
+            saw_body = true;
+        }
+    }
     let body = soap_child(&document.root, &child_is_soap, "Body")
         .ok_or_else(|| SamlError::ProtocolProfile("SOAP envelope is missing a Body".into()))?;
     let elements: Vec<&Node> = body.children.iter().collect();
@@ -168,6 +193,11 @@ pub(super) fn read_soap_body(
     if element.local_name != element_name {
         return Err(SamlError::ProtocolProfile(format!(
             "SOAP body must contain one {element_name}"
+        )));
+    }
+    if !soap_body_child_in_protocol_namespace(envelope_xml, elements.len())? {
+        return Err(SamlError::ProtocolProfile(format!(
+            "SOAP body element must use the {PROTOCOL_NS} namespace"
         )));
     }
     let element_xml = xml_slice(envelope_xml, element)?.to_string();
@@ -330,6 +360,75 @@ fn xml_slice<'a>(xml: &'a str, node: &Node) -> Result<&'a str, SamlError> {
         .ok_or_else(|| SamlError::Xml("SOAP element offsets fell outside the message".into()))
 }
 
+/// Whether the SOAP body's children use the SAML 2.0 protocol namespace.
+///
+/// Prefixes may be declared on any ancestor, so the whole envelope is
+/// traversed with its in-scope bindings instead of slicing the body out.
+fn soap_body_child_in_protocol_namespace(
+    xml: &str,
+    expected_children: usize,
+) -> Result<bool, SamlError> {
+    use quick_xml::events::Event;
+    use quick_xml::name::ResolveResult;
+    use quick_xml::reader::NsReader;
+
+    let mut reader = NsReader::from_str(xml);
+    let mut buf = Vec::new();
+    let mut depth = 0usize;
+    let mut body_depth = None;
+    let mut in_protocol = Vec::new();
+    loop {
+        let (resolved, event) = reader
+            .read_resolved_event_into(&mut buf)
+            .map_err(|err| SamlError::Xml(err.to_string()))?;
+        match &event {
+            Event::Start(element) | Event::Empty(element) => {
+                let next_depth = depth + 1;
+                let local_name = element.local_name();
+                if body_depth.is_none()
+                    && next_depth == 2
+                    && local_name.as_ref() == "Body"
+                    && matches!(
+                        &resolved,
+                        ResolveResult::Bound(namespace)
+                            if namespace.as_ref() == SOAP_ENVELOPE_NS
+                    )
+                {
+                    body_depth = Some(next_depth);
+                }
+                if body_depth == Some(next_depth - 1) {
+                    in_protocol.push(matches!(
+                        &resolved,
+                        ResolveResult::Bound(namespace)
+                            if namespace.as_ref() == PROTOCOL_NS
+                    ));
+                }
+                if matches!(event, Event::Start(_)) {
+                    depth = next_depth;
+                }
+            }
+            Event::End(_) => {
+                if body_depth == Some(depth) {
+                    break;
+                }
+                depth = depth.saturating_sub(1);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    if body_depth.is_none() {
+        return Err(SamlError::Xml("SOAP body was not found".into()));
+    }
+    if in_protocol.len() != expected_children {
+        return Err(SamlError::Xml(
+            "SAML element count did not match the SOAP body".into(),
+        ));
+    }
+    Ok(in_protocol.into_iter().next().unwrap_or(false))
+}
+
 fn header_value<'a>(header: &'a str, name: &str) -> &'a str {
     let trimmed = header.trim();
     let Some((field, value)) = trimmed.split_once(':') else {
@@ -348,29 +447,29 @@ fn lists_media_type(header: &str, media_type: &str) -> bool {
         .any(|part| part.trim().eq_ignore_ascii_case(media_type))
 }
 
+fn paos_tokens(header: &str) -> impl Iterator<Item = &str> {
+    header
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+}
+
 fn has_double_quoted_version(header: &str) -> bool {
-    let needle = format!("\"{PAOS_VERSION}\"");
-    header.match_indices("ver").any(|(index, _)| {
-        let after = header[index + 3..].trim_start();
-        let Some(after) = after.strip_prefix('=') else {
+    let expected = format!("\"{PAOS_VERSION}\"");
+    paos_tokens(header).any(|token| {
+        let Some(rest) = token.strip_prefix("ver") else {
             return false;
         };
-        after.trim_start().starts_with(needle.as_str())
+        let Some(rest) = rest.trim_start().strip_prefix('=') else {
+            return false;
+        };
+        rest.trim_start() == expected
     })
 }
 
-fn double_quoted_values(header: &str) -> Vec<&str> {
-    let mut values = Vec::new();
-    let mut rest = header;
-    while let Some(start) = rest.find('"') {
-        let after = &rest[start + 1..];
-        let Some(end) = after.find('"') else {
-            break;
-        };
-        values.push(&after[..end]);
-        rest = &after[end + 1..];
-    }
-    values
+fn has_ecp_service(header: &str) -> bool {
+    let expected = format!("\"{ECP_PROFILE}\"");
+    paos_tokens(header).any(|token| token == expected)
 }
 
 #[cfg(test)]
@@ -400,8 +499,38 @@ mod tests {
     }
 
     #[test]
+    fn ver_attribute_name_must_match_exactly() {
+        let ecp = "\"urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp\"";
+        for paos in [
+            format!("server=\"urn:liberty:paos:2003-08\";{ecp}"),
+            format!("xver=\"urn:liberty:paos:2003-08\";{ecp}"),
+            format!("version=\"urn:liberty:paos:2003-08\";{ecp}"),
+            format!("cover=\"urn:liberty:paos:2003-08\";{ecp}"),
+        ] {
+            assert!(
+                parse_client_headers("application/vnd.paos+xml", &paos).is_err(),
+                "accepted {paos}"
+            );
+        }
+    }
+
+    #[test]
+    fn ecp_service_must_be_its_own_token() {
+        let paos =
+            "ver=\"urn:liberty:paos:2003-08\";foo=\"urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp\"";
+        assert!(parse_client_headers("application/vnd.paos+xml", paos).is_err());
+    }
+
+    #[test]
+    fn accept_without_paos_is_rejected() {
+        assert!(parse_client_headers("text/html", E54_PAOS_HEADER).is_err());
+    }
+
+    #[test]
     fn soap_body_preserves_the_saml_element() -> Result<(), SamlError> {
-        let authn = "<samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest>";
+        let authn = format!(
+            "<samlp:AuthnRequest xmlns:samlp=\"{PROTOCOL_NS}\" ID=\"_1\"></samlp:AuthnRequest>"
+        );
         let envelope = sp_to_ecp_envelope(&SpToEcp {
             response_consumer_url: "https://sp.example.com/acs",
             provider_name: Some("Example SP"),
@@ -410,7 +539,7 @@ mod tests {
             identity_provider_id: "https://idp.example.com/metadata",
             identity_provider_loc: "https://idp.example.com/soap",
             relay_state: Some("state"),
-            authn_request_xml: authn,
+            authn_request_xml: &authn,
         });
         let body = read_soap_body(&envelope, "AuthnRequest", XmlLimits::default())?;
         assert_eq!(body.element_xml, authn);
@@ -423,7 +552,7 @@ mod tests {
     #[test]
     fn relay_state_namespace_may_be_declared_on_an_ancestor() -> Result<(), SamlError> {
         let xml = format!(
-            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:ecp=\"{ECP_PROFILE}\"><SOAP-ENV:Header><ecp:RelayState>state</ecp:RelayState></SOAP-ENV:Header><SOAP-ENV:Body><samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:ecp=\"{ECP_PROFILE}\" xmlns:samlp=\"{PROTOCOL_NS}\"><SOAP-ENV:Header><ecp:RelayState>state</ecp:RelayState></SOAP-ENV:Header><SOAP-ENV:Body><samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest></SOAP-ENV:Body></SOAP-ENV:Envelope>"
         );
         let body = read_soap_body(&xml, "AuthnRequest", XmlLimits::default())?;
         assert_eq!(body.relay_state.as_deref(), Some("state"));
@@ -433,7 +562,7 @@ mod tests {
     #[test]
     fn relay_state_in_another_namespace_is_rejected() -> Result<(), String> {
         let xml = format!(
-            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:other=\"urn:example:other\"><SOAP-ENV:Header><other:RelayState>state</other:RelayState></SOAP-ENV:Header><SOAP-ENV:Body><samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:other=\"urn:example:other\" xmlns:samlp=\"{PROTOCOL_NS}\"><SOAP-ENV:Header><other:RelayState>state</other:RelayState></SOAP-ENV:Header><SOAP-ENV:Body><samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest></SOAP-ENV:Body></SOAP-ENV:Envelope>"
         );
         match read_soap_body(&xml, "AuthnRequest", XmlLimits::default()) {
             Err(SamlError::ProtocolProfile(_)) => Ok(()),
@@ -481,5 +610,96 @@ mod tests {
             Err(other) => Err(format!("expected ProtocolProfile, got {other:?}")),
             Ok(_) => Err("expected ProtocolProfile, got a SOAP body".into()),
         }
+    }
+
+    #[test]
+    fn body_element_in_another_namespace_is_rejected() -> Result<(), String> {
+        let xml = format!(
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:other=\"urn:example:other\"><SOAP-ENV:Header/><SOAP-ENV:Body><other:Response ID=\"_1\"></other:Response></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+        );
+        match read_soap_body(&xml, "Response", XmlLimits::default()) {
+            Err(SamlError::ProtocolProfile(_)) => Ok(()),
+            Err(other) => Err(format!("expected ProtocolProfile, got {other:?}")),
+            Ok(_) => Err("expected ProtocolProfile, got a SOAP body".into()),
+        }
+    }
+
+    #[test]
+    fn saml_protocol_namespace_may_be_declared_on_an_ancestor() -> Result<(), SamlError> {
+        for xml in [
+            format!(
+                "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:samlp=\"{PROTOCOL_NS}\"><SOAP-ENV:Header/><SOAP-ENV:Body><samlp:Response ID=\"_1\"></samlp:Response></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+            ),
+            format!(
+                "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns=\"{PROTOCOL_NS}\"><SOAP-ENV:Header/><SOAP-ENV:Body><Response ID=\"_1\"></Response></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+            ),
+        ] {
+            let body = read_soap_body(&xml, "Response", XmlLimits::default())?;
+            assert!(body.element_xml.contains("ID=\"_1\""));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn extra_envelope_child_is_rejected() -> Result<(), String> {
+        let xml = format!(
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:samlp=\"{PROTOCOL_NS}\"><SOAP-ENV:Header/><SOAP-ENV:Body><samlp:Response ID=\"_1\"></samlp:Response></SOAP-ENV:Body><SOAP-ENV:Extra/></SOAP-ENV:Envelope>"
+        );
+        match read_soap_body(&xml, "Response", XmlLimits::default()) {
+            Err(SamlError::ProtocolProfile(_)) => Ok(()),
+            Err(other) => Err(format!("expected ProtocolProfile, got {other:?}")),
+            Ok(_) => Err("expected ProtocolProfile, got a SOAP body".into()),
+        }
+    }
+
+    #[test]
+    fn duplicate_body_is_rejected() -> Result<(), String> {
+        let xml = format!(
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:samlp=\"{PROTOCOL_NS}\"><SOAP-ENV:Body><samlp:Response ID=\"_1\"></samlp:Response></SOAP-ENV:Body><SOAP-ENV:Body><samlp:Response ID=\"_2\"></samlp:Response></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+        );
+        match read_soap_body(&xml, "Response", XmlLimits::default()) {
+            Err(SamlError::ProtocolProfile(_)) => Ok(()),
+            Err(other) => Err(format!("expected ProtocolProfile, got {other:?}")),
+            Ok(_) => Err("expected ProtocolProfile, got a SOAP body".into()),
+        }
+    }
+
+    #[test]
+    fn header_after_body_is_rejected() -> Result<(), String> {
+        let xml = format!(
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"{SOAP_ENVELOPE_NS}\" xmlns:samlp=\"{PROTOCOL_NS}\" xmlns:ecp=\"{ECP_PROFILE}\"><SOAP-ENV:Body><samlp:Response ID=\"_1\"></samlp:Response></SOAP-ENV:Body><SOAP-ENV:Header><ecp:RelayState>state</ecp:RelayState></SOAP-ENV:Header></SOAP-ENV:Envelope>"
+        );
+        match read_soap_body(&xml, "Response", XmlLimits::default()) {
+            Err(SamlError::ProtocolProfile(_)) => Ok(()),
+            Err(other) => Err(format!("expected ProtocolProfile, got {other:?}")),
+            Ok(_) => Err("expected ProtocolProfile, got a SOAP body".into()),
+        }
+    }
+
+    #[test]
+    fn soap_12_envelope_is_rejected() -> Result<(), String> {
+        let xml = format!(
+            "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:samlp=\"{PROTOCOL_NS}\"><SOAP-ENV:Body><samlp:Response ID=\"_1\"></samlp:Response></SOAP-ENV:Body></SOAP-ENV:Envelope>"
+        );
+        match read_soap_body(&xml, "Response", XmlLimits::default()) {
+            Err(SamlError::ProtocolProfile(_)) => Ok(()),
+            Err(other) => Err(format!("expected ProtocolProfile, got {other:?}")),
+            Ok(_) => Err("expected ProtocolProfile, got a SOAP body".into()),
+        }
+    }
+
+    #[test]
+    fn requested_is_passive_true_is_carried() {
+        let envelope = sp_to_ecp_envelope(&SpToEcp {
+            response_consumer_url: "https://sp.example.com/acs",
+            provider_name: None,
+            is_passive: Some(true),
+            issuer: "https://sp.example.com/metadata",
+            identity_provider_id: "https://idp.example.com/metadata",
+            identity_provider_loc: "https://idp.example.com/soap",
+            relay_state: None,
+            authn_request_xml: "<samlp:AuthnRequest ID=\"_1\"></samlp:AuthnRequest>",
+        });
+        assert!(envelope.contains("IsPassive=\"true\""));
     }
 }
