@@ -2,6 +2,8 @@
 //!
 //! # Start here
 //!
+//! Guides are at <https://samlrs.vercel.app>.
+//!
 //! Start new browser SSO/SLO integrations with [`Saml`]. The typed facade keeps
 //! local role state in [`Saml<Sp>`] or [`Saml<Idp>`], accepts peer metadata
 //! through typed descriptors, and returns pending transaction values that
