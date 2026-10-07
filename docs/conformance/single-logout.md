@@ -4,9 +4,8 @@ Rules for typed Single Logout: `start_slo`, `respond_slo`, and `finish_slo` on
 both roles. `receive_slo` reads the same request-signature field as the accept
 combination below. `LogoutPolicy::recommended`, and the `logout` field of
 `SpValidationPolicy::recommended` and `IdpValidationPolicy::recommended`,
-publish that accept combination. `Default`, `new`, and `try_new` stay on
-Compatibility. Config builders stay on the deprecated `strict()` bundle, which
-is unchanged. Raw logout generation and parsing are unchanged. Why those
+publish that accept combination. `Default`, `new`, `try_new`, and the config builders start on
+Recommended. Raw logout generation and parsing are unchanged. Why those
 presets differ is in
 [validation presets](../adr/0002-validation-presets.md).
 
@@ -24,8 +23,8 @@ the raw API.
 `finish_slo` reads `LogoutPolicy::responses`. The accept combination is
 `LogoutSignaturePolicy::RequireSigned` for both `requests` and `responses`.
 `LogoutPolicy::compatibility` remains the legacy permissive unsigned hatch.
-`LogoutPolicy::strict` is deprecated and unchanged. `LogoutPolicy::recommended`
-is the accept combination.
+`LogoutPolicy::recommended` is the accept combination. `LogoutPolicy::default`
+matches it.
 
 ## LogoutRequest from a session participant
 

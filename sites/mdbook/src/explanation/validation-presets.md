@@ -10,6 +10,6 @@ Library hardening that OASIS does not require stays off Recommended. Two example
 
 `recommended()` publishes the combination recorded under [Conformance](../reference/conformance.md).
 
-`strict()` is deprecated. It keeps its current behaviour and does not gain the RSA-SHA2 profile. `Default`, `new`, and `try_new` stay on Compatibility. Config builders stay on the deprecated `strict()` method. The following release removes `strict()` and points `Default`, `new`, `try_new`, and the builders at Recommended together.
+`strict()` is removed. `Default`, `new`, `try_new`, and the config builders start on Recommended. `compatibility()` stays available by name and keeps the legacy permissive behaviour. Raw settings keep their historical defaults.
 
 The calls are in [Validation](../guides/validation-preset.md). This page restates [ADR 0002](https://github.com/salasebas/saml-rs/blob/main/docs/adr/0002-validation-presets.md).

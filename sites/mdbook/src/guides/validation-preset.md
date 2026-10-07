@@ -20,12 +20,8 @@ let require_rsa_sha2 = SpValidationPolicy {
 
 ## Compatibility
 
-`compatibility()` is the legacy permissive preset: the samlify-port behaviour kept for a move off the raw API. It does not claim standards conformance. Name it explicitly. `Default`, `new`, and `try_new` still return that preset today.
+`compatibility()` is the legacy permissive preset: the samlify-port behaviour kept for a move off the raw API. It does not claim standards conformance. Name it explicitly. `Default`, `new`, `try_new`, and the config builders start on Recommended.
 
-## strict()
-
-`strict()` is deprecated. It keeps its current behaviour and does not gain the RSA-SHA2 profile. The following release removes it and points `Default`, `new`, `try_new`, and the config builders at Recommended together.
-
-Code that depends on `Default` staying permissive, or on a config builder staying on `strict()`, has to change in that release. The work is in [0.5 to 0.6](upgrade/v0-5-to-v0-6.md).
+Callers upgrading from 0.6, including code that called `strict()`, follow [From 0.6](upgrade/unreleased.md).
 
 Why the presets are separate is in [Validation presets](../explanation/validation-presets.md). The rows each preset publishes are the [conformance records](../reference/conformance.md).

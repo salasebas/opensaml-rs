@@ -70,16 +70,14 @@ with a caller-owned replay cache. Choose the metadata policy in
 [metadata trust](https://docs.rs/saml-rs/latest/saml_rs/#metadata-trust) and
 [`SamlValidationContext`](https://docs.rs/saml-rs/latest/saml_rs/struct.SamlValidationContext.html).
 
-If you want the preset for claimed features, start from
+`Default`, `new`, `try_new`, and the config builders start on
 `SpValidationPolicy::recommended` or `IdpValidationPolicy::recommended`. Add a
 direct Assertion signature or the RSA-SHA2 XML-DSig profile by name when you
-want that hardening. Neither is implied by `recommended()`, and `strict()`
-does not gain the RSA-SHA2 profile. `compatibility()` is the legacy permissive
-preset. `Default`, `new`, and `try_new` stay on that preset. Config builders
-still start on the deprecated `strict()` bundle. The following release removes
-`strict()` and points `Default`, `new`, `try_new`, and the config builders at
-Recommended together. Why those presets differ is in
-[validation presets](docs/adr/0002-validation-presets.md).
+want that hardening. Neither is implied by `recommended()`. `compatibility()`
+is the legacy permissive preset, selected by name. Why those presets differ is
+in [validation presets](docs/adr/0002-validation-presets.md). Callers moving
+off `strict()` follow
+[How to upgrade from 0.6](docs/migrations/unreleased.md).
 
 `finish_sso` returns an `SsoSession`. Read embedded XML signature evidence from
 `verified_xml_signatures()`: one item per verified signature over the Response

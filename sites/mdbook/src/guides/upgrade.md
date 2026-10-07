@@ -8,3 +8,4 @@ The [changelog](https://github.com/salasebas/saml-rs/blob/main/CHANGELOG.md) lis
 - [0.3 to 0.4](upgrade/v0-3-to-v0-4.md)
 - [0.4 to 0.5](upgrade/v0-4-to-v0-5.md)
 - [0.5 to 0.6](upgrade/v0-5-to-v0-6.md)
+- [From 0.6](upgrade/unreleased.md)

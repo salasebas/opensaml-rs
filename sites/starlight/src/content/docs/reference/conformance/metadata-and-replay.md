@@ -5,9 +5,9 @@ description: "Facts for metadata trust and replay on the typed browser flows. `r
 
 Facts for metadata trust and replay on the typed browser flows.
 `recommended()` does not select signed metadata, invent trust anchors, or
-store replay. `Default`, `new`, and `try_new` stay on Compatibility. Config
-builders stay on the deprecated `strict()` bundle, which is unchanged. Raw
-settings stay on their historical defaults. Why those presets differ is in
+store replay. `Default`, `new`, `try_new`, and the config builders start on
+Recommended. Raw settings stay on their historical defaults. Why those
+presets differ is in
 [Validation presets](../../explanation/validation-presets.md).
 
 Metadata trust is `MetadataTrustPolicy`, passed to

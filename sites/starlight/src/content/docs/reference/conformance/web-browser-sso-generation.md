@@ -7,9 +7,8 @@ Producer rules for typed Web Browser SSO generation: service-provider
 `start_sso`, and identity-provider `respond_sso` and `initiate_sso`.
 `SpValidationPolicy::recommended` leaves AuthnRequest signing and identifier
 creation off. `IdpValidationPolicy::recommended` does not turn assertion
-encryption on. `Default`, `new`, and `try_new` stay on Compatibility. Config
-builders stay on the deprecated `strict()` bundle, which is unchanged. Raw
-generation is unchanged. Why those presets differ is in
+encryption on. `Default`, `new`, `try_new`, and the config builders start on
+Recommended. Raw generation is unchanged. Why those presets differ is in
 [Validation presets](../../explanation/validation-presets.md).
 
 Normative text is SAML Core 2.0, Profiles 2.0, and Bindings 2.0, as corrected

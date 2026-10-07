@@ -31,7 +31,7 @@ let config = SpConfig {
     entity_id,
     metadata: SpMetadataConfig::new(vec![acs]),
     credentials: load_sp_signing_credentials()?,
-    validation: SpValidationPolicy::strict(),
+    validation: SpValidationPolicy::recommended(),
     algorithms: AlgorithmPolicy::default(),
     xml: XmlPolicy::default(),
     templates: TemplatePolicy::default(),
@@ -39,24 +39,22 @@ let config = SpConfig {
 config.validate()?;
 ```
 
-Builders keep large setup ergonomic while still returning `Result`. Builders
-still start on the deprecated `strict()` bundle. `recommended()` is the preset
-for claimed features and is not an implementation of SAML V2.0 as a whole.
-`SpConfig::new` / `IdpConfig::new`, `try_new`, and public `Default` policy
-values stay on Compatibility, the legacy permissive preset, so callers leaving
-the raw API do not silently opt into signature requirements SAML does not
-universally require.
+Builders keep large setup ergonomic while still returning `Result`. `Default`,
+`new`, `try_new`, and the config builders start on Recommended. `recommended()`
+is the preset for claimed features and is not an implementation of SAML V2.0
+as a whole. `compatibility()` remains the legacy permissive preset for callers
+leaving the raw API.
 
 ```rust
 let config = SpConfig::builder(EntityId::try_new("https://sp.example.com/metadata")?)
     .acs_endpoint(AcsEndpoint::post("https://sp.example.com/acs")?)
     .credentials(load_sp_signing_credentials()?)
-    .validation(SpValidationPolicy::strict())
+    .validation(SpValidationPolicy::recommended())
     .build()?;
 
 let idp_config = IdpConfig::builder(EntityId::try_new("https://idp.example.com/metadata")?)
     .sso_endpoint(SsoEndpoint::redirect("https://idp.example.com/sso")?)
-    .validation(IdpValidationPolicy::strict())
+    .validation(IdpValidationPolicy::recommended())
     .build()?;
 ```
 
@@ -231,14 +229,14 @@ pub struct IdpValidationPolicy {
 
 SAML V2.0 Approved Errata 05 E26/E93 clarifies that Web Browser SSO over
 HTTP-POST requires each Assertion to be protected by signing either the
-Assertion itself or the enclosing Response. `SpValidationPolicy::strict()`
-deliberately requires direct Assertion coverage as library hardening; this is
-stricter than the profile baseline and aligns with the separate
+Assertion itself or the enclosing Response. `AssertionSignaturePolicy::RequireSigned`
+requires direct Assertion coverage as library hardening on top of Recommended;
+this is stricter than the profile baseline and aligns with the separate
 `WantAssertionsSigned` metadata requirement.
 
 The top-level Response remains optional for plaintext Assertions, but Errata 05
 E93 recommends outer integrity protection before processing an
-`EncryptedAssertion` that uses CBC. Strict policy therefore uses
+`EncryptedAssertion` that uses CBC. Recommended therefore uses
 `ResponseSignaturePolicy::RequireForEncryptedCbc`; the samlify-port preset
 selects the E93 relaxation
 `AllowUnsignedEncryptedCbc`. That name is not Compatibility. Typed IdPs sign CBC-encrypted
