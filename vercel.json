@@ -1,6 +1,6 @@
 {
   "framework": null,
-  "installCommand": "pnpm --dir sites/starlight install --frozen-lockfile",
-  "buildCommand": "pnpm --dir sites/starlight build",
+  "installCommand": "npx --yes pnpm@11.6.0 --dir sites/starlight install --frozen-lockfile",
+  "buildCommand": "npx --yes pnpm@11.6.0 --dir sites/starlight build",
   "outputDirectory": "sites/starlight/dist"
 }
