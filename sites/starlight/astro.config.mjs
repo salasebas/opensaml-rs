@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import starlightLlmsTxt from 'starlight-llms-txt';
 import { rewriteDocLinks } from './src/plugins/doc-links.js';
 
 /** Registers the link rewriter on Astro's default Markdown processor. */
@@ -17,12 +18,25 @@ function docLinks() {
 
 // https://astro.build/config
 export default defineConfig({
+	site: 'https://samlrs.vercel.app',
 	integrations: [
 		starlight({
 			title: 'saml-rs',
 			description: 'SAML 2.0 browser SSO, metadata, and Single Logout for Rust.',
 			favicon: '/favicon.svg',
-			customCss: ['./src/styles/custom.css'],
+			customCss: [
+				'@fontsource-variable/geist',
+				'@fontsource-variable/geist-mono',
+				'./src/styles/custom.css',
+			],
+			components: { Hero: './src/components/Hero.astro' },
+			plugins: [
+				starlightLlmsTxt({
+					projectName: 'saml-rs',
+					description:
+						'saml-rs is a Rust crate for SAML 2.0 Service Provider and Identity Provider support: browser SSO, metadata, and Single Logout. The published crate is `saml-rs`; Rust imports use `saml_rs`.',
+				}),
+			],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/salasebas/saml-rs' }],
 			sidebar: [
 				{

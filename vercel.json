@@ -1,0 +1,6 @@
+{
+  "framework": null,
+  "installCommand": "pnpm --dir sites/starlight install --frozen-lockfile",
+  "buildCommand": "pnpm --dir sites/starlight build",
+  "outputDirectory": "sites/starlight/dist"
+}
