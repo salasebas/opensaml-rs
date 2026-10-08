@@ -35,6 +35,7 @@
     - [Logout](reference/conformance/single-logout.md)
     - [Identity Provider Discovery](reference/conformance/identity-provider-discovery.md)
     - [Metadata and replay](reference/conformance/metadata-and-replay.md)
+    - [HTTP-Artifact response](reference/conformance/web-browser-sso-artifact.md)
     - [Artifact resolution](reference/conformance/artifact-resolution.md)
 
 # Explanation
