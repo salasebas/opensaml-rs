@@ -1,9 +1,17 @@
 use crate::config::NameIdFormat;
+use crate::entity::generate_opaque_identifier;
+use crate::error::SamlError;
+
+const MAX_PERSISTENT_NAME_ID_CHARS: usize = 256;
 
 /// NameID value, format, and optional qualifier attributes.
 ///
 /// [`Self::new`] leaves the qualifiers unset. Response generation copies the
 /// value and format only.
+///
+/// [`Self::generate_transient`], [`Self::generate_persistent`], and
+/// [`Self::persistent`] create the identifiers an identity provider issues in
+/// those two formats. [`Self::new`] takes any value in any format.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameId {
     value: String,
@@ -17,6 +25,61 @@ impl NameId {
     /// Create a NameID value.
     pub fn new(value: impl Into<String>, format: Option<NameIdFormat>) -> Self {
         Self::with_qualifiers(value, format, None, None, None)
+    }
+
+    /// Create a new transient identifier.
+    ///
+    /// The value is 160 random bits, written as an XML ID of 41 characters.
+    /// Each call returns a different value.
+    pub fn generate_transient() -> Self {
+        Self::new(generate_opaque_identifier(), Some(NameIdFormat::Transient))
+    }
+
+    /// Create a new persistent identifier for one principal at one service
+    /// provider.
+    ///
+    /// The value is 160 random bits, written as 41 characters, and is not
+    /// derived from the principal. Each call returns a different value: store
+    /// it for that principal and service provider, and pass the stored value
+    /// to [`Self::persistent`] on later responses. Do not issue it for another
+    /// principal.
+    pub fn generate_persistent() -> Self {
+        Self::new(generate_opaque_identifier(), Some(NameIdFormat::Persistent))
+    }
+
+    /// Wrap a persistent identifier this identity provider already
+    /// established.
+    ///
+    /// The caller keeps the value opaque, unique for the service provider, and
+    /// bound to one principal. [`Self::generate_persistent`] creates such a
+    /// value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamlError::Invalid`] when the value is longer than 256
+    /// characters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use saml_rs::{NameId, NameIdFormat};
+    ///
+    /// let first = NameId::generate_persistent();
+    /// let stored = first.value().to_string();
+    ///
+    /// let later = NameId::persistent(stored)?;
+    /// assert_eq!(later, first);
+    /// assert_eq!(later.format(), Some(&NameIdFormat::Persistent));
+    /// # Ok::<(), saml_rs::SamlError>(())
+    /// ```
+    pub fn persistent(value: impl Into<String>) -> Result<Self, SamlError> {
+        let value = value.into();
+        if value.chars().count() > MAX_PERSISTENT_NAME_ID_CHARS {
+            return Err(SamlError::Invalid(format!(
+                "a persistent NameID must not exceed {MAX_PERSISTENT_NAME_ID_CHARS} characters"
+            )));
+        }
+        Ok(Self::new(value, Some(NameIdFormat::Persistent)))
     }
 
     /// Create a NameID with qualifier attributes.
