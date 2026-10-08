@@ -1,6 +1,6 @@
 use crate::browser::{BrowserInput, Outbound, SsoRequestBinding};
 use crate::config::SpDescriptor;
-use crate::discovery::{self, CommonDomainCookie, CommonDomainCookieRequest};
+use crate::discovery::{self, CommonDomainCookie, RememberIdentityProvider};
 use crate::error::SamlError as Error;
 use crate::flow::HttpRequest;
 use crate::idp::{IdentityProvider, LoginResponseOptions, LoginResponseOverrides};
@@ -257,8 +257,8 @@ impl Saml<Idp> {
     ///
     /// ```
     /// use saml_rs::{
-    ///     CommonDomainCookieRequest, DiscoveryCookieLifetime, EntityId, IdpConfig,
-    ///     IdpValidationPolicy, Saml, SsoEndpoint,
+    ///     CommonDomainCookieLifetime, EntityId, IdpConfig, IdpValidationPolicy,
+    ///     RememberIdentityProvider, Saml, SsoEndpoint,
     /// };
     ///
     /// let idp = Saml::idp(
@@ -267,9 +267,9 @@ impl Saml<Idp> {
     ///         .validation(IdpValidationPolicy::compatibility())
     ///         .build()?,
     /// )?;
-    /// let cookie = idp.remember_identity_provider(CommonDomainCookieRequest::new(
+    /// let cookie = idp.remember_identity_provider(RememberIdentityProvider::new(
     ///     "example.org",
-    ///     DiscoveryCookieLifetime::Session,
+    ///     CommonDomainCookieLifetime::Session,
     /// ))?;
     ///
     /// assert_eq!(cookie.name(), "_saml_idp");
@@ -280,9 +280,9 @@ impl Saml<Idp> {
     /// ```
     pub fn remember_identity_provider(
         &self,
-        request: CommonDomainCookieRequest<'_>,
+        options: RememberIdentityProvider<'_>,
     ) -> Result<CommonDomainCookie, SamlError> {
-        discovery::remember_identity_provider(&self.raw_identity_provider().entity_id(), request)
+        discovery::remember_identity_provider(&self.raw_identity_provider().entity_id(), options)
     }
 }
 fn user_from_subject(subject: Subject) -> crate::entity::User {
