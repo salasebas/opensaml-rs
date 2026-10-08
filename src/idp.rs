@@ -8,7 +8,7 @@ use crate::entity::{
 use crate::error::SamlError;
 use crate::flow::{FlowOptions, FlowResult, HttpRequest};
 use crate::metadata::{try_generate_idp_metadata, IdpMetadata, IdpMetadataConfig};
-use crate::model::{Status, TopLevelStatusCode};
+use crate::model::{Attribute, Status, TopLevelStatusCode};
 use crate::sp::{ServiceProvider, WebBrowserSsoProducer};
 use crate::template::{
     apply_tag_prefixes, attr_tag, attribute_statement_builder, replace_tags_by_value,
@@ -48,6 +48,7 @@ pub(crate) struct LoginResponseOverrides<'a> {
     pub(crate) issuance_lifetime: Option<time::Duration>,
     pub(crate) web_browser_sso_producer: WebBrowserSsoProducer,
     pub(crate) status: Option<&'a Status>,
+    pub(crate) attributes: &'a [Attribute],
 }
 
 #[derive(Clone, Copy)]
@@ -57,6 +58,7 @@ struct LoginResponseRendering<'a> {
     issuance_lifetime: time::Duration,
     web_browser_sso_producer: WebBrowserSsoProducer,
     status: Option<&'a Status>,
+    typed_attributes: &'a [Attribute],
 }
 
 /// A SAML 2.0 Identity Provider: runtime [`EntitySetting`] plus parsed [`IdpMetadata`].
@@ -162,6 +164,11 @@ impl IdentityProvider {
                     .into(),
             ));
         }
+        if !rendering.typed_attributes.is_empty() && (uses_template || !attributes.is_empty()) {
+            return Err(SamlError::Invalid(
+                "response attributes cannot be combined with a login response template".into(),
+            ));
+        }
         if error_response {
             let window = capture_idp_issuance_window(rendering.issuance_lifetime)?;
             let id = generate_id();
@@ -226,6 +233,7 @@ impl IdentityProvider {
                 ),
                 attributes,
                 user_attributes: &user.attributes,
+                typed_attributes: rendering.typed_attributes,
             })?;
             return Ok((id, xml));
         }
@@ -375,6 +383,7 @@ impl IdentityProvider {
                     .unwrap_or(time::Duration::seconds(300)),
                 web_browser_sso_producer: overrides.web_browser_sso_producer,
                 status: overrides.status,
+                typed_attributes: overrides.attributes,
             },
         )?;
         let error_response = overrides

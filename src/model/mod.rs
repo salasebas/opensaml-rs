@@ -20,7 +20,7 @@ mod validation;
 pub(crate) use extract::authn_statement_not_on_or_after_values;
 pub(crate) use session::earliest_authn_session_expiration;
 
-pub use attributes::{Attribute, AttributeValue, Attributes};
+pub use attributes::{Attribute, AttributeNameFormat, AttributeValue, Attributes};
 pub use authn::{AuthnRequest, ForceAuthn, IsPassive};
 pub use endpoint::EndpointUrl;
 pub use identifiers::{AssertionId, MessageId, SamlInstant, SessionIndex};
