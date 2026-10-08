@@ -66,9 +66,9 @@ Assertion encryption stays off until you select `XmlEncryptionPolicy::encrypt_as
 After authentication, ask the identity provider above for the `_saml_idp` cookie and write the header yourself. `respond_sso` does not write it. A service provider has no method that sets or reads it.
 
 ```rust
-let cookie = idp.remember_identity_provider(CommonDomainCookieRequest::new(
+let cookie = idp.remember_identity_provider(RememberIdentityProvider::new(
     "example.org",
-    DiscoveryCookieLifetime::Session,
+    CommonDomainCookieLifetime::Session,
 ))?;
 ```
 
