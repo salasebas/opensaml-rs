@@ -48,7 +48,7 @@ pub(crate) struct LoginResponseOverrides<'a> {
     pub(crate) issuance_lifetime: Option<time::Duration>,
     pub(crate) web_browser_sso_producer: WebBrowserSsoProducer,
     pub(crate) status: Option<&'a Status>,
-    pub(crate) attributes: &'a [Attribute],
+    pub(crate) typed_attributes: &'a [Attribute],
 }
 
 #[derive(Clone, Copy)]
@@ -383,7 +383,7 @@ impl IdentityProvider {
                     .unwrap_or(time::Duration::seconds(300)),
                 web_browser_sso_producer: overrides.web_browser_sso_producer,
                 status: overrides.status,
-                typed_attributes: overrides.attributes,
+                typed_attributes: overrides.typed_attributes,
             },
         )?;
         let error_response = overrides

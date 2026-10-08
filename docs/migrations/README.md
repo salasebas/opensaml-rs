@@ -16,6 +16,7 @@ compatible additions.
 ## Unreleased
 
 - [Artifact resolution service on IdP metadata](unreleased-artifact-resolution.md)
+- [Attribute name format on an accepted attribute](unreleased-attribute-name-format.md)
 
 Someone shipping a breaking change adds the next guide from
 [Contributing](../../CONTRIBUTING.md#how-to-add-a-migration-guide).

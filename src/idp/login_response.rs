@@ -1,6 +1,6 @@
-use crate::constants::namespace;
+use crate::constants::{attribute_name_format, namespace};
 use crate::error::SamlError;
-use crate::model::{Attribute, AttributeNameFormat, Status};
+use crate::model::{Attribute, Status};
 use crate::template::{write_login_response_attribute_statement, LoginResponseAttribute};
 use crate::xml::name::is_name;
 use crate::xml::write::XmlWriter;
@@ -218,7 +218,9 @@ fn write_attribute_statement(
     let value_name = qname(prefix, "AttributeValue");
     writer.start(&statement_name, &[]);
     for attribute in attributes {
-        if attribute.format() == Some(&AttributeNameFormat::Basic) && !is_name(attribute.name()) {
+        if attribute.name_format() == Some(attribute_name_format::BASIC)
+            && !is_name(attribute.name())
+        {
             return Err(SamlError::Invalid(format!(
                 "basic attribute name `{}` is not an XML name",
                 attribute.name()

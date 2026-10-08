@@ -236,7 +236,7 @@ impl Saml<Idp> {
                     issuance_lifetime: Some(self.0.issuance_lifetime),
                     web_browser_sso_producer: options.web_browser_sso_producer,
                     status: options.status.as_ref(),
-                    attributes: options.attributes.as_slice(),
+                    typed_attributes: options.attributes.as_slice(),
                 },
             )?;
         Outbound::<SsoResponse>::try_from(context)

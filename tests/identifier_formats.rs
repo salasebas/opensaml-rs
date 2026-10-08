@@ -280,6 +280,35 @@ fn identity_provider_produces_and_service_provider_consumes_each_attribute_name_
 }
 
 #[test]
+fn unsolicited_response_carries_attribute_name_formats_and_a_generated_identifier(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sp = sp()?;
+    let idp = idp()?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let name_id = NameId::generate_transient();
+    let mail = Attribute::with_name_format(
+        MAIL_OID,
+        AttributeNameFormat::Uri,
+        values(&["a@example.com"]),
+    );
+
+    let response = idp.initiate_sso(
+        &sp_descriptor,
+        subject(name_id.clone()),
+        RespondSso::post().attributes(Attributes::new(vec![mail.clone()])),
+    )?;
+    let session = sp.accept_unsolicited_sso(
+        &idp_descriptor,
+        BrowserInput::<SsoResponse>::post(response.post_form()?.fields().to_vec()),
+        validation(),
+    )?;
+
+    assert_eq!(session.name_id(), &name_id);
+    assert_eq!(session.attributes().as_slice(), [mail]);
+    Ok(())
+}
+
+#[test]
 fn response_without_typed_attributes_has_no_attribute_statement(
 ) -> Result<(), Box<dyn std::error::Error>> {
     for options in [
@@ -307,6 +336,24 @@ fn identity_provider_does_not_generate_a_basic_attribute_whose_name_is_not_an_xm
             other => {
                 return Err(format!("expected basic name error for {name:?}, got {other:?}").into())
             }
+        }
+    }
+    // The basic URI is the basic format however the caller spells it.
+    for attribute in [
+        Attribute::with_name_format(
+            "given name",
+            AttributeNameFormat::Custom(BASIC.to_string()),
+            values(&["x"]),
+        ),
+        Attribute::new("given name", Some(BASIC.to_string()), values(&["x"])),
+    ] {
+        assert_eq!(attribute.format(), Some(&AttributeNameFormat::Basic));
+        match respond(
+            alice(),
+            RespondSso::post().attributes(Attributes::new(vec![attribute])),
+        ) {
+            Err(SamlError::Invalid(message)) if message.contains("basic") => {}
+            other => return Err(format!("expected basic name error, got {other:?}").into()),
         }
     }
     for name in ["mail", "_mail", "ns:mail", "given-name.1", "é"] {
@@ -529,48 +576,32 @@ fn assert_opaque_identifier(value: &str) {
 }
 
 #[test]
-fn generated_transient_identifier_follows_the_producer_rules(
+fn generated_transient_and_persistent_identifiers_follow_the_producer_rules(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let name_id = NameId::generate_transient();
-    assert_eq!(name_id.format(), Some(&NameIdFormat::Transient));
-    assert_opaque_identifier(name_id.value());
-    assert_eq!(name_id.name_qualifier(), None);
-    assert_eq!(name_id.sp_name_qualifier(), None);
-    assert_eq!(name_id.sp_provided_id(), None);
-    assert_ne!(name_id.value(), NameId::generate_transient().value());
+    let generators: [(fn() -> NameId, NameIdFormat); 2] = [
+        (NameId::generate_transient, NameIdFormat::Transient),
+        (NameId::generate_persistent, NameIdFormat::Persistent),
+    ];
+    for (generate, format) in generators {
+        let name_id = generate();
+        assert_eq!(name_id.format(), Some(&format));
+        assert_opaque_identifier(name_id.value());
+        assert_eq!(name_id.name_qualifier(), None);
+        assert_eq!(name_id.sp_name_qualifier(), None);
+        assert_eq!(name_id.sp_provided_id(), None);
+        assert_ne!(name_id.value(), generate().value());
 
-    let exchange = exchange(subject(name_id.clone()), RespondSso::post())?;
-    assert_eq!(
-        name_id_element(&exchange.xml)?,
-        format!(
-            "<saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:transient\">{}",
-            name_id.value()
-        )
-    );
-    assert_eq!(exchange.session.name_id(), &name_id);
-    Ok(())
-}
-
-#[test]
-fn generated_persistent_identifier_follows_the_producer_rules(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let name_id = NameId::generate_persistent();
-    assert_eq!(name_id.format(), Some(&NameIdFormat::Persistent));
-    assert_opaque_identifier(name_id.value());
-    assert_eq!(name_id.name_qualifier(), None);
-    assert_eq!(name_id.sp_name_qualifier(), None);
-    assert_eq!(name_id.sp_provided_id(), None);
-    assert_ne!(name_id.value(), NameId::generate_persistent().value());
-
-    let exchange = exchange(subject(name_id.clone()), RespondSso::post())?;
-    assert_eq!(
-        name_id_element(&exchange.xml)?,
-        format!(
-            "<saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:persistent\">{}",
-            name_id.value()
-        )
-    );
-    assert_eq!(exchange.session.name_id(), &name_id);
+        let exchange = exchange(subject(name_id.clone()), RespondSso::post())?;
+        assert_eq!(
+            name_id_element(&exchange.xml)?,
+            format!(
+                "<saml:NameID Format=\"{}\">{}",
+                format.as_uri(),
+                name_id.value()
+            )
+        );
+        assert_eq!(exchange.session.name_id(), &name_id);
+    }
     Ok(())
 }
 

@@ -19,7 +19,8 @@ impl AttributeValue {
 /// Classification of a SAML attribute name: the `NameFormat` of an
 /// `<Attribute>`.
 ///
-/// An `<Attribute>` without `NameFormat` is read as [`Self::Unspecified`].
+/// SAML treats the name of an `<Attribute>` without `NameFormat` as
+/// [`Self::Unspecified`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AttributeNameFormat {
     /// Unspecified format. The name's interpretation is left to the deployment.
@@ -79,8 +80,9 @@ impl Attribute {
 
     /// Create a SAML attribute whose name is classified by `name_format`.
     ///
-    /// An identity provider does not issue an [`AttributeNameFormat::Basic`]
-    /// attribute whose name is not an XML name.
+    /// [`AttributeNameFormat::Custom`] with the URI of another variant is
+    /// stored as that variant. [`crate::RespondSso::attributes`] rejects an
+    /// [`AttributeNameFormat::Basic`] attribute whose name is not an XML name.
     ///
     /// # Examples
     ///
@@ -104,6 +106,12 @@ impl Attribute {
         name_format: AttributeNameFormat,
         values: Vec<AttributeValue>,
     ) -> Self {
+        let name_format = match name_format {
+            AttributeNameFormat::Custom(uri) => AttributeNameFormat::from_uri(&uri),
+            AttributeNameFormat::Unspecified
+            | AttributeNameFormat::Uri
+            | AttributeNameFormat::Basic => name_format,
+        };
         Self {
             name: name.into(),
             name_format: Some(name_format),
@@ -123,8 +131,8 @@ impl Attribute {
 
     /// `NameFormat`, when the attribute carries one.
     ///
-    /// `None` means the `<Attribute>` has no `NameFormat`, which is read as
-    /// [`AttributeNameFormat::Unspecified`].
+    /// `None` means the `<Attribute>` has no `NameFormat`. SAML treats that
+    /// name as [`AttributeNameFormat::Unspecified`].
     pub fn format(&self) -> Option<&AttributeNameFormat> {
         self.name_format.as_ref()
     }

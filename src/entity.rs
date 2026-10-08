@@ -310,7 +310,7 @@ pub fn generate_id() -> String {
 
 /// 20 random bytes from two version 4 UUIDs, skipping the bytes that carry
 /// the fixed version and variant bits.
-pub(crate) fn random_160_bits() -> [u8; 20] {
+pub(crate) fn random_20_bytes() -> [u8; 20] {
     let first = uuid::Uuid::new_v4().into_bytes();
     let second = uuid::Uuid::new_v4().into_bytes();
     let mut random = [0u8; 20];
@@ -325,12 +325,12 @@ pub(crate) fn random_160_bits() -> [u8; 20] {
 ///
 /// The result is an `xs:ID` of 41 characters.
 pub(crate) fn generate_opaque_identifier() -> String {
-    use std::fmt::Write;
+    const HEX: &[u8; 16] = b"0123456789abcdef";
 
     let mut identifier = String::from("_");
-    for byte in random_160_bits() {
-        // Writing to a `String` does not fail.
-        let _ = write!(identifier, "{byte:02x}");
+    for byte in random_20_bytes() {
+        identifier.push(char::from(HEX[usize::from(byte >> 4)]));
+        identifier.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     identifier
 }

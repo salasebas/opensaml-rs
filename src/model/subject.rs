@@ -1,5 +1,5 @@
 use crate::config::NameIdFormat;
-use crate::entity::generate_opaque_identifier as opaque_identifier;
+use crate::entity::generate_opaque_identifier;
 use crate::error::SamlError;
 
 const MAX_PERSISTENT_NAME_ID_CHARS: usize = 256;
@@ -32,7 +32,7 @@ impl NameId {
     /// The value is 160 random bits, written as an XML ID of 41 characters.
     /// Each call returns a different value.
     pub fn generate_transient() -> Self {
-        Self::new(opaque_identifier(), Some(NameIdFormat::Transient))
+        Self::new(generate_opaque_identifier(), Some(NameIdFormat::Transient))
     }
 
     /// Create a new persistent identifier for one principal at one service
@@ -44,7 +44,7 @@ impl NameId {
     /// to [`Self::persistent`] on later responses. Do not issue it for another
     /// principal.
     pub fn generate_persistent() -> Self {
-        Self::new(opaque_identifier(), Some(NameIdFormat::Persistent))
+        Self::new(generate_opaque_identifier(), Some(NameIdFormat::Persistent))
     }
 
     /// Wrap a persistent identifier this identity provider already

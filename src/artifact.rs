@@ -667,7 +667,7 @@ fn soap_service(
 }
 
 fn message_handle() -> [u8; SOURCE_ID_LEN] {
-    crate::entity::random_160_bits()
+    crate::entity::random_20_bytes()
 }
 
 fn encode_artifact(
