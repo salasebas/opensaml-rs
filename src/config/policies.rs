@@ -475,6 +475,12 @@ pub struct TemplatePolicy {
     /// Typed Session Authority generation requires a complete unqualified
     /// `NotOnOrAfter="{NotOnOrAfter}"` root attribute. Typed SP and raw
     /// samlify-port generation do not synthesize the attribute.
+    ///
+    /// `{NameQualifier}`, `{SPNameQualifier}`, and `{SPProvidedID}` are filled
+    /// from the logout subject's `NameID`. An attribute whose complete value is
+    /// one of these placeholders is omitted when the `NameID` has no value for
+    /// it. Typed generation rejects a template that drops a qualifier the
+    /// subject carries.
     pub logout_request_template: Option<String>,
     /// Logout response template.
     ///

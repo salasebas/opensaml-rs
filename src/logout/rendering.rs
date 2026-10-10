@@ -5,6 +5,7 @@ use crate::metadata::Metadata;
 use crate::model::Status;
 use crate::template::validate_tag_prefix;
 use crate::xml::write::XmlWriter;
+use crate::xml::OutboundNameIdQualifiers;
 
 pub(super) fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
     setting
@@ -16,6 +17,7 @@ pub(super) fn issuer_of(setting: &EntitySetting, meta: &Metadata) -> String {
 
 pub(super) struct LogoutRequestSubject<'a> {
     pub(super) name_id: &'a str,
+    pub(super) qualifiers: OutboundNameIdQualifiers<'a>,
     pub(super) session_indexes: Vec<&'a str>,
 }
 
@@ -28,6 +30,7 @@ impl<'a> LogoutRequestSubject<'a> {
     pub(super) fn from_user(user: &'a User) -> Self {
         Self {
             name_id: &user.name_id,
+            qualifiers: OutboundNameIdQualifiers::default(),
             session_indexes: user.session_index.as_deref().into_iter().collect(),
         }
     }
@@ -126,11 +129,19 @@ pub(super) fn render_default_logout_request(
     let mut writer = XmlWriter::new();
     writer.start(&root_name, &attrs);
     writer.text_element(&issuer_name, &[], &issuer);
-    writer.text_element(
-        &name_id_name,
-        &[("Format", name_id_format)],
-        subject.name_id,
-    );
+    let qualifiers = subject.qualifiers;
+    let mut name_id_attrs = Vec::with_capacity(4);
+    if let Some(value) = qualifiers.name_qualifier {
+        name_id_attrs.push(("NameQualifier", value));
+    }
+    if let Some(value) = qualifiers.sp_name_qualifier {
+        name_id_attrs.push(("SPNameQualifier", value));
+    }
+    name_id_attrs.push(("Format", name_id_format));
+    if let Some(value) = qualifiers.sp_provided_id {
+        name_id_attrs.push(("SPProvidedID", value));
+    }
+    writer.text_element(&name_id_name, &name_id_attrs, subject.name_id);
     for session_index in &subject.session_indexes {
         writer.text_element(&session_index_name, &[], session_index);
     }

@@ -9,6 +9,7 @@ use crate::template::{
 use crate::xml::{
     validate_logout_request_outbound, validate_logout_response_outbound, OutboundLogoutExpiration,
     OutboundLogoutRequestExpectation, OutboundLogoutRequestValidation, OutboundLogoutValidation,
+    OutboundNameIdQualifiers,
 };
 
 use super::bindings::unsigned_context;
@@ -105,6 +106,9 @@ pub(crate) struct LogoutRequestSessionIndexes<'a> {
     pub(crate) target_meta: &'a Metadata,
     pub(crate) binding: Binding,
     pub(crate) name_id: &'a str,
+    /// `<NameID>` `Format`. `None` uses the first local `name_id_format`.
+    pub(crate) name_id_format: Option<&'a str>,
+    pub(crate) name_id_qualifiers: OutboundNameIdQualifiers<'a>,
     pub(crate) session_indexes: &'a [String],
     pub(crate) relay_state: Option<&'a str>,
     pub(crate) want_signed: bool,
@@ -130,6 +134,8 @@ pub(crate) fn create_logout_request_with_session_indexes(
         target_meta,
         binding,
         name_id,
+        name_id_format,
+        name_id_qualifiers,
         session_indexes,
         relay_state,
         want_signed,
@@ -138,13 +144,19 @@ pub(crate) fn create_logout_request_with_session_indexes(
         validation,
     } = input;
 
-    let name_id_format = init_setting
-        .name_id_format
-        .first()
-        .cloned()
-        .unwrap_or_default();
+    let name_id_format = name_id_format.map_or_else(
+        || {
+            init_setting
+                .name_id_format
+                .first()
+                .cloned()
+                .unwrap_or_default()
+        },
+        str::to_string,
+    );
     let subject = LogoutRequestSubject {
         name_id,
+        qualifiers: name_id_qualifiers,
         session_indexes: session_indexes.iter().map(String::as_str).collect(),
     };
     create_logout_request_for_subject_inner(LogoutRequestInput {
@@ -232,6 +244,18 @@ fn create_logout_request_for_subject_inner(
             ("NameIDFormat", Some(name_id_format.to_string())),
             ("NameID", Some(subject.name_id.to_string())),
             (
+                "NameQualifier",
+                subject.qualifiers.name_qualifier.map(str::to_string),
+            ),
+            (
+                "SPNameQualifier",
+                subject.qualifiers.sp_name_qualifier.map(str::to_string),
+            ),
+            (
+                "SPProvidedID",
+                subject.qualifiers.sp_provided_id.map(str::to_string),
+            ),
+            (
                 "SessionIndex",
                 subject
                     .session_indexes
@@ -280,6 +304,7 @@ fn create_logout_request_for_subject_inner(
         expiration,
         name_id: subject.name_id,
         name_id_format,
+        name_id_qualifiers: subject.qualifiers,
         session_indexes,
     });
     if let Some(expectation) = expectation.as_ref() {

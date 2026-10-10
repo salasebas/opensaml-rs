@@ -111,6 +111,12 @@ pub struct EntitySetting {
     /// Typed Session Authority generation requires a complete unqualified
     /// `NotOnOrAfter="{NotOnOrAfter}"` root attribute. Raw compatibility
     /// generation keeps that optional placeholder omitted.
+    ///
+    /// `{NameQualifier}`, `{SPNameQualifier}`, and `{SPProvidedID}` are filled
+    /// from the logout subject's `NameID`. An attribute whose complete value is
+    /// one of these placeholders is omitted when the `NameID` has no value for
+    /// it. Typed generation rejects a template that drops a qualifier the
+    /// subject carries.
     pub logout_request_template: Option<String>,
     /// Custom `<LogoutResponse>` template (`None` uses the default).
     ///
