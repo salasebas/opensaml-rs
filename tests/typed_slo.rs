@@ -2480,7 +2480,10 @@ fn typed_session_authority_custom_logout_template_requires_explicit_name_id_form
 
     match idp.start_slo(
         &sp_descriptor,
-        subject()?,
+        LogoutSubject::with_session_index(
+            NameId::new("alice@example.com", Some(NameIdFormat::EmailAddress)),
+            SessionIndex::try_new("_session123")?,
+        ),
         StartSlo::post().signing(LogoutSigning::Sign),
     ) {
         Err(SamlError::ProtocolProfile(message)) if message.contains("missing expected Format") => {
@@ -3245,21 +3248,23 @@ fn typed_slo_logout_request_keeps_name_id_format_and_qualifiers(
 }
 
 #[test]
-fn typed_slo_logout_request_without_subject_format_uses_local_format(
+fn typed_slo_logout_request_without_subject_format_omits_format(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (sp, idp) = facades()?;
-    let (_sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
+    let (sp_descriptor, idp_descriptor) = descriptors(&sp, &idp)?;
 
     let started = sp.start_slo(&idp_descriptor, subject()?, StartSlo::post())?;
     let xml = outbound_xml(&started.outbound, "SAMLRequest")?;
-    let (value, attrs) = logout_request_name_id(&xml)?;
-    assert_eq!(value, "alice@example.com");
     assert_eq!(
-        attrs
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["Format"]
+        logout_request_name_id(&xml)?,
+        ("alice@example.com".to_string(), Vec::new())
+    );
+
+    let started = idp.start_slo(&sp_descriptor, subject()?, StartSlo::post())?;
+    let xml = outbound_xml(&started.outbound, "SAMLRequest")?;
+    assert_eq!(
+        logout_request_name_id(&xml)?,
+        ("alice@example.com".to_string(), Vec::new())
     );
     Ok(())
 }

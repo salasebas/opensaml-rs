@@ -33,5 +33,18 @@ assertion `NameID` has qualifiers, the session `NameId` now holds them and is
 no longer equal to a `NameId` without them. Compare `NameId::value()` and
 `NameId::format()` when only those matter.
 
-A `LogoutSubject` `NameId` with no `Format` still uses the first configured
-local NameID format.
+## Set the NameID format on a logout subject that needs one
+
+Typed `start_slo` used to fill a missing `Format` with the first local
+`name_id_format`. It now omits `Format` when the `LogoutSubject` `NameId` has
+none. That matches the assertion that established the session, because an
+omitted `Format` means unspecified.
+
+Who must change: code that builds a `LogoutSubject` with `NameId::new(value,
+None)` for a peer that expects a specific format. Pass the format the session
+used, for example `NameId::new(value, Some(NameIdFormat::EmailAddress))`. A
+subject from `SsoSession::logout_subject` already carries the assertion's
+format.
+
+A custom logout request template keeps working: an attribute whose complete
+value is `{NameIDFormat}` is omitted when the subject has no format.

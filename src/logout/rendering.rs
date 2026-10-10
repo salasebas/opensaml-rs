@@ -96,7 +96,7 @@ pub(super) fn render_default_logout_request(
     timing: LogoutRequestTimeAttributes<'_>,
     destination: &str,
     subject: &LogoutRequestSubject<'_>,
-    name_id_format: &str,
+    name_id_format: Option<&str>,
 ) -> Result<String, SamlError> {
     validate_tag_prefix("protocol", &setting.tag_prefix_protocol)?;
     validate_tag_prefix("assertion", &setting.tag_prefix_assertion)?;
@@ -137,7 +137,9 @@ pub(super) fn render_default_logout_request(
     if let Some(value) = qualifiers.sp_name_qualifier {
         name_id_attrs.push(("SPNameQualifier", value));
     }
-    name_id_attrs.push(("Format", name_id_format));
+    if let Some(value) = name_id_format {
+        name_id_attrs.push(("Format", value));
+    }
     if let Some(value) = qualifiers.sp_provided_id {
         name_id_attrs.push(("SPProvidedID", value));
     }

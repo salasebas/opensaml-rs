@@ -31,7 +31,8 @@ pub(crate) struct OutboundLogoutRequestExpectation<'a> {
     pub(crate) issuer: &'a str,
     pub(crate) expiration: OutboundLogoutExpiration<'a>,
     pub(crate) name_id: &'a str,
-    pub(crate) name_id_format: &'a str,
+    /// Expected `<NameID>` `Format`. `None` expects the attribute to be absent.
+    pub(crate) name_id_format: Option<&'a str>,
     pub(crate) name_id_qualifiers: OutboundNameIdQualifiers<'a>,
     pub(crate) session_indexes: &'a [&'a str],
 }
@@ -206,7 +207,7 @@ fn validate_name_id(
     reader: &NsReader<&[u8]>,
     element: &BytesStart<'_>,
     element_namespace: NamespaceKind,
-    expected_format: &str,
+    expected_format: Option<&str>,
     expected_qualifiers: OutboundNameIdQualifiers<'_>,
 ) -> Result<(), SamlError> {
     if element_namespace != NamespaceKind::Assertion {
@@ -237,16 +238,21 @@ fn validate_name_id(
             )));
         }
     }
-    match attribute_value(&attributes, b"Format") {
-        Some(format) if format != expected_format => Err(profile_error(format!(
-            "LogoutRequest NameID Format mismatch: expected {expected_format}, got {format}",
+    match (attribute_value(&attributes, b"Format"), expected_format) {
+        (Some(format), Some(expected)) if format != expected => Err(profile_error(format!(
+            "LogoutRequest NameID Format mismatch: expected {expected}, got {format}",
         ))),
-        None if !expected_format.is_empty() && expected_format != name_id_format::UNSPECIFIED => {
+        (None, Some(expected))
+            if !expected.is_empty() && expected != name_id_format::UNSPECIFIED =>
+        {
             Err(profile_error(format!(
-                "LogoutRequest NameID is missing expected Format {expected_format}",
+                "LogoutRequest NameID is missing expected Format {expected}",
             )))
         }
-        Some(_) | None => Ok(()),
+        (Some(format), None) => Err(profile_error(format!(
+            "LogoutRequest NameID Format must be omitted, got {format}",
+        ))),
+        (Some(_), Some(_)) | (None, Some(_) | None) => Ok(()),
     }
 }
 
